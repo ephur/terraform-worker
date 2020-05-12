@@ -22,7 +22,7 @@ def download_plugins(plugins, temp_dir):
     would be stored between runs, and only downloaded if the versions have changed. In production try  to remove all
     all external repositories/sources from the critical path.
     """
-    platform = "{}_{}".format(sys.platform.rstrip('2'), "amd64")
+    platform = "{}_{}".format(sys.platform.rstrip("2"), "amd64")
     plugin_dir = "{}/terraform-plugins".format(temp_dir)
     if not os.path.isdir(plugin_dir):
         os.mkdir(plugin_dir)
@@ -30,13 +30,21 @@ def download_plugins(plugins, temp_dir):
     for name, details in plugins.items():
         # Get platform and strip 2 off linux 2.x kernels
         file_name = "terraform-provider-{}_{}_{}.zip".format(
-            name, details['version'], platform)
+            name, details["version"], platform
+        )
         uri = "https://releases.hashicorp.com/terraform-provider-{}/{}/{}".format(
-            name, details['version'], file_name)
-        click.secho("getting plugin: {} version {} from {}".format(
-            name, details['version'], uri), fg='yellow')
+            name, details["version"], file_name
+        )
+        click.secho(
+            "getting plugin: {} version {} from {}".format(
+                name, details["version"], uri
+            ),
+            fg="yellow",
+        )
 
-        with urllib.request.urlopen(uri) as response, open("{}/{}".format(plugin_dir, file_name), 'wb') as plug_file:
+        with urllib.request.urlopen(uri) as response, open(
+            "{}/{}".format(plugin_dir, file_name), "wb"
+        ) as plug_file:
             shutil.copyfileobj(response, plug_file)
         with zipfile.ZipFile("{}/{}".format(plugin_dir, file_name)) as zip_file:
             zip_file.extractall(plugin_dir)
@@ -51,24 +59,26 @@ def prep_modules(src, dst):
     """Puts the modules sub directories into place."""
     mod_source = "{}/terraform-modules".format(src).replace("//", "/")
     mod_destination = "{}/terraform-modules".format(dst).replace("//", "/")
-    shutil.copytree(mod_source, mod_destination, symlinks=True,
-                    ignore=shutil.ignore_patterns('test', '.terraform', 'terraform.tfstate*'))
+    shutil.copytree(
+        mod_source,
+        mod_destination,
+        symlinks=True,
+        ignore=shutil.ignore_patterns("test", ".terraform", "terraform.tfstate*"),
+    )
 
 
 def prep_def(name, definition, all_defs, temp_dir, repo_path, cluster, args):
     """ prepare the definitions for running """
-    repo = Path("{}/{}".format(repo_path,
-                               definition['path']).replace("//", "/"))
-    target = Path(
-        "{}/{}".format(temp_dir, definition['path']).replace("//", "/"))
+    repo = Path("{}/{}".format(repo_path, definition["path"]).replace("//", "/"))
+    target = Path("{}/{}".format(temp_dir, definition["path"]).replace("//", "/"))
     target.mkdir(parents=True, exist_ok=True)
 
     # Prepare variables
-    template_vars = make_vars('template_vars', definition, all_defs)
-    terraform_vars = make_vars('terraform_vars', definition, all_defs)
-    locals_vars = make_vars('remote_vars', definition)
-    template_vars['cluster'] = cluster
-    terraform_vars['cluster'] = cluster
+    template_vars = make_vars("template_vars", definition, all_defs)
+    terraform_vars = make_vars("terraform_vars", definition, all_defs)
+    locals_vars = make_vars("remote_vars", definition)
+    template_vars["cluster"] = cluster
+    terraform_vars["cluster"] = cluster
 
     # Put terraform files in place
     for tf in repo.glob("*.tf"):
@@ -76,44 +86,45 @@ def prep_def(name, definition, all_defs, temp_dir, repo_path, cluster, args):
     for tf in repo.glob("*.tfvars"):
         shutil.copy("{}".format(str(tf)), str(target))
     if os.path.isdir(str(repo) + "/templates".replace("//", "/")):
-        shutil.copytree("{}/templates".format(str(repo)),
-                        "{}/templates".format(str(target)))
+        shutil.copytree(
+            "{}/templates".format(str(repo)), "{}/templates".format(str(target))
+        )
 
     # Render jinja templates and put in place
     env = jinja2.Environment(loader=jinja2.FileSystemLoader)
 
     for j2 in repo.glob("*.j2"):
         contents = env.get_template(j2).render(**template_vars)
-        with open("{}/{}".format(str(target), str(j2)), 'w+') as j2_file:
+        with open("{}/{}".format(str(target), str(j2)), "w+") as j2_file:
             j2_file.write(contents)
 
     # Create local vars from remote data sources
     if len(list(locals_vars.keys())) > 0:
-        with open("{}/{}".format(str(target), "worker-locals.tf"), 'w+') as tflocals:
+        with open("{}/{}".format(str(target), "worker-locals.tf"), "w+") as tflocals:
             tflocals.write("locals {\n")
             for k, v in locals_vars.items():
                 tflocals.write(
-                    "  {} = \"${{data.terraform_remote_state.{}}}\"\n".format(k, v))
+                    '  {} = "${{data.terraform_remote_state.{}}}"\n'.format(k, v)
+                )
             tflocals.write("}\n\n")
 
     # Create the terraform configuration, terraform.tf
     state = render_remote_state(name, cluster, args)
-    remote_data = render_remote_data_sources(
-        all_defs['definitions'], name, args)
-    providers = render_providers(all_defs['providers'], args)
-    with open("{}/{}".format(str(target), "terraform.tf"), 'w+') as tffile:
+    remote_data = render_remote_data_sources(all_defs["definitions"], name, args)
+    providers = render_providers(all_defs["providers"], args)
+    with open("{}/{}".format(str(target), "terraform.tf"), "w+") as tffile:
         tffile.write("{}\n\n".format(providers))
         tffile.write("{}\n\n".format(state))
         tffile.write("{}\n\n".format(remote_data))
 
     # Create the variable definitions
-    with open("{}/{}".format(str(target), "worker.auto.tfvars"), 'w+') as varfile:
+    with open("{}/{}".format(str(target), "worker.auto.tfvars"), "w+") as varfile:
         for k, v in terraform_vars.items():
             if isinstance(v, list):
                 varstring = "[{}]".format(", ".join(map(quote_str, v)))
                 varfile.write("{} = {}\n".format(k, varstring))
             else:
-                varfile.write("{} = \"{}\"\n".format(k, v))
+                varfile.write('{} = "{}"\n'.format(k, v))
 
 
 def make_vars(section, single, base=None):
@@ -136,17 +147,17 @@ def render_remote_state(name, cluster, args):
     """Return remote for the definition."""
     state_config = []
     state_config.append("terraform {")
-    state_config.append("  backend \"s3\" {")
-    state_config.append("    region = \"{}\"".format(args.state_region))
-    state_config.append("    bucket = \"{}\"".format(args.s3_bucket))
+    state_config.append('  backend "s3" {')
+    state_config.append('    region = "{}"'.format(args.state_region))
+    state_config.append('    bucket = "{}"'.format(args.s3_bucket))
     state_config.append(
-        "    key = \"{}/{}/terraform.tfstate\"".format(args.s3_prefix, name))
-    state_config.append(
-        "    dynamodb_table = \"terraform-{}\"".format(cluster))
-    state_config.append("    encrypt = \"true\"")
+        '    key = "{}/{}/terraform.tfstate"'.format(args.s3_prefix, name)
+    )
+    state_config.append('    dynamodb_table = "terraform-{}"'.format(cluster))
+    state_config.append('    encrypt = "true"')
     state_config.append("  }")
     state_config.append("}")
-    return("\n".join(state_config))
+    return "\n".join(state_config)
 
 
 def render_remote_data_sources(definitions, exclude, args):
@@ -155,15 +166,14 @@ def render_remote_data_sources(definitions, exclude, args):
     for name, body in definitions.items():
         if name == exclude:
             continue
-        remote_data_config.append(
-            "data \"terraform_remote_state\" \"{}\" {{".format(name))
-        remote_data_config.append("  backend = \"s3\"")
+        remote_data_config.append('data "terraform_remote_state" "{}" {{'.format(name))
+        remote_data_config.append('  backend = "s3"')
         remote_data_config.append("  config {")
+        remote_data_config.append('    region = "{}"'.format(args.state_region))
+        remote_data_config.append('    bucket = "{}"'.format(args.s3_bucket))
         remote_data_config.append(
-            "    region = \"{}\"".format(args.state_region))
-        remote_data_config.append("    bucket = \"{}\"".format(args.s3_bucket))
-        remote_data_config.append(
-            "    key = \"{}/{}/terraform.tfstate\"".format(args.s3_prefix, name))
+            '    key = "{}/{}/terraform.tfstate"'.format(args.s3_prefix, name)
+        )
         remote_data_config.append("  }")
         remote_data_config.append("}\n")
     return "\n".join(remote_data_config)
@@ -176,45 +186,54 @@ def render_providers(providers, args):
     for provider in providers:
         provider_vars = {}
         try:
-            for k, v in providers[provider]['vars'].items():
+            for k, v in providers[provider]["vars"].items():
                 provider_vars[k] = v
         except (KeyError, TypeError):
             """No provider vars were set."""
             pass
-        prov_string.append("provider \"{}\" {{".format(provider))
+        prov_string.append('provider "{}" {{'.format(provider))
         for k, v in provider_vars.items():
-            prov_string.append("  {} = \"{}\"".format(k, v))
+            prov_string.append('  {} = "{}"'.format(k, v))
         prov_string.append("}")
     return "\n".join(prov_string)
 
 
-def run(name, definition, temp_dir, terrform_path, command, key_id, key_secret, debug=False):
+def run(
+    name, definition, temp_dir, terrform_path, command, key_id, key_secret, debug=False
+):
     """Run terraform."""
     params = {
-        'init': '-input=false -no-color -plugin-dir {}/terraform-plugins/'.format(temp_dir),
-        'plan': '-input=false -no-color',
-        'apply': '-input=false -no-color -auto-approve',
-        'destroy': '-input=false -no-color -force'
+        "init": "-input=false -no-color",
+        "plan": "-input=false -no-color",
+        "apply": "-input=false -no-color -auto-approve",
+        "destroy": "-input=false -no-color -force",
     }
 
     env = os.environ.copy()
-    env['AWS_ACCESS_KEY_ID'] = key_id
-    env['AWS_SECRET_ACCESS_KEY'] = key_secret
+    env["AWS_ACCESS_KEY_ID"] = key_id
+    env["AWS_SECRET_ACCESS_KEY"] = key_secret
+    env["TF_PLUGIN_CACHE_DIR"] = "{}/terraform-plugins".format(temp_dir)
 
-    working_dir = "{}/{}".format(temp_dir, definition['path'])
+    working_dir = "{}/{}".format(temp_dir, definition["path"])
     command_params = params.get(command)
     if not command_params:
         raise ValueError(
-            'invalid command passed to terraform, {} has no defined params!'.format(command))
+            "invalid command passed to terraform, {} has no defined params!".format(
+                command
+            )
+        )
 
-    (exit_code, stdout, stderr) = pipe_exec("{} {} {}".format(
-        terrform_path, command, command_params), cwd=working_dir, env=env)
+    (exit_code, stdout, stderr) = pipe_exec(
+        "{} {} {}".format(terrform_path, command, command_params),
+        cwd=working_dir,
+        env=env,
+    )
     if debug:
-        click.secho("exit code: {}".format(exit_code), fg='blue')
+        click.secho("exit code: {}".format(exit_code), fg="blue")
         for line in stdout.decode().splitlines():
-            click.secho("stdout: {}".format(line), fg='blue')
+            click.secho("stdout: {}".format(line), fg="blue")
         for line in stderr.decode().splitlines():
-            click.secho("stderr: {}".format(line), fg='red')
+            click.secho("stderr: {}".format(line), fg="red")
 
     if exit_code:
         return False

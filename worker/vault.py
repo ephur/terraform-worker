@@ -11,13 +11,13 @@ def store_keys(server, token, cluster, pubkey, privkey):
     """Store the keys in the vault server."""
     client = hvac.Client(url=server, token=token)
 
-    with open(pubkey, 'r') as key:
+    with open(pubkey, "r") as key:
         pubkey_data = key.read()
-    with open(privkey, 'r') as key:
+    with open(privkey, "r") as key:
         privkey_data = key.read()
 
-    client.write('secret/{}/ssh/public_key'.format(cluster), key=pubkey_data)
-    client.write('secret/{}/ssh/private_key'.format(cluster), key=privkey_data)
+    client.write("secret/{}/ssh/public_key".format(cluster), key=pubkey_data)
+    client.write("secret/{}/ssh/private_key".format(cluster), key=privkey_data)
 
 
 @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
@@ -25,8 +25,8 @@ def check_keys(server, token, cluster):
     """True/False check if keys exist for cluster."""
     client = hvac.Client(url=server, token=token)
 
-    pub = client.read('secret/{}/ssh/public_key'.format(cluster))
-    priv = client.read('secret/{}/ssh/private_key'.format(cluster))
+    pub = client.read("secret/{}/ssh/public_key".format(cluster))
+    priv = client.read("secret/{}/ssh/private_key".format(cluster))
 
     if pub is not None and priv is not None:
         return True
@@ -50,7 +50,7 @@ def update_service_token_role(server, token):
         "server_flag": False,
         "client_flag": False,
         "code_signing_flag": True,
-        "require_cn": False
+        "require_cn": False,
     }
 
     if role is None:
@@ -88,19 +88,24 @@ def generate_service_token_cert(server, token, cluster):
 
     endpoint = "v1/pki/issue/token-signing"
 
-    request_data = {
-        'common_name': "{}_token-signing"
-    }
+    request_data = {"common_name": "{}_token-signing"}
 
-    request_headers = {
-        'X-Vault-Token': token
-    }
+    request_headers = {"X-Vault-Token": token}
 
-    r = requests.post('{}/{}'.format(server, endpoint),
-                      data=json.dumps(request_data), headers=request_headers,
-                      timeout=60)
+    r = requests.post(
+        "{}/{}".format(server, endpoint),
+        data=json.dumps(request_data),
+        headers=request_headers,
+        timeout=60,
+    )
 
     r.raise_for_status()
 
-    store_service_token_cert(server, token, cluster, r.json()['data']['certificate'], r.json()['data']['private_key'])
+    store_service_token_cert(
+        server,
+        token,
+        cluster,
+        r.json()["data"]["certificate"],
+        r.json()["data"]["private_key"],
+    )
     return None
