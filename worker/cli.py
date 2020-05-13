@@ -252,6 +252,29 @@ def terraform(
             click.secho("Error initializing terraform!", fg="red")
             sys.exit(1)
 
+    # Always show plan output
+    # @TODO(ephur): show proper plan output, this will always show a `create` plan
+    # a destroy plan will be different see:
+    for name, body in obj.config["terraform"]["definitions"].items():
+        plan_opts = ""
+        if destroy:
+            plan_opts = "-destroy"
+        if limit and name not in limit:
+            continue
+        click.secho("Planning definition {}".format(name), fg="green")
+        if not tf.run(
+            name,
+            body,
+            obj.temp_dir,
+            terraform_bin,
+            "plan".format(plan_opts),
+            obj.args.aws_access_key_id,
+            obj.args.aws_secret_access_key,
+            debug=show_output,
+        ):
+            click.secho("Error planning terraform on {}!".format(name), fg="red")
+            sys.exit(1)
+
     # Apply all the definitions
     if tf_apply:
         # This is probably no longer the workers role
@@ -262,35 +285,19 @@ def terraform(
         #     vault.generate_service_token_cert(
         #         obj.args.vault_address, obj.args.vault_token, cluster
         #     )
-        for name, body in obj.config["terraform"]["definitions"].items():
-            if limit and name not in limit:
-                continue
-            click.secho("Planning definition {}".format(name), fg="green")
-            if not tf.run(
-                name,
-                body,
-                obj.temp_dir,
-                terraform_bin,
-                "plan",
-                obj.args.aws_access_key_id,
-                obj.args.aws_secret_access_key,
-                debug=show_output,
-            ):
-                click.secho("Error applying terraform on {}!".format(name), fg="red")
-                sys.exit(1)
-            click.secho("Applying definition {}".format(name), fg="green")
-            if not tf.run(
-                name,
-                body,
-                obj.temp_dir,
-                terraform_bin,
-                "apply",
-                obj.args.aws_access_key_id,
-                obj.args.aws_secret_access_key,
-                debug=show_output,
-            ):
-                click.secho("Error applying terraform on {}!".format(name), fg="red")
-                sys.exit(1)
+        click.secho("Applying definition {}".format(name), fg="green")
+        if not tf.run(
+            name,
+            body,
+            obj.temp_dir,
+            terraform_bin,
+            "apply",
+            obj.args.aws_access_key_id,
+            obj.args.aws_secret_access_key,
+            debug=show_output,
+        ):
+            click.secho("Error applying terraform on {}!".format(name), fg="red")
+            sys.exit(1)
     else:
         click.secho(
             "Skipping terraform apply for all definitions (--no-apply)", fg="green"
@@ -315,3 +322,7 @@ def terraform(
                 debug=show_output,
             ):
                 click.secho("Error destroying terraform on {}!".format(name), fg="red")
+    else:
+        click.secho(
+            "Skipping terraform destroy for all definitions (--no-destroy)", fg="green"
+        )
