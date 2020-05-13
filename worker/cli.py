@@ -18,16 +18,16 @@ ready. Script will be deprecated once all actions are done via worker.
 DEFAULT_CONFIG = "{}/worker.yaml".format(os.getcwd())
 DEFAULT_REPOSITORY_PATH = "{}".format(os.getcwd())
 DEFAULT_S3_BUCKET = "launchpad-terraform-states"
-DEFAULT_S3_PREFIX = "terraform/state/{cluster}"
+DEFAULT_S3_PREFIX = "terraform/state/{deployment}"
 DEFAULT_AWS_REGION = "us-west-2"
 DEFAULT_STATE_REGION = "us-west-2"
 DEFAULT_TERRFORM = "/usr/local/bin/terraform"
 
 
-def validate_cluster(ctx, cluster, name):
-    """Validate the cluster is an 8 char name."""
+def validate_deployment(ctx, deployment, name):
+    """Validate the deployment is an 8 char name."""
     if len(name) != 8:
-        click.secho("Cluster must be 8 character name.", fg="red")
+        click.secho("deployment must be 8 character name.", fg="red")
         raise SystemExit(2)
     return name
 
@@ -40,7 +40,7 @@ def validate_host():
     return True
 
 
-def validate_keypair(pubkey, privkey, cluster, temp_dir, args):
+def validate_keypair(pubkey, privkey, deployment, temp_dir, args):
     """Validate the provided SSH key values, and their existence in vault."""
     if pubkey is not None and privkey is None:
         click.secho("Must pass --ssh-private-key when you supply a public SSH key")
@@ -52,15 +52,17 @@ def validate_keypair(pubkey, privkey, cluster, temp_dir, args):
 
     if pubkey is None and privkey is None:
         # No keys were passed so check inside of vault
-        if not vault.check_keys(args.vault_address, args.vault_token, cluster):
+        if not vault.check_keys(args.vault_address, args.vault_token, deployment):
             # No keys in vault, so generate a pair and save them
-            pubkey, privkey = generate_keypair(temp_dir, cluster)
+            pubkey, privkey = generate_keypair(temp_dir, deployment)
             vault.store_keys(
-                args.vault_address, args.vault_token, cluster, pubkey, privkey
+                args.vault_address, args.vault_token, deployment, pubkey, privkey
             )
     else:
         # Keys were passed on the command line, overwrite what is in vault
-        vault.store_keys(args.vault_address, args.vault_token, cluster, pubkey, privkey)
+        vault.store_keys(
+            args.vault_address, args.vault_token, deployment, pubkey, privkey
+        )
 
 
 @click.group()
@@ -143,18 +145,18 @@ def cli(context, **kwargs):
 @click.option(
     "--destroy/--no-destroy",
     default=False,
-    help="destroy a cluster instead of create it",
+    help="destroy a deployment instead of create it",
 )
 # To be removed, probably do not want to deal with SSH keys this way
 # @click.option(
 #     "--ssh-public-key",
 #     default=None,
-#     help="path to ssh public key to use with the cluster (must provide a private key if passing public)",
+#     help="path to ssh public key to use with the deployment (must provide a private key if passing public)",
 # )
 # @click.option(
 #     "--ssh-private-key",
 #     default=None,
-#     help="path to ssh private key to use with the cluster (must provide a public key if passing private)",
+#     help="path to ssh private key to use with the deployment (must provide a public key if passing private)",
 # )
 @click.option(
     "--show-output/--no-show-output",
@@ -177,7 +179,7 @@ def cli(context, **kwargs):
     help="The complate location of the terraform binary",
 )
 @click.option("--limit", help="limit operations to a single definition", multiple=True)
-@click.argument("cluster", callback=validate_cluster)
+@click.argument("deployment", callback=validate_deployment)
 @click.pass_obj
 def terraform(
     obj,
@@ -191,15 +193,15 @@ def terraform(
     s3_prefix,
     terraform_bin,
     limit,
-    cluster,
+    deployment,
 ):  # noqa: E501
-    """Build a cluster."""
+    """Build a deployment."""
     # Click call back can't validate these without throwing random stuff on the context object which is dirty
-    # validate_keypair(ssh_public_key, ssh_private_key, cluster, obj.temp_dir, obj.args)
+    # validate_keypair(ssh_public_key, ssh_private_key, deployment, obj.temp_dir, obj.args)
 
-    # If the default value is used, render the cluster name into it
+    # If the default value is used, render the deployment name into it
     if s3_prefix == DEFAULT_S3_PREFIX:
-        s3_prefix = DEFAULT_S3_PREFIX.format(cluster=cluster)
+        s3_prefix = DEFAULT_S3_PREFIX.format(deployment=deployment)
     obj.clean = clean
     obj.add_arg("s3_bucket", s3_bucket)
     obj.add_arg("s3_prefix", s3_prefix)
@@ -211,7 +213,7 @@ def terraform(
 
     obj.load_config(obj.args.config_file)
 
-    click.secho("building cluster {}".format(cluster), fg="green")
+    click.secho("building deployment {}".format(deployment), fg="green")
     click.secho("Temporary Directory:{}".format(obj.temp_dir), fg="yellow")
 
     # Prepare terraform definitions to be executed
@@ -219,7 +221,7 @@ def terraform(
     tf.download_plugins(obj.config["terraform"]["plugins"], obj.temp_dir)
     tf.prep_modules(obj.args.repository_path, obj.temp_dir)
     create_table(
-        "terraform-{}".format(cluster),
+        "terraform-{}".format(deployment),
         obj.args.state_region,
         obj.args.aws_access_key_id,
         obj.args.aws_secret_access_key,
@@ -235,7 +237,7 @@ def terraform(
             obj.config["terraform"],
             obj.temp_dir,
             obj.args.repository_path,
-            cluster,
+            deployment,
             obj.args,
         )
 
@@ -279,11 +281,11 @@ def terraform(
     if tf_apply:
         # This is probably no longer the workers role
         # if not vault.check_service_token_cert(
-        #     obj.args.vault_address, obj.args.vault_token, cluster
+        #     obj.args.vault_address, obj.args.vault_token, deployment
         # ):
         #     click.secho("Generating token signing certificate", fg="green")
         #     vault.generate_service_token_cert(
-        #         obj.args.vault_address, obj.args.vault_token, cluster
+        #         obj.args.vault_address, obj.args.vault_token, deployment
         #     )
         click.secho("Applying definition {}".format(name), fg="green")
         if not tf.run(

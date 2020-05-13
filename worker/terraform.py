@@ -67,7 +67,7 @@ def prep_modules(src, dst):
     )
 
 
-def prep_def(name, definition, all_defs, temp_dir, repo_path, cluster, args):
+def prep_def(name, definition, all_defs, temp_dir, repo_path, deployment, args):
     """ prepare the definitions for running """
     repo = Path("{}/{}".format(repo_path, definition["path"]).replace("//", "/"))
     target = Path("{}/{}".format(temp_dir, definition["path"]).replace("//", "/"))
@@ -77,8 +77,8 @@ def prep_def(name, definition, all_defs, temp_dir, repo_path, cluster, args):
     template_vars = make_vars("template_vars", definition, all_defs)
     terraform_vars = make_vars("terraform_vars", definition, all_defs)
     locals_vars = make_vars("remote_vars", definition)
-    template_vars["cluster"] = cluster
-    terraform_vars["cluster"] = cluster
+    template_vars["deployment"] = deployment
+    terraform_vars["deployment"] = deployment
 
     # Put terraform files in place
     for tf in repo.glob("*.tf"):
@@ -109,7 +109,7 @@ def prep_def(name, definition, all_defs, temp_dir, repo_path, cluster, args):
             tflocals.write("}\n\n")
 
     # Create the terraform configuration, terraform.tf
-    state = render_remote_state(name, cluster, args)
+    state = render_remote_state(name, deployment, args)
     remote_data = render_remote_data_sources(all_defs["definitions"], name, args)
     providers = render_providers(all_defs["providers"], args)
     with open("{}/{}".format(str(target), "terraform.tf"), "w+") as tffile:
@@ -143,7 +143,7 @@ def quote_str(string):
     return '"{}"'.format(string)
 
 
-def render_remote_state(name, cluster, args):
+def render_remote_state(name, deployment, args):
     """Return remote for the definition."""
     state_config = []
     state_config.append("terraform {")
@@ -153,7 +153,7 @@ def render_remote_state(name, cluster, args):
     state_config.append(
         '    key = "{}/{}/terraform.tfstate"'.format(args.s3_prefix, name)
     )
-    state_config.append('    dynamodb_table = "terraform-{}"'.format(cluster))
+    state_config.append('    dynamodb_table = "terraform-{}"'.format(deployment))
     state_config.append('    encrypt = "true"')
     state_config.append("  }")
     state_config.append("}")
