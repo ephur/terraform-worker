@@ -134,7 +134,16 @@ def make_vars(section, single, base=None):
 
     item_vars = base.get(section, {})
     for k, v in single.get(section, {}).items():
-        item_vars[k] = v
+        # terraform expects variables in a specific type, so need to convert bools to a lower case true/false
+        matched_type = False
+        if v is True:
+            item_vars[k] = "true"
+            matched_type = True
+        if v is False:
+            item_vars[k] = "false"
+            matched_type = True
+        if not matched_type:
+            item_vars[k] = v
     return item_vars
 
 
@@ -161,14 +170,14 @@ def render_remote_state(name, deployment, args):
 
 
 def render_remote_data_sources(definitions, exclude, args):
-    """Return remote data sources for all items except the excluded item."""
+    """Return remote data sources for all items until the excluded item"""
     remote_data_config = []
     for name, body in definitions.items():
         if name == exclude:
-            continue
+            break
         remote_data_config.append('data "terraform_remote_state" "{}" {{'.format(name))
         remote_data_config.append('  backend = "s3"')
-        remote_data_config.append("  config {")
+        remote_data_config.append("  config = {")
         remote_data_config.append('    region = "{}"'.format(args.state_region))
         remote_data_config.append('    bucket = "{}"'.format(args.s3_bucket))
         remote_data_config.append(
