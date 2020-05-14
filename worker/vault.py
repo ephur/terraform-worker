@@ -7,7 +7,7 @@ import hvac
 
 
 @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
-def store_keys(server, token, cluster, pubkey, privkey):
+def store_keys(server, token, deployment, pubkey, privkey):
     """Store the keys in the vault server."""
     client = hvac.Client(url=server, token=token)
 
@@ -16,17 +16,17 @@ def store_keys(server, token, cluster, pubkey, privkey):
     with open(privkey, "r") as key:
         privkey_data = key.read()
 
-    client.write("secret/{}/ssh/public_key".format(cluster), key=pubkey_data)
-    client.write("secret/{}/ssh/private_key".format(cluster), key=privkey_data)
+    client.write("secret/{}/ssh/public_key".format(deployment), key=pubkey_data)
+    client.write("secret/{}/ssh/private_key".format(deployment), key=privkey_data)
 
 
 @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
-def check_keys(server, token, cluster):
-    """True/False check if keys exist for cluster."""
+def check_keys(server, token, deployment):
+    """True/False check if keys exist for deployment."""
     client = hvac.Client(url=server, token=token)
 
-    pub = client.read("secret/{}/ssh/public_key".format(cluster))
-    priv = client.read("secret/{}/ssh/private_key".format(cluster))
+    pub = client.read("secret/{}/ssh/public_key".format(deployment))
+    priv = client.read("secret/{}/ssh/private_key".format(deployment))
 
     if pub is not None and priv is not None:
         return True
@@ -59,10 +59,10 @@ def update_service_token_role(server, token):
 
 
 @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
-def check_service_token_cert(server, token, cluster):
-    """True/False check if token signing certs exist for cluster."""
+def check_service_token_cert(server, token, deployment):
+    """True/False check if token signing certs exist for deployment."""
     client = hvac.Client(url=server, token=token)
-    signing_cert = client.read("secret/{}/certs/token-signing".format(cluster))
+    signing_cert = client.read("secret/{}/certs/token-signing".format(deployment))
 
     if signing_cert is not None:
         return True
@@ -70,15 +70,15 @@ def check_service_token_cert(server, token, cluster):
 
 
 @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
-def store_service_token_cert(server, token, cluster, cert, key):
+def store_service_token_cert(server, token, deployment, cert, key):
     """Store a certificate and key in vault."""
     client = hvac.Client(url=server, token=token)
-    client.write("secret/{}/certs/token-signing".format(cluster), key=key, cert=cert)
+    client.write("secret/{}/certs/token-signing".format(deployment), key=key, cert=cert)
     return None
 
 
 @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
-def generate_service_token_cert(server, token, cluster):
+def generate_service_token_cert(server, token, deployment):
     """
     Generate a certificate from vault.
 
@@ -104,7 +104,7 @@ def generate_service_token_cert(server, token, cluster):
     store_service_token_cert(
         server,
         token,
-        cluster,
+        deployment,
         r.json()["data"]["certificate"],
         r.json()["data"]["private_key"],
     )

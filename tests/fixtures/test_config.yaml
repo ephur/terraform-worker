@@ -21,4 +21,4 @@ terraform:
         vpc_id: network.vpc_id
         private_subnet_ids: network.private_subnet_ids
         public_subnet_ids: network.public_subnet_ids
-        cluster_zone_id: network.cluster_zone_id
+        deployment_zone_id: network.deployment_zone_id
