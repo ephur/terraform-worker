@@ -89,6 +89,10 @@ def prep_def(name, definition, all_defs, temp_dir, repo_path, deployment, args):
         shutil.copytree(
             "{}/templates".format(str(repo)), "{}/templates".format(str(target))
         )
+    if os.path.isdir(str(repo) + "/policies".replace("//", "/")):
+        shutil.copytree(
+            "{}/policies".format(str(repo)), "{}/templates".format(str(target))
+        )
 
     # Render jinja templates and put in place
     env = jinja2.Environment(loader=jinja2.FileSystemLoader)
