@@ -26,8 +26,8 @@ DEFAULT_TERRFORM = "/usr/local/bin/terraform"
 
 def validate_deployment(ctx, deployment, name):
     """Validate the deployment is an 8 char name."""
-    if len(name) != 8:
-        click.secho("deployment must be 8 character name.", fg="red")
+    if len(name) > 16:
+        click.secho("deployment must be less than 16 characters.", fg="red")
         raise SystemExit(2)
     return name
 
