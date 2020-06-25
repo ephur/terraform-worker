@@ -70,7 +70,7 @@ def prep_modules(src, dst):
 def prep_def(name, definition, all_defs, temp_dir, repo_path, deployment, args):
     """ prepare the definitions for running """
     repo = Path("{}/{}".format(repo_path, definition["path"]).replace("//", "/"))
-    target = Path("{}/{}".format(temp_dir, definition["path"]).replace("//", "/"))
+    target = Path("{}/definitions/test/{}".format(temp_dir, name).replace("//", "/"))
     target.mkdir(parents=True, exist_ok=True)
 
     # Prepare variables
@@ -98,9 +98,7 @@ def prep_def(name, definition, all_defs, temp_dir, repo_path, deployment, args):
             "{}/scripts".format(str(repo)), "{}/scripts".format(str(target))
         )
     if os.path.isdir(str(repo) + "/repos".replace("//", "/")):
-        shutil.copytree(
-            "{}/repos".format(str(repo)), "{}/repos".format(str(target))
-        )
+        shutil.copytree("{}/repos".format(str(repo)), "{}/repos".format(str(target)))
 
     # Render jinja templates and put in place
     env = jinja2.Environment(loader=jinja2.FileSystemLoader)
@@ -235,7 +233,7 @@ def run(
     env["AWS_SECRET_ACCESS_KEY"] = key_secret
     env["TF_PLUGIN_CACHE_DIR"] = "{}/terraform-plugins".format(temp_dir)
 
-    working_dir = "{}/{}".format(temp_dir, definition["path"])
+    working_dir = "{}/definitions/test/{}".format(temp_dir, name)
     command_params = params.get(command)
     if not command_params:
         raise ValueError(
