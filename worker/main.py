@@ -4,6 +4,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import sys
 from collections import OrderedDict
 
 import boto3
@@ -46,8 +47,14 @@ class State(object):
         return None
 
     def load_config(self, config_file):
-        with open(config_file, "r") as cfile:
-            self.config = ordered_config_load(cfile, self.args)
+        try:
+            with open(config_file, "r") as cfile:
+                self.config = ordered_config_load(cfile, self.args)
+        except IOError:
+            click.secho(
+                "Unable to open configuration file: {}".format(config_file), fg="red"
+            )
+            sys.exit(1)
 
     class StateArgs(object):
         """A class to hold arguments in the state for easier access."""
