@@ -73,6 +73,15 @@ def prep_def(name, definition, all_defs, temp_dir, repo_path, deployment, args):
     target = Path("{}/definitions/test/{}".format(temp_dir, name).replace("//", "/"))
     target.mkdir(parents=True, exist_ok=True)
 
+    if not repo.exists():
+        click.secho(
+            "Error preparing definition {}, path {} does not exist".format(
+                name, repo.resolve()
+            ),
+            fg="red",
+        )
+        sys.exit(1)
+
     # Prepare variables
     template_vars = make_vars("template_vars", definition, all_defs)
     terraform_vars = make_vars("terraform_vars", definition, all_defs)
