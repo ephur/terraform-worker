@@ -8,12 +8,7 @@ import click
 
 from . import terraform as tf
 from . import vault
-from .main import State, create_table, generate_keypair, get_aws_id
-
-"""
-Script to handle calling terraform and building 'manually' until the worker system is deployed and
-ready. Script will be deprecated once all actions are done via worker.
-"""
+from .main import State, create_table, get_aws_id
 
 DEFAULT_CONFIG = "{}/worker.yaml".format(os.getcwd())
 DEFAULT_REPOSITORY_PATH = "{}".format(os.getcwd())
@@ -80,21 +75,6 @@ def validate_keypair(pubkey, privkey, deployment, temp_dir, args):
     envvar="AWS_SECRET_ACCESS_KEY",
     help="AWS access key secret",
 )
-### Vault integration is probably not responsibility of the worker
-# @click.option(
-#     "--vault-address",
-#     # required=True,
-#     envvar="VAULT_ADDR",
-#     help="Vault server address, https://vault.example.com:8200",
-# )
-# @click.option(
-#     "--vault-token",
-#     # required=True,
-#     # prompt=True,
-#     hide_input=True,
-#     envvar="VAULT_TOKEN",
-#     help="vault token (must have access to create policies, and issue tokens)",
-# )
 @click.option(
     "--aws-region",
     envvar="AWS_DEFAULT_REGION",
@@ -127,7 +107,7 @@ def cli(context, **kwargs):
         click.secho(
             "Configuration file {} not found!".format(config_file), fg="red", err=True
         )
-        sys.exit(1)
+        raise SystemExit(1)
 
 
 @cli.command()
@@ -147,17 +127,6 @@ def cli(context, **kwargs):
     default=False,
     help="destroy a deployment instead of create it",
 )
-# To be removed, probably do not want to deal with SSH keys this way
-# @click.option(
-#     "--ssh-public-key",
-#     default=None,
-#     help="path to ssh public key to use with the deployment (must provide a private key if passing public)",
-# )
-# @click.option(
-#     "--ssh-private-key",
-#     default=None,
-#     help="path to ssh private key to use with the deployment (must provide a public key if passing private)",
-# )
 @click.option(
     "--show-output/--no-show-output",
     default=False,
@@ -186,8 +155,6 @@ def terraform(
     clean,
     tf_apply,
     destroy,
-    # ssh_public_key,
-    # ssh_private_key,
     show_output,
     s3_bucket,
     s3_prefix,
@@ -196,8 +163,9 @@ def terraform(
     deployment,
 ):  # noqa: E501
     """Build a deployment."""
-    # Click call back can't validate these without throwing random stuff on the context object which is dirty
-    # validate_keypair(ssh_public_key, ssh_private_key, deployment, obj.temp_dir, obj.args)
+    if tf_apply and destroy:
+        click.secho("Can not apply and destroy at the same time.", fg="red")
+        raise SystemExit(1)
 
     # If the default value is used, render the deployment name into it
     if s3_prefix == DEFAULT_S3_PREFIX:
@@ -211,12 +179,13 @@ def terraform(
         get_aws_id(obj.args.aws_access_key_id, obj.args.aws_secret_access_key),
     )
 
+    click.secho("loading config file {}".format(obj.args.config_file), fg="green")
     obj.load_config(obj.args.config_file)
 
     click.secho("building deployment {}".format(deployment), fg="green")
     click.secho("Temporary Directory:{}".format(obj.temp_dir), fg="yellow")
 
-    # Prepare terraform definitions to be executed
+    # common setup required for all definitions
     click.secho("Downloading plugins", fg="green")
     tf.download_plugins(obj.config["terraform"]["plugins"], obj.temp_dir)
     tf.prep_modules(obj.args.repository_path, obj.temp_dir)
@@ -226,6 +195,13 @@ def terraform(
         obj.args.aws_access_key_id,
         obj.args.aws_secret_access_key,
     )
+
+    # update mechanism for definitions
+    # first determine apply/destroy
+    # fix order
+    # plan for apply/destroy
+    # only execute apply/destroy if plan succeeds
+    # fail / exit on any error
 
     for name, body in obj.config["terraform"]["definitions"].items():
         if limit and name not in limit:
