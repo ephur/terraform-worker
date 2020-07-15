@@ -4,6 +4,7 @@ import shutil
 import sys
 import urllib
 import zipfile
+import copy
 
 from pathlib import Path
 
@@ -11,6 +12,14 @@ import click
 import jinja2
 
 from .main import pipe_exec
+
+
+class TerraformError(Exception):
+    pass
+
+
+class PlanChange(Exception):
+    pass
 
 
 def download_plugins(plugins, temp_dir):
@@ -83,6 +92,7 @@ def prep_def(name, definition, all_defs, temp_dir, repo_path, deployment, args):
         sys.exit(1)
 
     # Prepare variables
+    terraform_vars = None
     template_vars = make_vars("template_vars", definition, all_defs)
     terraform_vars = make_vars("terraform_vars", definition, all_defs)
     locals_vars = make_vars("remote_vars", definition)
@@ -151,8 +161,9 @@ def make_vars(section, single, base=None):
     if base is None:
         base = {}
 
-    item_vars = base.get(section, {})
+    item_vars = copy.deepcopy(base.get(section, {}))
     for k, v in single.get(section, {}).items():
+        print("processing key: {}, value: {}")
         # terraform expects variables in a specific type, so need to convert bools to a lower case true/false
         matched_type = False
         if v is True:
@@ -191,7 +202,7 @@ def render_remote_state(name, deployment, args):
 def render_remote_data_sources(definitions, exclude, args):
     """Return remote data sources for all items until the excluded item"""
     remote_data_config = []
-    for name, body in definitions.items():
+    for name, _ in definitions.items():
         if name == exclude:
             break
         remote_data_config.append('data "terraform_remote_state" "{}" {{'.format(name))
@@ -227,15 +238,25 @@ def render_providers(providers, args):
 
 
 def run(
-    name, definition, temp_dir, terrform_path, command, key_id, key_secret, debug=False
+    name,
+    temp_dir,
+    terrform_path,
+    command,
+    key_id,
+    key_secret,
+    debug=False,
+    plan_action="apply",
 ):
     """Run terraform."""
     params = {
         "init": "-input=false -no-color",
-        "plan": "-input=false -no-color",
+        "plan": "-input=false -detailed-exitcode -no-color",
         "apply": "-input=false -no-color -auto-approve",
         "destroy": "-input=false -no-color -force",
     }
+
+    if plan_action == "destroy":
+        params["plan"] += " -destroy"
 
     env = os.environ.copy()
     env["AWS_ACCESS_KEY_ID"] = key_id
@@ -263,6 +284,16 @@ def run(
         for line in stderr.decode().splitlines():
             click.secho("stderr: {}".format(line), fg="red")
 
+    # special handling of the exit codes for "plan" operations
+    if command == "plan":
+        if exit_code == 0:
+            return True
+        if exit_code == 1:
+            raise TerraformError
+        if exit_code == 2:
+            raise PlanChange
+
     if exit_code:
-        return False
+        raise TerraformError
+
     return True
