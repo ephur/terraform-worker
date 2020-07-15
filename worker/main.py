@@ -4,16 +4,11 @@ import shlex
 import shutil
 import subprocess
 import tempfile
-import sys
 from collections import OrderedDict
 
 import boto3
 import click
 import yaml
-
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import serialization as crypto_serialization
-from cryptography.hazmat.backends import default_backend as crypto_default_backend
 
 
 class State(object):
@@ -54,43 +49,12 @@ class State(object):
             click.secho(
                 "Unable to open configuration file: {}".format(config_file), fg="red"
             )
-            sys.exit(1)
+            raise SystemExit(1)
 
     class StateArgs(object):
         """A class to hold arguments in the state for easier access."""
 
         pass
-
-
-def generate_keypair(tempdir, name):
-    """Generate an ssh keypair, and write to the tempdir."""
-    key = rsa.generate_private_key(
-        backend=crypto_default_backend(), public_exponent=65537, key_size=4096
-    )
-
-    private_key = key.private_bytes(
-        crypto_serialization.Encoding.PEM,
-        crypto_serialization.PrivateFormat.PKCS8,
-        crypto_serialization.NoEncryption(),
-    ).decode()
-
-    public_key = (
-        key.public_key()
-        .public_bytes(
-            crypto_serialization.Encoding.OpenSSH,
-            crypto_serialization.PublicFormat.OpenSSH,
-        )
-        .decode()
-    )
-
-    with open("{}/{}".format(tempdir, name), mode="w") as priv_key:
-        priv_key.write(private_key)
-        os.chmod("{}/{}".format(tempdir, name), 0o600)
-
-    with open("{}/{}.pub".format(tempdir, name), mode="w") as pub_key:
-        pub_key.write(public_key)
-
-    return ("{}/{}.pub".format(tempdir, name), "{}/{}".format(tempdir, name))
 
 
 def create_table(name, region, key_id, key_secret, read_capacity=1, write_capacity=1):

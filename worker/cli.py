@@ -1,19 +1,14 @@
 #!/usr/bin/env python
 
+import copy
 import os
 import struct
-import sys
 
 import click
 
 from . import terraform as tf
 from . import vault
-from .main import State, create_table, generate_keypair, get_aws_id
-
-"""
-Script to handle calling terraform and building 'manually' until the worker system is deployed and
-ready. Script will be deprecated once all actions are done via worker.
-"""
+from .main import State, create_table, get_aws_id
 
 DEFAULT_CONFIG = "{}/worker.yaml".format(os.getcwd())
 DEFAULT_REPOSITORY_PATH = "{}".format(os.getcwd())
@@ -27,7 +22,7 @@ DEFAULT_TERRFORM = "/usr/local/bin/terraform"
 def validate_deployment(ctx, deployment, name):
     """Validate the deployment is an 8 char name."""
     if len(name) > 16:
-        click.secho("deployment must be less than 16 characters.", fg="red")
+        click.secho("deployment must be less than 16 characters", fg="red")
         raise SystemExit(2)
     return name
 
@@ -35,7 +30,7 @@ def validate_deployment(ctx, deployment, name):
 def validate_host():
     """Ensure that the script is being run on a supported platform."""
     if struct.calcsize("P") * 8 != 64:
-        click.secho("Worker can only be run on 64 bit hosts, in 64 bit mode.", fg="red")
+        click.secho("worker can only be run on 64 bit hosts, in 64 bit mode", fg="red")
         raise SystemExit(2)
     return True
 
@@ -43,11 +38,11 @@ def validate_host():
 def validate_keypair(pubkey, privkey, deployment, temp_dir, args):
     """Validate the provided SSH key values, and their existence in vault."""
     if pubkey is not None and privkey is None:
-        click.secho("Must pass --ssh-private-key when you supply a public SSH key")
+        click.secho("must pass --ssh-private-key when you supply a public SSH key")
         raise SystemExit(2)
 
     if pubkey is None and privkey is not None:
-        click.secho("Must pass --ssh-public-key when you supply a private SSH key")
+        click.secho("must pass --ssh-public-key when you supply a private SSH key")
         raise SystemExit(2)
 
     if pubkey is None and privkey is None:
@@ -80,21 +75,6 @@ def validate_keypair(pubkey, privkey, deployment, temp_dir, args):
     envvar="AWS_SECRET_ACCESS_KEY",
     help="AWS access key secret",
 )
-### Vault integration is probably not responsibility of the worker
-# @click.option(
-#     "--vault-address",
-#     # required=True,
-#     envvar="VAULT_ADDR",
-#     help="Vault server address, https://vault.example.com:8200",
-# )
-# @click.option(
-#     "--vault-token",
-#     # required=True,
-#     # prompt=True,
-#     hide_input=True,
-#     envvar="VAULT_TOKEN",
-#     help="vault token (must have access to create policies, and issue tokens)",
-# )
 @click.option(
     "--aws-region",
     envvar="AWS_DEFAULT_REGION",
@@ -125,9 +105,9 @@ def cli(context, **kwargs):
         context.obj = State(args=kwargs)
     except FileNotFoundError:
         click.secho(
-            "Configuration file {} not found!".format(config_file), fg="red", err=True
+            "configuration file {} not found".format(config_file), fg="red", err=True
         )
-        sys.exit(1)
+        raise SystemExit(1)
 
 
 @cli.command()
@@ -147,17 +127,6 @@ def cli(context, **kwargs):
     default=False,
     help="destroy a deployment instead of create it",
 )
-# To be removed, probably do not want to deal with SSH keys this way
-# @click.option(
-#     "--ssh-public-key",
-#     default=None,
-#     help="path to ssh public key to use with the deployment (must provide a private key if passing public)",
-# )
-# @click.option(
-#     "--ssh-private-key",
-#     default=None,
-#     help="path to ssh private key to use with the deployment (must provide a public key if passing private)",
-# )
 @click.option(
     "--show-output/--no-show-output",
     default=False,
@@ -186,8 +155,6 @@ def terraform(
     clean,
     tf_apply,
     destroy,
-    # ssh_public_key,
-    # ssh_private_key,
     show_output,
     s3_bucket,
     s3_prefix,
@@ -196,8 +163,10 @@ def terraform(
     deployment,
 ):  # noqa: E501
     """Build a deployment."""
-    # Click call back can't validate these without throwing random stuff on the context object which is dirty
-    # validate_keypair(ssh_public_key, ssh_private_key, deployment, obj.temp_dir, obj.args)
+    if tf_apply and destroy:
+        click.secho("can not apply and destroy at the same time", fg="red")
+        raise SystemExit(1)
+    plan_for = "apply"
 
     # If the default value is used, render the deployment name into it
     if s3_prefix == DEFAULT_S3_PREFIX:
@@ -211,13 +180,14 @@ def terraform(
         get_aws_id(obj.args.aws_access_key_id, obj.args.aws_secret_access_key),
     )
 
+    click.secho("loading config file {}".format(obj.args.config_file), fg="green")
     obj.load_config(obj.args.config_file)
 
     click.secho("building deployment {}".format(deployment), fg="green")
-    click.secho("Temporary Directory:{}".format(obj.temp_dir), fg="yellow")
+    click.secho("using temporary Directory:{}".format(obj.temp_dir), fg="yellow")
 
-    # Prepare terraform definitions to be executed
-    click.secho("Downloading plugins", fg="green")
+    # common setup required for all definitions
+    click.secho("downloading plugins", fg="green")
     tf.download_plugins(obj.config["terraform"]["plugins"], obj.temp_dir)
     tf.prep_modules(obj.args.repository_path, obj.temp_dir)
     create_table(
@@ -227,10 +197,32 @@ def terraform(
         obj.args.aws_secret_access_key,
     )
 
-    for name, body in obj.config["terraform"]["definitions"].items():
-        if limit and name not in limit:
-            continue
-        click.secho("preparing definition:{}".format(name), fg="green")
+    # update mechanism for definitions
+    # first determine apply/destroy
+    # fix order
+    # plan for apply/destroy
+    # only execute apply/destroy if plan succeeds
+    # fail / exit on any error
+
+    tf_items = []
+
+    # setup tf_items to capture the limit/order based on options
+    if destroy:
+        for name, body in reversed(obj.config["terraform"]["definitions"].items()):
+            if limit and name not in limit:
+                continue
+            tf_items.append((name, body))
+        plan_for = "destroy"
+    else:
+        for name, body in obj.config["terraform"]["definitions"].items():
+            if limit and name not in limit:
+                continue
+            tf_items.append((name, body))
+
+    for name, body in tf_items:
+        execute = False
+        # copy definition files / templates etc.
+        click.secho("preparing definition: {}".format(name), fg="green")
         tf.prep_def(
             name,
             body,
@@ -241,87 +233,69 @@ def terraform(
             obj.args,
         )
 
-        if not tf.run(
-            name,
-            body,
-            obj.temp_dir,
-            terraform_bin,
-            "init",
-            obj.args.aws_access_key_id,
-            obj.args.aws_secret_access_key,
-            debug=show_output,
-        ):
-            click.secho("Error initializing terraform!", fg="red")
-            sys.exit(1)
-
-    # Always show plan output
-    # @TODO(ephur): show proper plan output, this will always show a `create` plan
-    # a destroy plan will be different see:
-    for name, body in obj.config["terraform"]["definitions"].items():
-        if limit and name not in limit:
-            continue
-        click.secho("Planning definition {}".format(name), fg="green")
-        if not tf.run(
-            name,
-            body,
-            obj.temp_dir,
-            terraform_bin,
-            "plan",
-            obj.args.aws_access_key_id,
-            obj.args.aws_secret_access_key,
-            debug=show_output,
-        ):
-            click.secho("Error planning terraform on {}!".format(name), fg="red")
-            sys.exit(1)
-
-        # Apply all the definitions
-        if tf_apply:
-            # This is probably no longer the workers role
-            # if not vault.check_service_token_cert(
-            #     obj.args.vault_address, obj.args.vault_token, deployment
-            # ):
-            #     click.secho("Generating token signing certificate", fg="green")
-            #     vault.generate_service_token_cert(
-            #         obj.args.vault_address, obj.args.vault_token, deployment
-            #     )
-            click.secho("Applying definition {}".format(name), fg="green")
-            if not tf.run(
+        # run terraform init
+        try:
+            tf.run(
                 name,
-                body,
                 obj.temp_dir,
                 terraform_bin,
-                "apply",
+                "init",
                 obj.args.aws_access_key_id,
                 obj.args.aws_secret_access_key,
                 debug=show_output,
-            ):
-                click.secho("Error applying terraform on {}!".format(name), fg="red")
-                sys.exit(1)
+            )
+        except tf.TerraformError:
+            click.secho("error running terraform init", fg="red")
+            raise SystemExit(1)
+
+        click.secho("planning definition: {}".format(name), fg="green")
+
+        # run terraform plan
+        try:
+            tf.run(
+                name,
+                obj.temp_dir,
+                terraform_bin,
+                "plan",
+                obj.args.aws_access_key_id,
+                obj.args.aws_secret_access_key,
+                debug=show_output,
+                plan_action=plan_for,
+            )
+        except tf.PlanChange:
+            execute = True
+        except tf.TerraformError:
+            click.secho(
+                "error planning terraform definition: {}!".format(name), fg="red"
+            )
+            raise SystemExit(1)
+
+        if execute and tf_apply:
+            click.secho("plan changes for {}, applying".format(name), fg="yellow")
+        elif execute and destroy:
+            click.secho("plan changes for {}, destroying".format(name), fg="yellow")
+        elif not execute:
+            click.secho("no plan changes for {}".format(name), fg="yellow")
+            continue
+
+        try:
+            tf.run(
+                name,
+                obj.temp_dir,
+                terraform_bin,
+                plan_for,
+                obj.args.aws_access_key_id,
+                obj.args.aws_secret_access_key,
+                debug=show_output,
+            )
+        except tf.TerraformError:
+            click.secho(
+                "error with terraform {} on definition {}, exiting".format(
+                    plan_for, name
+                ),
+                fg="red",
+            )
         else:
             click.secho(
-                "Skipping terraform apply for all definitions (--no-apply)", fg="green"
+                "terraform {} complete for {}".format(plan_for, name), fg="green"
             )
-
-    if destroy:
-        for name, body in reversed(obj.config["terraform"]["definitions"].items()):
-            if limit and name not in limit:
-                continue
-            click.secho(
-                "Destroying infrastructure created by definition {}".format(name),
-                fg="green",
-            )
-            if not tf.run(
-                name,
-                body,
-                obj.temp_dir,
-                terraform_bin,
-                "destroy",
-                obj.args.aws_access_key_id,
-                obj.args.aws_secret_access_key,
-                debug=show_output,
-            ):
-                click.secho("Error destroying terraform on {}!".format(name), fg="red")
-    else:
-        click.secho(
-            "Skipping terraform destroy for all definitions (--no-destroy)", fg="green"
-        )
