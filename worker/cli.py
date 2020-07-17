@@ -7,7 +7,6 @@ import struct
 import click
 
 from . import terraform as tf
-from . import vault
 from .main import State, create_table, get_aws_id
 
 DEFAULT_CONFIG = "{}/worker.yaml".format(os.getcwd())
@@ -33,31 +32,6 @@ def validate_host():
         click.secho("worker can only be run on 64 bit hosts, in 64 bit mode", fg="red")
         raise SystemExit(2)
     return True
-
-
-def validate_keypair(pubkey, privkey, deployment, temp_dir, args):
-    """Validate the provided SSH key values, and their existence in vault."""
-    if pubkey is not None and privkey is None:
-        click.secho("must pass --ssh-private-key when you supply a public SSH key")
-        raise SystemExit(2)
-
-    if pubkey is None and privkey is not None:
-        click.secho("must pass --ssh-public-key when you supply a private SSH key")
-        raise SystemExit(2)
-
-    if pubkey is None and privkey is None:
-        # No keys were passed so check inside of vault
-        if not vault.check_keys(args.vault_address, args.vault_token, deployment):
-            # No keys in vault, so generate a pair and save them
-            pubkey, privkey = generate_keypair(temp_dir, deployment)
-            vault.store_keys(
-                args.vault_address, args.vault_token, deployment, pubkey, privkey
-            )
-    else:
-        # Keys were passed on the command line, overwrite what is in vault
-        vault.store_keys(
-            args.vault_address, args.vault_token, deployment, pubkey, privkey
-        )
 
 
 @click.group()
