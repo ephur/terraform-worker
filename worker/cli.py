@@ -251,6 +251,7 @@ def terraform(
                 "init",
                 obj.args.aws_access_key_id,
                 obj.args.aws_secret_access_key,
+                obj.args.aws_session_token,
                 debug=show_output,
             )
         except tf.TerraformError:
@@ -268,6 +269,7 @@ def terraform(
                 "plan",
                 obj.args.aws_access_key_id,
                 obj.args.aws_secret_access_key,
+                obj.args.aws_session_token,
                 debug=show_output,
                 plan_action=plan_for,
             )
@@ -295,6 +297,7 @@ def terraform(
                 plan_for,
                 obj.args.aws_access_key_id,
                 obj.args.aws_secret_access_key,
+                obj.args.aws_session_token,
                 debug=show_output,
             )
         except tf.TerraformError:
@@ -304,6 +307,7 @@ def terraform(
                 ),
                 fg="red",
             )
+            raise SystemExit(1)
         else:
             click.secho(
                 "terraform {} complete for {}".format(plan_for, name), fg="green"
