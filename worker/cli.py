@@ -76,6 +76,15 @@ def validate_keypair(pubkey, privkey, deployment, temp_dir, args):
     help="AWS access key secret",
 )
 @click.option(
+    "--aws-session-token",
+    required=False,
+    prompt=True,
+    hide_input=True,
+    envvar="AWS_SESSION_TOKEN",
+    help="AWS access key token",
+    default=""
+)
+@click.option(
     "--aws-region",
     envvar="AWS_DEFAULT_REGION",
     default=DEFAULT_AWS_REGION,
@@ -177,7 +186,7 @@ def terraform(
     obj.add_arg("terraform_bin", terraform_bin)
     obj.add_arg(
         "aws_account_id",
-        get_aws_id(obj.args.aws_access_key_id, obj.args.aws_secret_access_key),
+        get_aws_id(obj.args.aws_access_key_id, obj.args.aws_secret_access_key, obj.args.aws_session_token),
     )
 
     click.secho("loading config file {}".format(obj.args.config_file), fg="green")
@@ -195,7 +204,7 @@ def terraform(
         obj.args.state_region,
         obj.args.aws_access_key_id,
         obj.args.aws_secret_access_key,
-    )
+        obj.args.aws_session_token)
 
     # update mechanism for definitions
     # first determine apply/destroy

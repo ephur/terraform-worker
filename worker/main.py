@@ -57,13 +57,14 @@ class State(object):
         pass
 
 
-def create_table(name, region, key_id, key_secret, read_capacity=1, write_capacity=1):
+def create_table(name, region, key_id, key_secret, session_token, read_capacity=1, write_capacity=1):
     """Create a dynamodb table."""
     client = boto3.client(
         "dynamodb",
         region_name=region,
         aws_access_key_id=key_id,
         aws_secret_access_key=key_secret,
+        aws_session_token=session_token
     )
     tables = client.list_tables()
     table_key = "LockID"
@@ -88,10 +89,10 @@ def create_table(name, region, key_id, key_secret, read_capacity=1, write_capaci
         )
 
 
-def get_aws_id(key_id, key_secret):
+def get_aws_id(key_id, key_secret, session_token=None):
     """Return the AWS account ID."""
     client = boto3.client(
-        "sts", aws_access_key_id=key_id, aws_secret_access_key=key_secret
+        "sts", aws_access_key_id=key_id, aws_secret_access_key=key_secret, aws_session_token=session_token
     )
     return client.get_caller_identity()["Account"]
 
