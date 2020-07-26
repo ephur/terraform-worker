@@ -163,7 +163,6 @@ def make_vars(section, single, base=None):
 
     item_vars = copy.deepcopy(base.get(section, {}))
     for k, v in single.get(section, {}).items():
-        print("processing key: {}, value: {}")
         # terraform expects variables in a specific type, so need to convert bools to a lower case true/false
         matched_type = False
         if v is True:
@@ -244,6 +243,7 @@ def run(
     command,
     key_id,
     key_secret,
+    key_token=None,
     debug=False,
     plan_action="apply",
 ):
@@ -261,6 +261,8 @@ def run(
     env = os.environ.copy()
     env["AWS_ACCESS_KEY_ID"] = key_id
     env["AWS_SECRET_ACCESS_KEY"] = key_secret
+    if key_token is not None:
+        env['AWS_SESSION_TOKEN'] = key_token
     env["TF_PLUGIN_CACHE_DIR"] = "{}/terraform-plugins".format(temp_dir)
 
     working_dir = "{}/definitions/test/{}".format(temp_dir, name)
