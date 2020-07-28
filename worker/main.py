@@ -1,3 +1,17 @@
+# Copyright 2020 Richard Maynard (richard.maynard@gmail.com)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import os
 import re
 import shlex
@@ -57,14 +71,16 @@ class State(object):
         pass
 
 
-def create_table(name, region, key_id, key_secret, session_token, read_capacity=1, write_capacity=1):
+def create_table(
+    name, region, key_id, key_secret, session_token, read_capacity=1, write_capacity=1
+):
     """Create a dynamodb table."""
     client = boto3.client(
         "dynamodb",
         region_name=region,
         aws_access_key_id=key_id,
         aws_secret_access_key=key_secret,
-        aws_session_token=session_token
+        aws_session_token=session_token,
     )
     tables = client.list_tables()
     table_key = "LockID"
@@ -92,7 +108,10 @@ def create_table(name, region, key_id, key_secret, session_token, read_capacity=
 def get_aws_id(key_id, key_secret, session_token=None):
     """Return the AWS account ID."""
     client = boto3.client(
-        "sts", aws_access_key_id=key_id, aws_secret_access_key=key_secret, aws_session_token=session_token
+        "sts",
+        aws_access_key_id=key_id,
+        aws_secret_access_key=key_secret,
+        aws_session_token=session_token,
     )
     return client.get_caller_identity()["Account"]
 
