@@ -20,10 +20,10 @@ import struct
 
 import click
 
-from worker import terraform as tf
-from worker.main import State, create_table, get_aws_id
-from worker.providers.aws import aws_config, clean_bucket_state, clean_locking_state
-from worker.providers import StateError
+from tfworker import terraform as tf
+from tfworker.main import State, create_table, get_aws_id
+from tfworker.providers.aws import aws_config, clean_bucket_state, clean_locking_state
+from tfworker.providers import StateError
 
 DEFAULT_CONFIG = "{}/worker.yaml".format(os.getcwd())
 DEFAULT_REPOSITORY_PATH = "{}".format(os.getcwd())

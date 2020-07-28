@@ -25,7 +25,7 @@ from pathlib import Path
 import click
 import jinja2
 
-from .main import pipe_exec
+from tfworker.main import pipe_exec
 
 
 class TerraformError(Exception):
