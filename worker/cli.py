@@ -6,8 +6,10 @@ import struct
 
 import click
 
-from . import terraform as tf
-from .main import State, create_table, get_aws_id
+from worker import terraform as tf
+from worker.main import State, create_table, get_aws_id
+from worker.providers.aws import aws_config, clean_bucket_state, clean_locking_state
+from worker.providers import StateError
 
 DEFAULT_CONFIG = "{}/worker.yaml".format(os.getcwd())
 DEFAULT_REPOSITORY_PATH = "{}".format(os.getcwd())
@@ -52,11 +54,11 @@ def validate_host():
 @click.option(
     "--aws-session-token",
     required=False,
-    prompt=True,
+    # prompt=True,
     hide_input=True,
     envvar="AWS_SESSION_TOKEN",
     help="AWS access key token",
-    default=""
+    default="",
 )
 @click.option(
     "--aws-region",
@@ -91,6 +93,70 @@ def cli(context, **kwargs):
             "configuration file {} not found".format(config_file), fg="red", err=True
         )
         raise SystemExit(1)
+
+
+@cli.command()
+@click.option(
+    "--s3-bucket",
+    default=DEFAULT_S3_BUCKET,
+    help="The s3 bucket for storing terraform state",
+)
+@click.option(
+    "--s3-prefix",
+    default=DEFAULT_S3_PREFIX,
+    help="The prefix in the bucket for the definitions to use",
+)
+@click.option(
+    "--state-region",
+    default=DEFAULT_STATE_REGION,
+    help="AWS region where terraform state bucket exists",
+)
+@click.option("--limit", help="limit operations to a single definition", multiple=True)
+@click.argument("deployment", callback=validate_deployment)
+@click.pass_obj
+def clean(
+    obj, s3_bucket, s3_prefix, state_region, limit, deployment,
+):  # noqa: E501
+    """ clean up terraform state """
+    if s3_prefix == DEFAULT_S3_PREFIX:
+        s3_prefix = DEFAULT_S3_PREFIX.format(deployment=deployment)
+
+    obj.clean = clean
+    obj.add_arg("s3_bucket", s3_bucket)
+    obj.add_arg("s3_prefix", s3_prefix)
+
+    config = aws_config(
+        obj.args.aws_access_key_id,
+        obj.args.aws_secret_access_key,
+        obj.args.state_region,
+        obj.args.s3_bucket,
+        obj.args.s3_prefix,
+        deployment,
+        session_token=obj.args.aws_session_token,
+    )
+
+    # clean just items if limit supplied, or everything if no limit
+    if len(limit) > 0:
+        for limit_item in limit:
+            click.secho(
+                "when using limit, dynamodb tables won't be completely dropped",
+                fg="yellow",
+            )
+            try:
+                # the bucket state deployment is part of the s3 prefix
+                clean_bucket_state(config, definition=limit_item)
+                # deployment name needs specified to determine the dynamo table
+                clean_locking_state(config, deployment, definition=limit_item)
+            except StateError as e:
+                click.secho("error deleting state: {}".format(e), fg="red")
+                raise SystemExit(1)
+    else:
+        try:
+            clean_bucket_state(config)
+        except StateError as e:
+            click.secho("error deleting state: {}".format(e))
+            raise SystemExit(1)
+        clean_locking_state(config, deployment)
 
 
 @cli.command()
@@ -160,7 +226,11 @@ def terraform(
     obj.add_arg("terraform_bin", terraform_bin)
     obj.add_arg(
         "aws_account_id",
-        get_aws_id(obj.args.aws_access_key_id, obj.args.aws_secret_access_key, obj.args.aws_session_token),
+        get_aws_id(
+            obj.args.aws_access_key_id,
+            obj.args.aws_secret_access_key,
+            obj.args.aws_session_token,
+        ),
     )
 
     click.secho("loading config file {}".format(obj.args.config_file), fg="green")
@@ -178,7 +248,8 @@ def terraform(
         obj.args.state_region,
         obj.args.aws_access_key_id,
         obj.args.aws_secret_access_key,
-        obj.args.aws_session_token)
+        obj.args.aws_session_token,
+    )
 
     # update mechanism for definitions
     # first determine apply/destroy
