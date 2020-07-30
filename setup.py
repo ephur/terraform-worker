@@ -36,7 +36,7 @@ setup(
         "Programming Language :: Python :: 3.8",
         "Topic :: System :: Systems Administration",
     ],
-    entry_points={"console_scripts": ["worker=worker.cli:cli"]},
+    entry_points={"console_scripts": ["worker=tfworker.cli:cli"]},
     setup_requires=["flake8"],
     python_requires=">=3.6",
 )
