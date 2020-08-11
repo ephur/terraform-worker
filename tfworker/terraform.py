@@ -187,6 +187,7 @@ def make_vars(section, single, base=None):
             matched_type = True
         if not matched_type:
             item_vars[k] = v
+
     return item_vars
 
 

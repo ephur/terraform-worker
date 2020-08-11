@@ -2,23 +2,23 @@ import os
 
 import pytest
 
-import worker.main
+import tfworker.main
 
 
 class TestMain:
     def test_state_add_arg(self):
-        state = worker.main.State()
+        state = tfworker.main.State()
         state.add_arg("a", 1)
         assert state.args.a == 1
 
     def test_state_add_args(self):
-        state = worker.main.State()
+        state = tfworker.main.State()
         state.add_args({"a": 1, "b": "two"})
         assert state.args.a == 1
         assert state.args.b == "two"
 
     def test_state_init(self):
-        state = worker.main.State(args={"a": 1, "b": "two"})
+        state = tfworker.main.State(args={"a": 1, "b": "two"})
         assert state.args.a == 1
         assert state.args.b == "two"
 
@@ -63,7 +63,7 @@ class TestMain:
         ],
     )
     def test_run_pipe_exec(self, commands, exit_code, cwd, stdin, stdout, stderr):
-        (return_exit_code, return_stdout, return_stderr) = worker.main.pipe_exec(
+        (return_exit_code, return_stdout, return_stderr) = tfworker.main.pipe_exec(
             commands, cwd=cwd, stdin=stdin
         )
 
@@ -83,4 +83,4 @@ class TestMain:
         ],
     )
     def test_replace_vars(self, state, var, expected):
-        assert worker.main.replace_vars(var, state.args) == expected
+        assert tfworker.main.replace_vars(var, state.args) == expected

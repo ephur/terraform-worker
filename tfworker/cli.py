@@ -53,32 +53,44 @@ def validate_host():
 @click.group()
 @click.option(
     "--aws-access-key-id",
-    required=True,
+    required=False,
     envvar="AWS_ACCESS_KEY_ID",
     help="AWS Access key",
+    default=None,
 )
 @click.option(
     "--aws-secret-access-key",
-    required=True,
-    prompt=True,
-    hide_input=True,
+    required=False,
     envvar="AWS_SECRET_ACCESS_KEY",
     help="AWS access key secret",
+    default=None,
 )
 @click.option(
     "--aws-session-token",
     required=False,
-    # prompt=True,
-    hide_input=True,
     envvar="AWS_SESSION_TOKEN",
     help="AWS access key token",
-    default="",
+    default=None,
+)
+@click.option(
+    "--aws-role-arn",
+    envvar="AWS_ROLE_ARN",
+    help="If provided, credentials will be used to assume this role (complete ARN)",
+    default=None,
+    required=False,
 )
 @click.option(
     "--aws-region",
     envvar="AWS_DEFAULT_REGION",
     default=DEFAULT_AWS_REGION,
     help="AWS Region to build in",
+)
+@click.option(
+    "--aws-profile",
+    required=False,
+    envvar="AWS_PROFILE",
+    help="The AWS/Boto3 profile to use",
+    default=None,
 )
 @click.option(
     "--state-region",
@@ -120,16 +132,11 @@ def cli(context, **kwargs):
     default=DEFAULT_S3_PREFIX,
     help="The prefix in the bucket for the definitions to use",
 )
-@click.option(
-    "--state-region",
-    default=DEFAULT_STATE_REGION,
-    help="AWS region where terraform state bucket exists",
-)
 @click.option("--limit", help="limit operations to a single definition", multiple=True)
 @click.argument("deployment", callback=validate_deployment)
 @click.pass_obj
 def clean(
-    obj, s3_bucket, s3_prefix, state_region, limit, deployment,
+    obj, s3_bucket, s3_prefix, limit, deployment,
 ):  # noqa: E501
     """ clean up terraform state """
     if s3_prefix == DEFAULT_S3_PREFIX:
@@ -138,16 +145,7 @@ def clean(
     obj.clean = clean
     obj.add_arg("s3_bucket", s3_bucket)
     obj.add_arg("s3_prefix", s3_prefix)
-
-    config = aws_config(
-        obj.args.aws_access_key_id,
-        obj.args.aws_secret_access_key,
-        obj.args.state_region,
-        obj.args.s3_bucket,
-        obj.args.s3_prefix,
-        deployment,
-        session_token=obj.args.aws_session_token,
-    )
+    config = get_aws_config(obj, deployment)
 
     # clean just items if limit supplied, or everything if no limit
     if len(limit) > 0:
@@ -234,17 +232,18 @@ def terraform(
     # If the default value is used, render the deployment name into it
     if s3_prefix == DEFAULT_S3_PREFIX:
         s3_prefix = DEFAULT_S3_PREFIX.format(deployment=deployment)
+
     obj.clean = clean
     obj.add_arg("s3_bucket", s3_bucket)
     obj.add_arg("s3_prefix", s3_prefix)
     obj.add_arg("terraform_bin", terraform_bin)
+
+    # configuration for AWS interactions
+    config = get_aws_config(obj, deployment)
+
     obj.add_arg(
         "aws_account_id",
-        get_aws_id(
-            obj.args.aws_access_key_id,
-            obj.args.aws_secret_access_key,
-            obj.args.aws_session_token,
-        ),
+        get_aws_id(config.key_id, config.key_secret, config.session_token),
     )
 
     click.secho("loading config file {}".format(obj.args.config_file), fg="green")
@@ -259,18 +258,11 @@ def terraform(
     tf.prep_modules(obj.args.repository_path, obj.temp_dir)
     create_table(
         "terraform-{}".format(deployment),
-        obj.args.state_region,
-        obj.args.aws_access_key_id,
-        obj.args.aws_secret_access_key,
-        obj.args.aws_session_token,
+        config.state_region,
+        config.key_id,
+        config.key_secret,
+        config.session_token,
     )
-
-    # update mechanism for definitions
-    # first determine apply/destroy
-    # fix order
-    # plan for apply/destroy
-    # only execute apply/destroy if plan succeeds
-    # fail / exit on any error
 
     tf_items = []
 
@@ -308,9 +300,9 @@ def terraform(
                 obj.temp_dir,
                 terraform_bin,
                 "init",
-                obj.args.aws_access_key_id,
-                obj.args.aws_secret_access_key,
-                obj.args.aws_session_token,
+                config.key_id,
+                config.key_secret,
+                key_token=config.session_token,
                 debug=show_output,
             )
         except tf.TerraformError:
@@ -326,9 +318,9 @@ def terraform(
                 obj.temp_dir,
                 terraform_bin,
                 "plan",
-                obj.args.aws_access_key_id,
-                obj.args.aws_secret_access_key,
-                obj.args.aws_session_token,
+                config.key_id,
+                config.key_secret,
+                key_token=config.session_token,
                 debug=show_output,
                 plan_action=plan_for,
             )
@@ -354,9 +346,9 @@ def terraform(
                 obj.temp_dir,
                 terraform_bin,
                 plan_for,
-                obj.args.aws_access_key_id,
-                obj.args.aws_secret_access_key,
-                obj.args.aws_session_token,
+                config.key_id,
+                config.key_secret,
+                key_token=config.session_token,
                 debug=show_output,
             )
         except tf.TerraformError:
@@ -371,3 +363,34 @@ def terraform(
             click.secho(
                 "terraform {} complete for {}".format(plan_for, name), fg="green"
             )
+
+
+def get_aws_config(obj, deployment):
+    """ returns an aws_config based on the paramenters sent to CLI """
+    # build params for aws_config based on inputs
+
+    config_args = dict()
+    if obj.args.aws_access_key_id is not None:
+        config_args["key_id"] = obj.args.aws_access_key_id
+
+    if obj.args.aws_secret_access_key is not None:
+        config_args["key_secret"] = obj.args.aws_secret_access_key
+
+    if obj.args.aws_session_token is not None:
+        config_args["session_token"] = obj.args.aws_session_token
+
+    if obj.args.aws_profile is not None:
+        config_args["aws_profile"] = obj.args.aws_profile
+
+    if obj.args.aws_role_arn is not None:
+        config_args["role_arn"] = obj.args.aws_role_arn
+
+    config = aws_config(
+        obj.args.aws_region,
+        obj.args.state_region,
+        deployment,
+        obj.args.s3_bucket,
+        obj.args.s3_prefix,
+        **config_args
+    )
+    return config
