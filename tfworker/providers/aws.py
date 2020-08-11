@@ -18,8 +18,9 @@ Currently, only AWS is supported, however this provides a model to implement oth
 providers in the future for things like the remote state store, etc...
 """
 from contextlib import closing
-from worker.providers import StateError, validate_state_empty
+from tfworker.providers import StateError, validate_state_empty
 import boto3
+
 import json
 import click
 
@@ -27,33 +28,77 @@ import click
 class aws_config(object):
     """
     aws_config provides an object to hold the required configuration needed for AWS
-    provider options
+    provider options. This current holds extra attributes in order to expose session
+    credentials to terraform.
     """
 
     def __init__(
         self,
-        key_id,
-        key_secret,
         region,
+        state_region,
+        deployment,
         state_bucket,
         state_prefix,
-        deployment,
+        key_id=None,
+        key_secret=None,
         session_token=None,
+        aws_profile=None,
+        role_arn=None,
     ):
         self.__key_secret = key_secret
         self.__key_id = key_id
         self.__region = region
+        self.__state_region = state_region
+        self.__deployment = deployment
+        self.__session_token = session_token
         self.__state_bucket = state_bucket
         self.__state_prefix = state_prefix
-        self.__session_token = session_token
-        self.__deployment = deployment
 
-        self.__session = boto3.Session(
-            aws_access_key_id=self.__key_id,
-            aws_secret_access_key=self.__key_secret,
-            aws_session_token=self.__session_token,
-            region_name=self.__region,
-        )
+        session_args = dict()
+
+        if aws_profile is not None:
+            session_args["profile_name"] = aws_profile
+
+        if key_id is not None:
+            session_args["aws_access_key_id"] = key_id
+
+        if key_secret is not None:
+            session_args["aws_secret_access_key"] = key_secret
+
+        if session_token is not None:
+            session_args["aws_session_token"] = session_token
+
+        # create the base boto session
+        self.__session = boto3.Session(region_name=self.__region, **session_args)
+
+        # handle cases for assuming the role, and create a session for the state region
+        if role_arn is None:
+            # if a role was not provided, need to ensure credentials are set in the config, these will come from the session
+            self.__key_id = self.__session.get_credentials().access_key
+            self.__key_secret = self.__session.get_credentials().secret_key
+            self.__session_token = self.__session.get_credentials().token
+
+            if state_region == region:
+                self.__state_session = self.__session
+            else:
+                self.__state_session = boto3.Session(
+                    region_name=self.__state_region, **session_args
+                )
+        else:
+            (self.__session, creds) = get_assumed_role_session(self.__session, role_arn)
+            self.__key_id = creds["AccessKeyId"]
+            self.__key_secret = creds["SecretAccessKey"]
+            self.__session_token = creds["SessionToken"]
+
+            if state_region == region:
+                self.__state_session = self.__session
+            else:
+                self.__state_session = boto3.Session(
+                    region_name=self.__state_region,
+                    aws_access_key_id=self.__key_id,
+                    aws_secret_access_key=self.__key_secret,
+                    aws_session_token=self.__session_token,
+                )
 
     @property
     def key_secret(self):
@@ -80,12 +125,20 @@ class aws_config(object):
         return self.__region
 
     @property
+    def state_region(self):
+        return self.__state_region
+
+    @property
     def deployment(self):
         return self.__deployment
 
     @property
     def session(self):
         return self.__session
+
+    @property
+    def state_session(self):
+        return self.__state_session
 
 
 def clean_bucket_state(config, definition=None):
@@ -97,17 +150,8 @@ def clean_bucket_state(config, definition=None):
     to a single definition
     """
 
-    # get a list of all objects
-    # if definition is not none, check if state matches definition
-    # validate state is empty
-    # remove state file/prefix from S3 (including all previous versions?)
-    # s3 = config.session.resource("s3")
-    # bucket = s3.Bucket(config.state_bucket)
-    # for s3_file in bucket.objects.all():
-    #     print(s3_file.key)
-
-    s3_paginator = config.session.client("s3").get_paginator("list_objects_v2")
-    s3_client = config.session.client("s3")
+    s3_paginator = config.state_session.client("s3").get_paginator("list_objects_v2")
+    s3_client = config.state_session.client("s3")
     if definition is None:
         prefix = config.state_prefix
     else:
@@ -132,7 +176,7 @@ def clean_locking_state(config, deployment, definition=None):
     that holds all of the state checksums and locking table
     entries
     """
-    dynamo_client = config.session.resource("dynamodb")
+    dynamo_client = config.state_session.resource("dynamodb")
 
     if definition is None:
         table = dynamo_client.Table("terraform-{}".format(deployment))
@@ -157,11 +201,14 @@ def filter_keys(paginator, bucket_name, prefix="/", delimiter="/", start_after="
 
     prefix = prefix[1:] if prefix.startswith(delimiter) else prefix
     start_after = (start_after or prefix) if prefix.endswith(delimiter) else start_after
-    for page in paginator.paginate(
-        Bucket=bucket_name, Prefix=prefix, StartAfter=start_after
-    ):
-        for content in page.get("Contents", ()):
-            yield content["Key"]
+    try:
+        for page in paginator.paginate(
+            Bucket=bucket_name, Prefix=prefix, StartAfter=start_after
+        ):
+            for content in page.get("Contents", ()):
+                yield content["Key"]
+    except TypeError:
+        pass
 
 
 def delete_with_versions(config, key):
@@ -171,8 +218,26 @@ def delete_with_versions(config, key):
     note: in initial testing this isn't required, but is inconsistent with how S3 delete markers, and the boto
     delete object call work there may be some configurations that require extra handling.
     """
-    s3_client = config.session.client("s3")
+    s3_client = config.state_session.client("s3")
     s3_client.delete_object(Bucket=config.state_bucket, Key=key)
+
+
+def get_assumed_role_session(
+    session, role_arn, session_name="AssumedRoleSession1", duration=3600
+):
+    """ get_assumed_role_session returns a boto3 session updated with assumed role credentials """
+    sts_client = session.client("sts")
+    role_creds = sts_client.assume_role(
+        RoleArn=role_arn, RoleSessionName=session_name, DurationSeconds=duration
+    )["Credentials"]
+
+    new_session = boto3.Session(
+        aws_access_key_id=role_creds["AccessKeyId"],
+        aws_secret_access_key=role_creds["SecretAccessKey"],
+        aws_session_token=role_creds["SessionToken"],
+    )
+
+    return new_session, role_creds
 
 
 def unlock_state(config, definition):
