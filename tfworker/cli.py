@@ -184,6 +184,12 @@ def clean(
     help="apply the terraform configuration",
 )
 @click.option(
+    "--force-apply/--no-force-apply",
+    "force_apply",
+    default=False,
+    help="force apply without plan change",
+)
+@click.option(
     "--destroy/--no-destroy",
     default=False,
     help="destroy a deployment instead of create it",
@@ -208,6 +214,12 @@ def clean(
     default=DEFAULT_TERRFORM,
     help="The complate location of the terraform binary",
 )
+@click.option(
+    "--b64-encode-hook-values/--no--b64-encode-hook-values",
+    "b64_encode",
+    default=False,
+    help="Terraform variables and outputs can be complex data structures, setting this open will base64 encode the values for use in hook scripts",
+)
 @click.option("--limit", help="limit operations to a single definition", multiple=True)
 @click.argument("deployment", callback=validate_deployment)
 @click.pass_obj
@@ -215,11 +227,13 @@ def terraform(
     obj,
     clean,
     tf_apply,
+    force_apply,
     destroy,
     show_output,
     s3_bucket,
     s3_prefix,
     terraform_bin,
+    b64_encode,
     limit,
     deployment,
 ):  # noqa: E501
@@ -323,6 +337,7 @@ def terraform(
                 key_token=config.session_token,
                 debug=show_output,
                 plan_action=plan_for,
+                b64_encode=b64_encode,
             )
         except tf.PlanChange:
             execute = True
@@ -332,8 +347,14 @@ def terraform(
             )
             raise SystemExit(1)
 
+        if force_apply:
+            execute = True
+
         if execute and tf_apply:
-            click.secho("plan changes for {}, applying".format(name), fg="yellow")
+            if force_apply:
+                click.secho("force apply for {}, applying".format(name), fg="yellow")
+            else:
+                click.secho("plan changes for {}, applying".format(name), fg="yellow")
         elif execute and destroy:
             click.secho("plan changes for {}, destroying".format(name), fg="yellow")
         elif not execute:
@@ -350,6 +371,7 @@ def terraform(
                 config.key_secret,
                 key_token=config.session_token,
                 debug=show_output,
+                b64_encode=b64_encode,
             )
         except tf.TerraformError:
             click.secho(
