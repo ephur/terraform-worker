@@ -299,7 +299,7 @@ def run(
             )
         )
 
-    # only execute hooks for plan/destroy
+    # only execute hooks for apply/destroy
     try:
         if check_hooks("pre", working_dir, command) and command in ["apply", "destroy"]:
             # pre exec hooks
@@ -420,6 +420,7 @@ def hook_exec(
     val_replace_items = {
         " ": "",
         '"': "",
+        "\n": "",
     }
     local_env = env.copy()
     hook_dir = "{}/hooks".format(working_dir)
@@ -454,10 +455,14 @@ def hook_exec(
                     working_dir, env, terraform_path, state, state_item
                 )
 
-                if b64_encode:
-                    state_value = base64.b64encode(state_value.encode("utf-8")).decode()
-
-                local_env["TF_REMOTE_{}_{}".format(state, item).upper()] = state_value
+                if state_value is not None:
+                    if b64_encode:
+                        state_value = base64.b64encode(
+                            state_value.encode("utf-8")
+                        ).decode()
+                    local_env[
+                        "TF_REMOTE_{}_{}".format(state, item).upper()
+                    ] = state_value
 
     # populate environment with terraform remotes
     if os.path.isfile("{}/worker.auto.tfvars".format(working_dir)):
@@ -503,11 +508,17 @@ def get_state_item(working_dir, env, terraform_path, state, item):
     get_state_item returns json encoded output from a terraform remote state
     """
     base_dir, _ = os.path.split(working_dir)
-    (exit_code, stdout, stderr) = pipe_exec(
-        "{} output -json -no-color {}".format(terraform_path, item),
-        cwd="{}/{}".format(base_dir, state),
-        env=env,
-    )
+    try:
+        (exit_code, stdout, stderr) = pipe_exec(
+            "{} output -json -no-color {}".format(terraform_path, item),
+            cwd="{}/{}".format(base_dir, state),
+            env=env,
+        )
+    except FileNotFoundError:
+        # the remote state is not setup, likely do to use of --limit
+        # this is acceptable, and is the responsibility of the hook
+        # to ensure it has all values needed for safe execution
+        return None
 
     if exit_code != 0:
         raise HookError(
