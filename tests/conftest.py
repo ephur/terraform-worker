@@ -2,12 +2,13 @@ import os
 
 import pytest
 
-import worker
+import tfworker
+import tfworker.main
 
 
 @pytest.fixture
 def state():
-    state = worker.main.State(
+    state = tfworker.main.State(
         args={
             "aws_access_key_id": "1234567890",
             "aws_secret_access_key": "1234567890",
