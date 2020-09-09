@@ -5,16 +5,16 @@ from unittest import mock
 
 import pytest
 
-import worker.terraform
+import tfworker.terraform
 
 
 def mock_pipe_exec(args, stdin=None, cwd=None, env=None):
-    return ("0", "".encode(), "".encode())
+    return (0, "".encode(), "".encode())
 
 
 class TestTerraform:
     def test_prep_modules(self, state):
-        worker.terraform.prep_modules(state.args.repository_path, state.temp_dir)
+        tfworker.terraform.prep_modules(state.args.repository_path, state.temp_dir)
         for test_file in [
             "/terraform-modules/test_a/test.tf",
             "/terraform-modules/test_b/test.tf",
@@ -29,7 +29,7 @@ class TestTerraform:
         )
         state.load_config(test_config_file)
         body = state.config["terraform"]["definitions"]["test"]
-        worker.terraform.prep_def(
+        tfworker.terraform.prep_def(
             "test",
             body,
             state.config["terraform"],
@@ -39,12 +39,12 @@ class TestTerraform:
             state.args,
         )
         # File contents of rendered files are not tested, the rendering functions are tested in other tests
-        assert os.path.isfile(state.temp_dir + "/definitions/test_a/test.tf")
-        assert os.path.isfile(state.temp_dir + "/definitions/test_a/terraform.tf")
-        assert os.path.isfile(state.temp_dir + "/definitions/test_a/worker.auto.tfvars")
+        assert os.path.isfile(state.temp_dir + "/definitions/test/test.tf")
+        assert os.path.isfile(state.temp_dir + "/definitions/test/terraform.tf")
+        assert os.path.isfile(state.temp_dir + "/definitions/test/worker.auto.tfvars")
 
     def test_plugin_download(self, state):
-        worker.terraform.download_plugins({"aws": {"version": "1.9.0"}}, state.temp_dir)
+        tfworker.terraform.download_plugins({"aws": {"version": "1.9.0"}}, state.temp_dir)
         files = glob.glob(
             "{}/terraform-plugins/terraform-provider-aws_v1.9.0*".format(state.temp_dir)
         )
@@ -58,7 +58,7 @@ class TestTerraform:
         [({"terraform_vars": {"c": 1}}, 3), ({"miss": {"c": "bad_val"}}, 3), (None, 3)],
     )
     def test_make_vars(self, definition, base, expected):
-        test_vars = worker.terraform.make_vars(
+        test_vars = tfworker.terraform.make_vars(
             "terraform_vars", definition["test"], base
         )
         assert test_vars["c"] == expected
@@ -66,7 +66,7 @@ class TestTerraform:
     def test_render_remote_state(self, definition, state):
         deployment = state.args.deployment
         name = "test"
-        render = worker.terraform.render_remote_state(name, deployment, state.args)
+        render = tfworker.terraform.render_remote_state(name, deployment, state.args)
         expected_render = """terraform {
   backend "s3" {
     region = "us-west-2"
@@ -79,22 +79,22 @@ class TestTerraform:
         assert render == expected_render
 
     def test_render_remote_data_sources(self, all_definitions, state):
-        render = worker.terraform.render_remote_data_sources(
-            all_definitions, "test", state.args
+        render = tfworker.terraform.render_remote_data_sources(
+            all_definitions, "test2", state.args
         )
-        expected_render = """data "terraform_remote_state" "test2" {
+        expected_render = """data "terraform_remote_state" "test" {
   backend = "s3"
-  config {
+  config = {
     region = "us-west-2"
     bucket = "test_s3_bucket"
-    key = "terraform/test-0001/test2/terraform.tfstate"
+    key = "terraform/test-0001/test/terraform.tfstate"
   }
 }
 """
         assert render == expected_render
 
     def test_render_providers(self, providers, state):
-        render = worker.terraform.render_providers(providers, state.args)
+        render = tfworker.terraform.render_providers(providers, state.args)
         expected_render = """provider "aws" {
   version = "1.3.37"
 }"""
@@ -103,13 +103,11 @@ class TestTerraform:
     @pytest.mark.parametrize("method", ["init", "plan", "apply"])
     def test_run(self, definition, state, method):
         with mock.patch(
-            "worker.terraform.pipe_exec", side_effect=mock_pipe_exec
+            "tfworker.terraform.pipe_exec", side_effect=mock_pipe_exec
         ) as mocked:
             name = "test"
-            body = definition[name]
-            worker.terraform.run(
+            tfworker.terraform.run(
                 name,
-                body,
                 "/tmp",
                 "/usr/local/bin/terraform",
                 method,
