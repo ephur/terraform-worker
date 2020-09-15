@@ -66,7 +66,7 @@ class TestTerraform:
     def test_render_remote_state(self, definition, state):
         deployment = state.args.deployment
         name = "test"
-        render = tfworker.terraform.render_remote_state(name, deployment, state.args)
+        render = tfworker.terraform.render_remote_state(name, deployment, state.args, "aws")
         expected_render = """terraform {
   backend "s3" {
     region = "us-west-2"

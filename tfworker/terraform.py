@@ -43,6 +43,12 @@ class HookError(Exception):
     pass
 
 
+class Providers:
+    aws = "aws"
+    google = "google"
+    vault = "vault"
+
+
 def download_plugins(plugins, temp_dir):
     """
     Download the required plugins.
@@ -161,7 +167,8 @@ def prep_def(name, definition, all_defs, temp_dir, repo_path, deployment, args):
             tflocals.write("}\n\n")
 
     # Create the terraform configuration, terraform.tf
-    state = render_remote_state(name, deployment, args)
+    for provider in all_defs["providers"]:
+        state = render_remote_state(name, deployment, args, provider)
     remote_data = render_remote_data_sources(all_defs["definitions"], name, args)
     providers = render_providers(all_defs["providers"], args)
     with open("{}/{}".format(str(target), "terraform.tf"), "w+") as tffile:
@@ -205,10 +212,24 @@ def quote_str(string):
     return '"{}"'.format(string)
 
 
-def render_remote_state(name, deployment, args):
-    """Return remote for the definition."""
+def render_remote_state(name, deployment, args, provider):
+    """Route remote state bit based on provider """
     state_config = []
     state_config.append("terraform {")
+    if provider in [Providers.aws, Providers.vault]:
+        content = render_remote_state_s3(name, deployment, args)
+    elif provider == Providers.google:
+        content = render_remote_state_gcp(name, deployment, args)
+    else:
+        raise Exception(f"Unable to reconcile backend: {provider}")
+    state_config.append(content)
+    state_config.append("}")
+    return "\n".join(state_config)
+
+
+def render_remote_state_s3(name, deployment, args):
+    """Return remote for the definition."""
+    state_config = []
     state_config.append('  backend "s3" {')
     state_config.append('    region = "{}"'.format(args.state_region))
     state_config.append('    bucket = "{}"'.format(args.s3_bucket))
@@ -218,7 +239,16 @@ def render_remote_state(name, deployment, args):
     state_config.append('    dynamodb_table = "terraform-{}"'.format(deployment))
     state_config.append('    encrypt = "true"')
     state_config.append("  }")
-    state_config.append("}")
+    return "\n".join(state_config)
+
+
+def render_remote_state_gcp(name, deployment, args):
+    """Return remote for the definition."""
+    state_config = []
+    state_config.append('  backend "gcs" {')
+    state_config.append('    bucket = "{}"'.format(args.gcp_bucket))
+    state_config.append('    prefix = "{}"'.format(args.gcp_prefix))
+    state_config.append("  }")
     return "\n".join(state_config)
 
 
@@ -265,8 +295,8 @@ def run(
     temp_dir,
     terraform_path,
     command,
-    key_id,
-    key_secret,
+    key_id=None,
+    key_secret=None,
     key_token=None,
     debug=False,
     plan_action="apply",

@@ -25,11 +25,14 @@ from tfworker.main import State, create_table, get_aws_id
 from tfworker.providers.aws import aws_config, clean_bucket_state, clean_locking_state
 from tfworker.providers import StateError
 
+DEFAULT_GCP_BUCKET = "tfworker-terraform-states"
 DEFAULT_CONFIG = "{}/worker.yaml".format(os.getcwd())
+DEFAULT_GCP_PREFIX = "terraform/state/{deployment}"
 DEFAULT_REPOSITORY_PATH = "{}".format(os.getcwd())
-DEFAULT_S3_BUCKET = "launchpad-terraform-states"
+DEFAULT_S3_BUCKET = "tfworker-terraform-states"
 DEFAULT_S3_PREFIX = "terraform/state/{deployment}"
 DEFAULT_AWS_REGION = "us-west-2"
+DEFAULT_GCP_REGION = "us-west2b"
 DEFAULT_STATE_REGION = "us-west-2"
 DEFAULT_TERRFORM = "/usr/local/bin/terraform"
 
@@ -98,6 +101,25 @@ def validate_host():
     help="AWS region where terraform state bucket exists",
 )
 @click.option(
+    "--gcp-region",
+    envvar="GCP_REGION",
+    default=DEFAULT_GCP_REGION,
+    help="Region to build in",
+)
+@click.option(
+    "--gcp-creds-path",
+    required=False,
+    envvar="GCP_CREDS_PATH",
+    help="Relative path to the credentials JSON file for the service account to be used.",
+    default=None,
+)
+@click.option(
+    "--gcp-project",
+    envvar="GCP_PROJECT",
+    help="GCP project name to which work will be applied",
+    default=None,
+)
+@click.option(
     "--config-file", default=DEFAULT_CONFIG, envvar="WORKER_CONFIG_FILE", required=True
 )
 @click.option(
@@ -105,7 +127,7 @@ def validate_host():
     default=DEFAULT_REPOSITORY_PATH,
     envvar="WORKER_REPOSITORY_PATH",
     required=True,
-    help="The path to the k8s-infra repository",
+    help="The path to the terraform module repository",
 )
 @click.pass_context
 def cli(context, **kwargs):
@@ -123,6 +145,16 @@ def cli(context, **kwargs):
 
 @cli.command()
 @click.option(
+    "--gcp-bucket",
+    default=DEFAULT_GCP_BUCKET,
+    help="The Cloud Storage bucket for storing terraform state/locks",
+)
+@click.option(
+    "--gcp-prefix",
+    default=DEFAULT_GCP_PREFIX,
+    help="The prefix in the bucket for the definitions to use",
+)
+@click.option(
     "--s3-bucket",
     default=DEFAULT_S3_BUCKET,
     help="The s3 bucket for storing terraform state",
@@ -136,13 +168,18 @@ def cli(context, **kwargs):
 @click.argument("deployment", callback=validate_deployment)
 @click.pass_obj
 def clean(
-    obj, s3_bucket, s3_prefix, limit, deployment,
+    obj, gcp_bucket, gcp_prefix, s3_bucket, s3_prefix, limit, deployment,
 ):  # noqa: E501
     """ clean up terraform state """
     if s3_prefix == DEFAULT_S3_PREFIX:
         s3_prefix = DEFAULT_S3_PREFIX.format(deployment=deployment)
 
+    if prefix == DEFAULT_GCP_PREFIX:
+        prefix = DEFAULT_GCP_PREFIX.format(deployment=deployment)
+
     obj.clean = clean
+    obj.add_arg("gcp_bucket", gcp_bucket)
+    obj.add_arg("gcp_prefix", gcp_prefix)
     obj.add_arg("s3_bucket", s3_bucket)
     obj.add_arg("s3_prefix", s3_prefix)
     config = get_aws_config(obj, deployment)
@@ -200,6 +237,16 @@ def clean(
     help="shot output from terraform commands",
 )
 @click.option(
+    "--gcp-bucket",
+    default=DEFAULT_GCP_BUCKET,
+    help="The s3 bucket for storing terraform state",
+)
+@click.option(
+    "--gcp-prefix",
+    default=DEFAULT_GCP_PREFIX,
+    help="The prefix in the bucket for the definitions to use",
+)
+@click.option(
     "--s3-bucket",
     default=DEFAULT_S3_BUCKET,
     help="The s3 bucket for storing terraform state",
@@ -230,6 +277,8 @@ def terraform(
     force_apply,
     destroy,
     show_output,
+    gcp_bucket,
+    gcp_prefix,
     s3_bucket,
     s3_prefix,
     terraform_bin,
@@ -242,6 +291,9 @@ def terraform(
         click.secho("can not apply and destroy at the same time", fg="red")
         raise SystemExit(1)
     plan_for = "apply"
+
+    if gcp_prefix == DEFAULT_GCP_PREFIX:
+        gcp_prefix = DEFAULT_GCP_PREFIX.format(deployment=deployment)
 
     # If the default value is used, render the deployment name into it
     if s3_prefix == DEFAULT_S3_PREFIX:
@@ -259,6 +311,9 @@ def terraform(
         "aws_account_id",
         get_aws_id(config.key_id, config.key_secret, config.session_token),
     )
+
+    obj.add_arg("gcp_bucket", gcp_bucket)
+    obj.add_arg("gcp_prefix", gcp_prefix)
 
     click.secho("loading config file {}".format(obj.args.config_file), fg="green")
     obj.load_config(obj.args.config_file)
@@ -314,8 +369,8 @@ def terraform(
                 obj.temp_dir,
                 terraform_bin,
                 "init",
-                config.key_id,
-                config.key_secret,
+                key_id=config.key_id,
+                key_secret=config.key_secret,
                 key_token=config.session_token,
                 debug=show_output,
             )
@@ -332,8 +387,8 @@ def terraform(
                 obj.temp_dir,
                 terraform_bin,
                 "plan",
-                config.key_id,
-                config.key_secret,
+                key_id=config.key_id,
+                key_secret=config.key_secret,
                 key_token=config.session_token,
                 debug=show_output,
                 plan_action=plan_for,
@@ -416,3 +471,7 @@ def get_aws_config(obj, deployment):
         **config_args
     )
     return config
+
+
+if __name__ == '__main__':
+    cli()

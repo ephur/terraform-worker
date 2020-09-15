@@ -45,10 +45,10 @@ class TestMain:
     @pytest.mark.parametrize(
         "commands, exit_code, cwd, stdin, stdout, stderr",
         [
-            ("/bin/true", 0, None, None, "", ""),
-            ("/bin/false", 1, None, None, "", ""),
+            ("/usr/bin/true", 0, None, None, "", ""),
+            ("/usr/bin/false", 1, None, None, "", ""),
             ("/bin/echo foo", 0, None, None, "foo", ""),
-            ("/bin/grep foo", 0, None, "foo", "foo", ""),
+            ("/usr/bin/grep foo", 0, None, "foo", "foo", ""),
             ("/bin/pwd", 0, "/tmp", None, "/tmp", ""),
             (
                 "/bin/cat /yisohwo0AhK8Ah ",
@@ -58,8 +58,8 @@ class TestMain:
                 "",
                 "/bin/cat: /yisohwo0AhK8Ah: No such file or directory",
             ),
-            (["/bin/echo foo", "/bin/grep foo"], 0, None, None, "foo", ""),
-            (["/bin/echo foo", "/bin/grep bar"], 1, None, None, "", ""),
+            (["/bin/echo foo", "/usr/bin/grep foo"], 0, None, None, "foo", ""),
+            (["/bin/echo foo", "/usr/bin/grep bar"], 1, None, None, "", ""),
         ],
     )
     def test_run_pipe_exec(self, commands, exit_code, cwd, stdin, stdout, stderr):
@@ -68,8 +68,8 @@ class TestMain:
         )
 
         assert return_exit_code == exit_code
-        assert return_stdout.rstrip() == stdout.encode()
-        assert return_stderr.rstrip() == stderr.encode()
+        assert stdout.encode() in return_stdout.rstrip()
+        assert return_stderr.rstrip() in stderr.encode()
 
     @pytest.mark.parametrize(
         "var, expected",
