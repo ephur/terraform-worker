@@ -299,24 +299,38 @@ def terraform(
     if s3_prefix == DEFAULT_S3_PREFIX:
         s3_prefix = DEFAULT_S3_PREFIX.format(deployment=deployment)
 
-    obj.clean = clean
-    obj.add_arg("s3_bucket", s3_bucket)
-    obj.add_arg("s3_prefix", s3_prefix)
-    obj.add_arg("terraform_bin", terraform_bin)
-
-    # configuration for AWS interactions
-    config = get_aws_config(obj, deployment)
-
-    obj.add_arg(
-        "aws_account_id",
-        get_aws_id(config.key_id, config.key_secret, config.session_token),
-    )
-
-    obj.add_arg("gcp_bucket", gcp_bucket)
-    obj.add_arg("gcp_prefix", gcp_prefix)
-
     click.secho("loading config file {}".format(obj.args.config_file), fg="green")
     obj.load_config(obj.args.config_file)
+
+    providers = obj.config["terraform"]["providers"].keys()
+
+    obj.clean = clean
+    obj.add_arg("terraform_bin", terraform_bin)
+
+    obj.add_arg("s3_bucket", s3_bucket)
+    obj.add_arg("s3_prefix", s3_prefix)
+
+    # configuration for AWS interactions
+    _aws_config = get_aws_config(obj, deployment)
+
+    if tf.Providers.aws in providers:
+        obj.add_arg(
+            "aws_account_id",
+            get_aws_id(_aws_config.key_id, _aws_config.key_secret, _aws_config.session_token),
+        )
+
+        # Create locking table for aws backend
+        create_table(
+            "terraform-{}".format(deployment),
+            _aws_config.state_region,
+            _aws_config.key_id,
+            _aws_config.key_secret,
+            _aws_config.session_token,
+        )
+
+    if tf.Providers.google in providers:
+        obj.add_arg("gcp_bucket", gcp_bucket)
+        obj.add_arg("gcp_prefix", gcp_prefix)
 
     click.secho("building deployment {}".format(deployment), fg="green")
     click.secho("using temporary Directory:{}".format(obj.temp_dir), fg="yellow")
@@ -325,14 +339,6 @@ def terraform(
     click.secho("downloading plugins", fg="green")
     tf.download_plugins(obj.config["terraform"]["plugins"], obj.temp_dir)
     tf.prep_modules(obj.args.repository_path, obj.temp_dir)
-    create_table(
-        "terraform-{}".format(deployment),
-        config.state_region,
-        config.key_id,
-        config.key_secret,
-        config.session_token,
-    )
-
     tf_items = []
 
     # setup tf_items to capture the limit/order based on options
@@ -369,9 +375,9 @@ def terraform(
                 obj.temp_dir,
                 terraform_bin,
                 "init",
-                key_id=config.key_id,
-                key_secret=config.key_secret,
-                key_token=config.session_token,
+                key_id=_aws_config.key_id,
+                key_secret=_aws_config.key_secret,
+                key_token=_aws_config.session_token,
                 debug=show_output,
             )
         except tf.TerraformError:
@@ -387,9 +393,9 @@ def terraform(
                 obj.temp_dir,
                 terraform_bin,
                 "plan",
-                key_id=config.key_id,
-                key_secret=config.key_secret,
-                key_token=config.session_token,
+                key_id=_aws_config.key_id,
+                key_secret=_aws_config.key_secret,
+                key_token=_aws_config.session_token,
                 debug=show_output,
                 plan_action=plan_for,
                 b64_encode=b64_encode,
@@ -422,9 +428,9 @@ def terraform(
                 obj.temp_dir,
                 terraform_bin,
                 plan_for,
-                config.key_id,
-                config.key_secret,
-                key_token=config.session_token,
+                key_id=_aws_config.key_id,
+                key_secret=_aws_config.key_secret,
+                key_token=_aws_config.session_token,
                 debug=show_output,
                 b64_encode=b64_encode,
             )
