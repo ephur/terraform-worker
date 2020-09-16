@@ -167,10 +167,15 @@ def prep_def(name, definition, all_defs, temp_dir, repo_path, deployment, args):
             tflocals.write("}\n\n")
 
     # Create the terraform configuration, terraform.tf
+    # Iterate provd
+    states = []
     for provider in all_defs["providers"]:
-        state = render_remote_state(name, deployment, args, provider)
+        states.append(render_remote_state(name, deployment, args, provider))
+    state = "\n".join(states)
+
     remote_data = render_remote_data_sources(all_defs["definitions"], name, args)
     providers = render_providers(all_defs["providers"], args)
+
     with open("{}/{}".format(str(target), "terraform.tf"), "w+") as tffile:
         tffile.write("{}\n\n".format(providers))
         tffile.write("{}\n\n".format(state))
@@ -248,6 +253,8 @@ def render_remote_state_gcp(name, deployment, args):
     state_config.append('  backend "gcs" {')
     state_config.append('    bucket = "{}"'.format(args.gcp_bucket))
     state_config.append('    prefix = "{}"'.format(args.gcp_prefix))
+    if args.gcp_creds_path:
+        state_config.append('    credentials = "{}"'.format(args.gcp_creds_path))
     state_config.append("  }")
     return "\n".join(state_config)
 
