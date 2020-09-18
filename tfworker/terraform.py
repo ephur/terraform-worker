@@ -169,6 +169,7 @@ def prep_def(name, definition, all_defs, temp_dir, repo_path, deployment, args):
     # Create the terraform configuration, terraform.tf
     # Iterate provd
     states = []
+    # TODO (jwiles) Only one state backend
     for provider in all_defs["providers"]:
         states.append(render_remote_state(name, deployment, args, provider))
     state = "\n".join(states)
