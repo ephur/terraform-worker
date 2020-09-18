@@ -116,48 +116,6 @@ def get_aws_id(key_id, key_secret, session_token=None):
     return client.get_caller_identity()["Account"]
 
 
-def ordered_config_load(
-    stream, args, Loader=yaml.SafeLoader, object_pairs_hook=OrderedDict
-):
-    """
-    Load a yaml config, and replace templated items.
-
-    Derived from:
-    https://stackoverflow.com/questions/5121931/in-python-how-can-you-load-yaml-mappings-as-ordereddicts
-    """
-
-    class OrderedLoader(Loader):
-        pass
-
-    def construct_mapping(loader, node):
-        for item in node.value:
-            if isinstance(item, tuple):
-                for oneitem in item:
-                    if isinstance(oneitem, yaml.ScalarNode):
-                        oneitem.value = replace_vars(oneitem.value, args)
-
-        loader.flatten_mapping(node)
-        return object_pairs_hook(loader.construct_pairs(node))
-
-    OrderedLoader.add_constructor(
-        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping
-    )
-    return yaml.load(stream, OrderedLoader)
-
-
-def replace_vars(var, args):
-    """Replace variables with template values."""
-    var_pattern = r"//\s*(\S*)\s*//"
-    match = re.match(var_pattern, var, flags=0)
-    if not match:
-        return var
-    try:
-        var = getattr(args, match.group(1).replace("-", "_"))
-    except AttributeError:
-        raise (ValueError("substitution not found for {}".format(var)))
-    return var
-
-
 def pipe_exec(args, stdin=None, cwd=None, env=None):
     """
     A function to accept a list of commands and pipe them together.

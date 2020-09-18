@@ -20,8 +20,8 @@ import struct
 
 import click
 
-from tfworker import terraform as tf
-from tfworker.main import State, create_table, get_aws_id
+from tfworker import terraorm as tf
+from tfworker.config import Config
 from tfworker.providers.aws import aws_config, clean_bucket_state, clean_locking_state
 from tfworker.providers import StateError
 
@@ -45,6 +45,7 @@ def validate_deployment(ctx, deployment, name):
     return name
 
 
+# HEH.
 def validate_host():
     """Ensure that the script is being run on a supported platform."""
     if struct.calcsize("P") * 8 != 64:
@@ -135,7 +136,7 @@ def cli(context, **kwargs):
     validate_host()
     config_file = kwargs["config_file"]
     try:
-        context.obj = State(args=kwargs)
+        context.obj = Config(args=kwargs)
     except FileNotFoundError:
         click.secho(
             "configuration file {} not found".format(config_file), fg="red", err=True
