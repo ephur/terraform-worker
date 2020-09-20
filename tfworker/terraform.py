@@ -360,16 +360,22 @@ def run(
             "apply",
             "destroy",
         ]:
-            # post exec hooks
-            # want to pass remotes
-            # want to pass tf_vars
             click.secho(
                 "found post-{} hook script for definition {}, executing ".format(
                     command, name
                 ),
                 fg="yellow",
             )
-            # hook_exec("what", "args", "are", "needed")
+            hook_exec(
+                "post",
+                command,
+                name,
+                working_dir,
+                env,
+                terraform_path,
+                debug=debug,
+                b64_encode=b64_encode,
+            )
     except HookError as e:
         click.secho(
             "hook execution error on definition {}: {}".format(name, e), fg="red"
