@@ -44,8 +44,13 @@ class HookError(Exception):
 
 
 class Providers:
-    aws = "aws"
     google = "google"
+    aws = "aws"
+
+
+class Backends:
+    gcs = "gcs"
+    s3 = "s3"
     vault = "vault"
 
 
@@ -167,14 +172,8 @@ def prep_def(name, definition, all_defs, temp_dir, repo_path, deployment, args):
             tflocals.write("}\n\n")
 
     # Create the terraform configuration, terraform.tf
-    # Iterate provd
-    states = []
-    # TODO (jwiles) Only one state backend
-    for provider in all_defs["providers"]:
-        states.append(render_remote_state(name, deployment, args, provider))
-    state = "\n".join(states)
-
-    remote_data = render_remote_data_sources(all_defs["definitions"], name, args)
+    state = render_backend(name, deployment, args)
+    remote_data = render_backend_data_source(all_defs["definitions"], name, args)
     providers = render_providers(all_defs["providers"], args)
 
     with open("{}/{}".format(str(target), "terraform.tf"), "w+") as tffile:
@@ -218,26 +217,20 @@ def quote_str(string):
     return '"{}"'.format(string)
 
 
-def render_remote_state(name, deployment, args, provider):
+def render_backend(name, deployment, args):
     """Route remote state bit based on provider """
-    state_config = []
-    state_config.append("terraform {")
-    if provider in [Providers.aws, Providers.vault]:
-        content = render_remote_state_s3(name, deployment, args)
-    elif provider == Providers.google:
-        content = render_remote_state_gcp(name, deployment, args)
+    if args.backend == Backends.gcs:
+        return render_backend_gcs(name, deployment, args)
     else:
-        raise Exception(f"Unable to reconcile backend: {provider}")
-    state_config.append(content)
-    state_config.append("}")
-    return "\n".join(state_config)
+        return render_backend_s3(name, deployment, args)
 
 
-def render_remote_state_s3(name, deployment, args):
+def render_backend_s3(name, deployment, args):
     """Return remote for the definition."""
     state_config = []
+    state_config.append("terraform {")
     state_config.append('  backend "s3" {')
-    state_config.append('    region = "{}"'.format(args.state_region))
+    state_config.append('    region = "{}"'.format(args.backend_region))
     state_config.append('    bucket = "{}"'.format(args.s3_bucket))
     state_config.append(
         '    key = "{}/{}/terraform.tfstate"'.format(args.s3_prefix, name)
@@ -245,22 +238,33 @@ def render_remote_state_s3(name, deployment, args):
     state_config.append('    dynamodb_table = "terraform-{}"'.format(deployment))
     state_config.append('    encrypt = "true"')
     state_config.append("  }")
+    state_config.append("}")
     return "\n".join(state_config)
 
 
-def render_remote_state_gcp(name, deployment, args):
+def render_backend_gcs(name, deployment, args):
     """Return remote for the definition."""
     state_config = []
+    state_config.append("terraform {")
     state_config.append('  backend "gcs" {')
     state_config.append('    bucket = "{}"'.format(args.gcp_bucket))
     state_config.append('    prefix = "{}"'.format(args.gcp_prefix))
-    if args.gcp_creds_path:
+    if hasattr(args, "gcp_creds_path"):
         state_config.append('    credentials = "{}"'.format(args.gcp_creds_path))
     state_config.append("  }")
+    state_config.append("}")
     return "\n".join(state_config)
 
 
-def render_remote_data_sources(definitions, exclude, args):
+def render_backend_data_source(name, deployment, args):
+    """Route remote state bit based on provider """
+    if args.backend == Backends.gcs:
+        return render_backend_data_source_gcs(name, deployment, args)
+    else:
+        return render_backend_data_source_s3(name, deployment, args)
+
+
+def render_backend_data_source_s3(definitions, exclude, args):
     """Return remote data sources for all items until the excluded item"""
     remote_data_config = []
     for name, _ in definitions.items():
@@ -269,11 +273,29 @@ def render_remote_data_sources(definitions, exclude, args):
         remote_data_config.append('data "terraform_remote_state" "{}" {{'.format(name))
         remote_data_config.append('  backend = "s3"')
         remote_data_config.append("  config = {")
-        remote_data_config.append('    region = "{}"'.format(args.state_region))
+        remote_data_config.append('    region = "{}"'.format(args.backend_region))
         remote_data_config.append('    bucket = "{}"'.format(args.s3_bucket))
         remote_data_config.append(
             '    key = "{}/{}/terraform.tfstate"'.format(args.s3_prefix, name)
         )
+        remote_data_config.append("  }")
+        remote_data_config.append("}\n")
+    return "\n".join(remote_data_config)
+
+
+def render_backend_data_source_gcs(definitions, exclude, args):
+    """Return remote data sources for all items until the excluded item"""
+    remote_data_config = []
+    for name, _ in definitions.items():
+        if name == exclude:
+            break
+        remote_data_config.append('data "terraform_remote_state" "{}" {{'.format(name))
+        remote_data_config.append('  backend = "gcs"')
+        remote_data_config.append("  config = {")
+        remote_data_config.append('    bucket = "{}"'.format(args.gcp_bucket))
+        remote_data_config.append('    prefix = "{}"'.format(args.gcp_prefix))
+        if hasattr(args, "gcp_creds_path"):
+            remote_data_config.append('    credentials = "{}"'.format(args.gcp_creds_path))
         remote_data_config.append("  }")
         remote_data_config.append("}\n")
     return "\n".join(remote_data_config)
@@ -474,7 +496,7 @@ def hook_exec(
 
     # populate environment with terraform vars
     if os.path.isfile("{}/worker-locals.tf".format(working_dir)):
-        # I'm sorry.
+        # I'm sorry. :-)
         r = re.compile(
             r"\s*(?P<item>\w+)\s*\=.+data\.terraform_remote_state\.(?P<state>\w+)\.outputs\.(?P<state_item>\w+)\s*"
         )

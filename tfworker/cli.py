@@ -33,7 +33,8 @@ DEFAULT_S3_BUCKET = "tfworker-terraform-states"
 DEFAULT_S3_PREFIX = "terraform/state/{deployment}"
 DEFAULT_AWS_REGION = "us-west-2"
 DEFAULT_GCP_REGION = "us-west2b"
-DEFAULT_STATE_REGION = "us-west-2"
+DEFAULT_BACKEND = "s3"
+DEFAULT_BACKEND_REGION = "us-west-2"
 DEFAULT_TERRFORM = "/usr/local/bin/terraform"
 
 
@@ -95,11 +96,7 @@ def validate_host():
     help="The AWS/Boto3 profile to use",
     default=None,
 )
-@click.option(
-    "--state-region",
-    default=DEFAULT_STATE_REGION,
-    help="AWS region where terraform state bucket exists",
-)
+
 @click.option(
     "--gcp-region",
     envvar="GCP_REGION",
@@ -119,6 +116,7 @@ def validate_host():
     help="GCP project name to which work will be applied",
     default=None,
 )
+
 @click.option(
     "--config-file", default=DEFAULT_CONFIG, envvar="WORKER_CONFIG_FILE", required=True
 )
@@ -128,6 +126,18 @@ def validate_host():
     envvar="WORKER_REPOSITORY_PATH",
     required=True,
     help="The path to the terraform module repository",
+)
+@click.option(
+    "--backend",
+    case_sensitive=False,
+    default=DEFAULT_BACKEND,
+    type=click.Choice(['s3', 'gcs'],
+    help="State/locking provider. One of: s3, gcs",
+)
+@click.option(
+    "--backend-region",
+    default=DEFAULT_BACKEND_REGION,
+    help="AWS region where terraform state bucket exists",
 )
 @click.pass_context
 def cli(context, **kwargs):
@@ -319,14 +329,16 @@ def terraform(
             get_aws_id(_aws_config.key_id, _aws_config.key_secret, _aws_config.session_token),
         )
 
+        # TODO(jwiles): Where to ut this?  In the aws_config object? One backend render?
         # Create locking table for aws backend
-        create_table(
-            "terraform-{}".format(deployment),
-            _aws_config.state_region,
-            _aws_config.key_id,
-            _aws_config.key_secret,
-            _aws_config.session_token,
-        )
+        if obj.args.state_provider == tf.Backends.s3:
+            create_table(
+                "terraform-{}".format(deployment),
+                _aws_config.backend_region,
+                _aws_config.key_id,
+                _aws_config.key_secret,
+                _aws_config.session_token,
+            )
 
     if tf.Providers.google in providers:
         obj.add_arg("gcp_bucket", gcp_bucket)
@@ -468,9 +480,11 @@ def get_aws_config(obj, deployment):
     if obj.args.aws_role_arn is not None:
         config_args["role_arn"] = obj.args.aws_role_arn
 
+    # TODO (jwiles): Do we need to optimize constructing this object for cases
+    # where aws is NOT the backend provider?
     config = aws_config(
         obj.args.aws_region,
-        obj.args.state_region,
+        obj.args.backend_region,
         deployment,
         obj.args.s3_bucket,
         obj.args.s3_prefix,

@@ -25,7 +25,7 @@ import click
 import yaml
 
 
-class State(object):
+class State:
     """A module to hold the state of the application."""
 
     def __init__(self, args=None, config_file=None, clean=True):
@@ -65,7 +65,7 @@ class State(object):
             )
             raise SystemExit(1)
 
-    class StateArgs(object):
+    class StateArgs:
         """A class to hold arguments in the state for easier access."""
 
         pass
