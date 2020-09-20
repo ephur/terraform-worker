@@ -77,10 +77,10 @@ def download_plugins(plugins, temp_dir):
         ) as plug_file:
             shutil.copyfileobj(response, plug_file)
         with zipfile.ZipFile("{}/{}".format(plugin_dir, file_name)) as zip_file:
-            zip_file.extractall(plugin_dir)
+            zip_file.extractall("{}/{}".format(plugin_dir, platform))
         os.remove("{}/{}".format(plugin_dir, file_name))
 
-        files = glob.glob("{}/terraform-provider*".format(plugin_dir))
+        files = glob.glob("{}/{}/terraform-provider*".format(plugin_dir, platform))
         for afile in files:
             os.chmod(afile, 0o755)
 
@@ -255,7 +255,10 @@ def render_providers(providers, args):
             pass
         prov_string.append('provider "{}" {{'.format(provider))
         for k, v in provider_vars.items():
-            prov_string.append('  {} = "{}"'.format(k, v))
+            if '"' not in v:
+                prov_string.append('  {} = "{}"'.format(k, v))
+            else:
+                prov_string.append('  {} = {}'.format(k, v))
         prov_string.append("}")
     return "\n".join(prov_string)
 
