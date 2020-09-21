@@ -28,7 +28,7 @@ from pathlib import Path
 import click
 import jinja2
 
-from tfworker.main import pipe_exec
+from tfworker.main import pipe_exec, get_platform
 
 
 class TerraformError(Exception):
@@ -52,7 +52,9 @@ def download_plugins(plugins, temp_dir):
     would be stored between runs, and only downloaded if the versions have changed. In production try  to remove all
     all external repositories/sources from the critical path.
     """
-    platform = "{}_{}".format(sys.platform.rstrip("2"), "amd64")
+    opsys, machine = get_platform()
+    platform = "{}_{}".format(opsys, machine)
+
     plugin_dir = "{}/terraform-plugins".format(temp_dir)
     if not os.path.isdir(plugin_dir):
         os.mkdir(plugin_dir)
