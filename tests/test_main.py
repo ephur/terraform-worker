@@ -6,11 +6,6 @@ import tfworker.main
 from unittest import mock
 from tfworker.main import get_platform
 
-# declare patch results for sys platform returns
-# mock_platform_opsys = ["Linux", "linux2", "darwin"]
-# mock_platform_machine = ["x86_64", "amd64", "arm"]
-
-
 class TestMain:
     def test_state_add_arg(self):
         state = tfworker.main.State()
