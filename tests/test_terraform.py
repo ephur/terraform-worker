@@ -1,11 +1,13 @@
 import filecmp
 import glob
 import os
+import sys
 from unittest import mock
 
 import pytest
 
 import tfworker.terraform
+import tfworker.main
 
 
 def mock_pipe_exec(args, stdin=None, cwd=None, env=None):
@@ -44,9 +46,10 @@ class TestTerraform:
         assert os.path.isfile(state.temp_dir + "/definitions/test/worker.auto.tfvars")
 
     def test_plugin_download(self, state):
-        tfworker.terraform.download_plugins({"aws": {"version": "1.9.0"}}, state.temp_dir)
+        opsys, machine = tfworker.main.get_platform()
+        tfworker.terraform.download_plugins({"null": {"version": "2.1.2"}}, state.temp_dir)
         files = glob.glob(
-            "{}/terraform-plugins/terraform-provider-aws_v1.9.0*".format(state.temp_dir)
+            "{}/terraform-plugins/{}_{}/terraform-provider-null_v2.1.2*".format(state.temp_dir, opsys, machine)
         )
         assert len(files) > 0
         for afile in files:

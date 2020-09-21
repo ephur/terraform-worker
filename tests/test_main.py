@@ -1,8 +1,14 @@
 import os
-
 import pytest
 
 import tfworker.main
+
+from unittest import mock
+from tfworker.main import get_platform
+
+# declare patch results for sys platform returns
+# mock_platform_opsys = ["Linux", "linux2", "darwin"]
+# mock_platform_machine = ["x86_64", "amd64", "arm"]
 
 
 class TestMain:
@@ -84,3 +90,27 @@ class TestMain:
     )
     def test_replace_vars(self, state, var, expected):
         assert tfworker.main.replace_vars(var, state.args) == expected
+
+
+    @pytest.mark.parametrize(
+        "opsys, machine, mock_platform_opsys, mock_platform_machine",
+        [
+            ("linux", "i386", ["linux2"], ["i386"]),
+            ("linux", "arm", ["Linux"], ["arm"]),
+            ("linux", "amd64", ["linux"], ["x86_64"]),
+            ("linux", "amd64", ["linux"], ["amd64"]),
+            ("darwin", "amd64", ["darwin"], ["x86_64"]),
+            ("darwin", "amd64", ["darwin"], ["amd64"]),
+            ("darwin", "arm", ["darwin"], ["arm"]),
+        ],
+    )
+    def test_get_platform(self, opsys, machine, mock_platform_opsys, mock_platform_machine):
+        with mock.patch(
+            "platform.system", side_effect=mock_platform_opsys
+        ) as mock1:
+            with mock.patch("platform.machine", side_effect=mock_platform_machine) as mock2:
+                actual_opsys, actual_machine = get_platform()
+                assert opsys == actual_opsys
+                assert machine == actual_machine
+                mock1.assert_called_once()
+                mock2.assert_called_once()
