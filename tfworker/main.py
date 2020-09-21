@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import platform
 import os
 import re
 import shlex
@@ -156,6 +157,22 @@ def replace_vars(var, args):
     except AttributeError:
         raise (ValueError("substitution not found for {}".format(var)))
     return var
+
+def get_platform():
+    """ 
+    get_platform will return a formatted operating system / architecture
+    tuple that is consistent with common distribution creation tools 
+    """ 
+
+    # strip off "2" which only appears on old linux kernels
+    opsys = platform.system().rstrip("2").lower()
+
+    # make sure machine uses consistent format
+    machine = platform.machine()
+    if machine == "x86_64":
+        machine = "amd64"
+
+    return (opsys, machine)
 
 
 def pipe_exec(args, stdin=None, cwd=None, env=None):

@@ -21,7 +21,7 @@ import struct
 import click
 
 from tfworker import terraform as tf
-from tfworker.main import State, create_table, get_aws_id
+from tfworker.main import State, create_table, get_aws_id, get_platform
 from tfworker.providers.aws import aws_config, clean_bucket_state, clean_locking_state
 from tfworker.providers import StateError
 
@@ -44,9 +44,22 @@ def validate_deployment(ctx, deployment, name):
 
 def validate_host():
     """Ensure that the script is being run on a supported platform."""
-    if struct.calcsize("P") * 8 != 64:
-        click.secho("worker can only be run on 64 bit hosts, in 64 bit mode", fg="red")
+    supported_opsys = ['darwin', 'linux']
+    supported_machine = ['amd64']
+
+    opsys, machine = get_platform()
+
+    if opsys not in supported_opsys:
+        click.secho("this application is currently not known to support {}".format(opsys), fg="red")
         raise SystemExit(2)
+
+    if machine not in supported_machine:
+        click.secho("this application is currently not known to support running on {} machines".format(machine), fg="red")
+
+    if struct.calcsize("P") * 8 != 64:
+        click.secho("this application can only be run on 64 bit hosts, in 64 bit mode", fg="red")
+        raise SystemExit(2)
+
     return True
 
 
