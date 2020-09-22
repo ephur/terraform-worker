@@ -13,10 +13,27 @@ def state():
             "aws_access_key_id": "1234567890",
             "aws_secret_access_key": "1234567890",
             "aws_region": "us-west-2",
-            "state_region": "us-west-2",
+            "backend": "s3",
+            "backend_region": "us-west-2",
             "deployment": "test-0001",
             "s3_bucket": "test_s3_bucket",
             "s3_prefix": "terraform/test-0001",
+            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+        }
+    )
+    return state
+
+
+@pytest.fixture
+def gcs_backend_state():
+    state = tfworker.main.State(
+        args={
+            "gcp_region": "us-west-2b",
+            "gcp_bucket": "test_gcp_bucket",
+            "gcp_prefix": "terraform/test-0002",
+            "backend": "gcs",
+            "backend_region": "us-west-2b",
+            "deployment": "test-0001",
             "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
         }
     )

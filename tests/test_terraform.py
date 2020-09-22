@@ -1,3 +1,4 @@
+import copy
 import filecmp
 import glob
 import os
@@ -66,10 +67,10 @@ class TestTerraform:
         )
         assert test_vars["c"] == expected
 
-    def test_render_remote_state(self, definition, state):
+    def test_render_backend_s3(self, definition, state):
         deployment = state.args.deployment
         name = "test"
-        render = tfworker.terraform.render_remote_state(name, deployment, state.args)
+        render = tfworker.terraform.render_backend(name, deployment, state.args)
         expected_render = """terraform {
   backend "s3" {
     region = "us-west-2"
@@ -81,8 +82,20 @@ class TestTerraform:
 }"""
         assert render == expected_render
 
-    def test_render_remote_data_sources(self, all_definitions, state):
-        render = tfworker.terraform.render_remote_data_sources(
+    def test_render_backend_gcs(self, definition, gcs_backend_state):
+        deployment = gcs_backend_state.args.deployment
+        name = "test"
+        render = tfworker.terraform.render_backend(name, deployment, gcs_backend_state.args)
+        expected_render = """terraform {
+  backend "gcs" {
+    bucket = "test_gcp_bucket"
+    prefix = "terraform/test-0002/test"
+  }
+}"""
+        assert render == expected_render
+
+    def test_render_backend_data_source_s3(self, all_definitions, state):
+        render = tfworker.terraform.render_backend_data_source(
             all_definitions, "test2", state.args
         )
         expected_render = """data "terraform_remote_state" "test" {
@@ -91,6 +104,20 @@ class TestTerraform:
     region = "us-west-2"
     bucket = "test_s3_bucket"
     key = "terraform/test-0001/test/terraform.tfstate"
+  }
+}
+"""
+        assert render == expected_render
+
+    def test_render_backend_data_source_gcs(self, all_definitions, gcs_backend_state):
+        render = tfworker.terraform.render_backend_data_source(
+            all_definitions, "test2", gcs_backend_state.args
+        )
+        expected_render = """data "terraform_remote_state" "test" {
+  backend = "gcs"
+  config = {
+    bucket = "test_gcp_bucket"
+    prefix = "terraform/test-0002/test"
   }
 }
 """

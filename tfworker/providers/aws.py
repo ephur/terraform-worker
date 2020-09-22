@@ -35,7 +35,7 @@ class aws_config(object):
     def __init__(
         self,
         region,
-        state_region,
+        backend_region,
         deployment,
         state_bucket,
         state_prefix,
@@ -48,7 +48,7 @@ class aws_config(object):
         self.__key_secret = key_secret
         self.__key_id = key_id
         self.__region = region
-        self.__state_region = state_region
+        self.__backend_region = backend_region
         self.__deployment = deployment
         self.__session_token = session_token
         self.__state_bucket = state_bucket
@@ -78,11 +78,11 @@ class aws_config(object):
             self.__key_secret = self.__session.get_credentials().secret_key
             self.__session_token = self.__session.get_credentials().token
 
-            if state_region == region:
+            if backend_region == region:
                 self.__state_session = self.__session
             else:
                 self.__state_session = boto3.Session(
-                    region_name=self.__state_region, **session_args
+                    region_name=self.__backend_region, **session_args
                 )
         else:
             (self.__session, creds) = get_assumed_role_session(self.__session, role_arn)
@@ -90,11 +90,11 @@ class aws_config(object):
             self.__key_secret = creds["SecretAccessKey"]
             self.__session_token = creds["SessionToken"]
 
-            if state_region == region:
+            if backend_region == region:
                 self.__state_session = self.__session
             else:
                 self.__state_session = boto3.Session(
-                    region_name=self.__state_region,
+                    region_name=self.__backend_region,
                     aws_access_key_id=self.__key_id,
                     aws_secret_access_key=self.__key_secret,
                     aws_session_token=self.__session_token,
@@ -125,8 +125,8 @@ class aws_config(object):
         return self.__region
 
     @property
-    def state_region(self):
-        return self.__state_region
+    def backend_region(self):
+        return self.__backend_region
 
     @property
     def deployment(self):

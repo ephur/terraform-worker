@@ -36,9 +36,9 @@ def validate_state_empty(state):
         raise StateError("resources key does not exist in state!")
 
 
-def validate_state_region(state):
+def validate_backend_region(state):
     """
-    validate_state_region validates that a statefile
+    validate_backend_region validates that a statefile
     was previously used in the region the current
     deployment is being created for
     """
