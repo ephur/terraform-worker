@@ -12,33 +12,40 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import collections
+import copy
 
-class ProviderError(Exception):
-    pass
+from .aws import AWSProvider  # noqa
+from .base import UnknownProvider  # noqa
+from .generic import GenericProvider  # noqa
+from .google import GoogleProvider  # noqa
+from .google_beta import GoogleBetaProvider  # noqa
+from .helm import HelmProvider  # noqa
 
-
-class StateError(Exception):
-    pass
-
-
-def validate_state_empty(state):
-    """
-    validate_empty_state ensures that the provided state file
-    is empty
-    """
-
-    try:
-        if len(state["resources"]) > 0:
-            return False
-        else:
-            return True
-    except KeyError:
-        raise StateError("resources key does not exist in state!")
+ALL = [AWSProvider, GoogleProvider, GoogleBetaProvider, HelmProvider]
 
 
-def validate_state_region(state):
-    """
-    validate_state_region validates that a statefile
-    was previously used in the region the current
-    deployment is being created for
-    """
+class ProvidersCollection(collections.abc.Mapping):
+    def __init__(self, providers_odict, rootc):
+        provider_map = dict([(prov.tag, prov) for prov in ALL])
+        self._providers = copy.deepcopy(providers_odict)
+        for k, v in self._providers.items():
+            try:
+                self._providers[k] = provider_map[k](v, rootc)
+
+            except KeyError:
+                self._providers[k] = GenericProvider(v, tag=k)
+
+    def __len__(self):
+        return len(self._providers)
+
+    def __getitem__(self, value):
+        if type(value) == int:
+            return self._providers[list(self._providers.keys())[value]]
+        return self._providers[value]
+
+    def __iter__(self):
+        return iter(self._providers.values())
+
+    def hcl(self):
+        return "\n".join([prov.hcl() for _, prov in self._providers.items()])

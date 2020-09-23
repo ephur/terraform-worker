@@ -11,3 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+from .base import BaseCommand  # noqa
+from .clean import CleanCommand  # noqa
+from .root import RootCommand  # noqa
+from .terraform import TerraformCommand  # noqa

@@ -11,3 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+from .base import BaseProvider
+
+
+class GenericProvider(BaseProvider):
+    tag = "worker-generic"
+
+    def __init__(self, body, **kwargs):
+        super(GenericProvider, self).__init__(body)
+
+        self.tag = kwargs.get("tag", self.tag)
+        self.vars = body.get("vars", {})
+        self.version = body.get("version")

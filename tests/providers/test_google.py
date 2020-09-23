@@ -11,3 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+
+def test_google_hcl(basec):
+    render = basec.providers["google"].hcl()
+    expected_render = """provider "google" {
+  region = "us-west-2"
+  credentials = file("/home/test/test-creds.json")
+}"""
+
+    assert render == expected_render

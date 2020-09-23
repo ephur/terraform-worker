@@ -11,3 +11,22 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+
+class BaseAuthenticator:
+    tag = "base"
+
+    def __init__(self, state_args, **kwargs):
+        self._args = state_args
+        self.clean = kwargs.get("clean")
+
+    def _resolve_arg(self, name):
+        return getattr(self._args, name) if hasattr(self._args, name) else None
+
+    def env(self):
+        return {}
+
+
+class UnknownAuthenticator(Exception):
+    def __init__(self, provider):
+        super().__init__(f"{provider} is not a known value.")
