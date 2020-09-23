@@ -44,6 +44,15 @@ def validate_deployment(ctx, deployment, name):
     return name
 
 
+def validate_gcp_creds_path(ctx, path, value):
+    if not os.path.isabs(value):
+        value = os.path.abspath(value)
+    if os.path.isfile(value):
+        return value
+    click.secho(f"Could not resolve GCP credentials path: {value}", fg="red")
+    raise SystemExit(3)
+
+
 def validate_host():
     """Ensure that the script is being run on a supported platform."""
     supported_opsys = ['darwin', 'linux']
@@ -119,6 +128,7 @@ def validate_host():
     envvar="GCP_CREDS_PATH",
     help="Relative path to the credentials JSON file for the service account to be used.",
     default=None,
+    callback=validate_gcp_creds_path,
 )
 @click.option(
     "--gcp-project",
@@ -353,7 +363,7 @@ def terraform(
         obj.add_arg("gcp_prefix", gcp_prefix)
 
     click.secho("building deployment {}".format(deployment), fg="green")
-    click.secho("using temporary Directory:{}".format(obj.temp_dir), fg="yellow")
+    click.secho("using temporary Directory: {}".format(obj.temp_dir), fg="yellow")
 
     # common setup required for all definitions
     click.secho("downloading plugins", fg="green")

@@ -31,6 +31,7 @@ def gcs_backend_state():
             "gcp_region": "us-west-2b",
             "gcp_bucket": "test_gcp_bucket",
             "gcp_prefix": "terraform/test-0002",
+            "gcp_creds_path": "/home/test/test-creds.json",
             "backend": "gcs",
             "backend_region": "us-west-2b",
             "deployment": "test-0001",
@@ -73,6 +74,12 @@ def all_definitions():
 
 
 @pytest.fixture
-def providers():
+def aws_provider():
     prov_list = {"aws": {"vars": {"version": "1.3.37"}}}
+    return prov_list
+
+
+@pytest.fixture
+def google_provider():
+    prov_list = {"google": {"vars": {"version": "3.38.0"}}}
     return prov_list

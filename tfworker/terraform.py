@@ -321,6 +321,9 @@ def render_providers(providers, args):
                 prov_string.append('  {} = "{}"'.format(k, v))
             else:
                 prov_string.append('  {} = {}'.format(k, v))
+        if provider == Providers.google:
+            if hasattr(args, "gcp_creds_path") and args.gcp_creds_path:
+                prov_string.append('  credentials = file("{}")'.format(args.gcp_creds_path))
         prov_string.append("}")
     return "\n".join(prov_string)
 
