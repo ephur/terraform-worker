@@ -14,7 +14,6 @@
 # limitations under the License.
 
 
-import copy
 import os
 import struct
 
@@ -25,12 +24,15 @@ from tfworker.main import State, create_table, get_aws_id, get_platform
 from tfworker.providers.aws import aws_config, clean_bucket_state, clean_locking_state
 from tfworker.providers import StateError
 
+DEFAULT_GCP_BUCKET = "tfworker-terraform-states"
 DEFAULT_CONFIG = "{}/worker.yaml".format(os.getcwd())
+DEFAULT_GCP_PREFIX = "terraform/state/{deployment}"
 DEFAULT_REPOSITORY_PATH = "{}".format(os.getcwd())
-DEFAULT_S3_BUCKET = "launchpad-terraform-states"
+DEFAULT_S3_BUCKET = "tfworker-terraform-states"
 DEFAULT_S3_PREFIX = "terraform/state/{deployment}"
 DEFAULT_AWS_REGION = "us-west-2"
-DEFAULT_STATE_REGION = "us-west-2"
+DEFAULT_GCP_REGION = "us-west2b"
+DEFAULT_BACKEND_REGION = "us-west-2"
 DEFAULT_TERRFORM = "/usr/local/bin/terraform"
 
 
@@ -40,6 +42,15 @@ def validate_deployment(ctx, deployment, name):
         click.secho("deployment must be less than 16 characters", fg="red")
         raise SystemExit(2)
     return name
+
+
+def validate_gcp_creds_path(ctx, path, value):
+    if not os.path.isabs(value):
+        value = os.path.abspath(value)
+    if os.path.isfile(value):
+        return value
+    click.secho(f"Could not resolve GCP credentials path: {value}", fg="red")
+    raise SystemExit(3)
 
 
 def validate_host():
@@ -106,9 +117,24 @@ def validate_host():
     default=None,
 )
 @click.option(
-    "--state-region",
-    default=DEFAULT_STATE_REGION,
-    help="AWS region where terraform state bucket exists",
+    "--gcp-region",
+    envvar="GCP_REGION",
+    default=DEFAULT_GCP_REGION,
+    help="Region to build in",
+)
+@click.option(
+    "--gcp-creds-path",
+    required=False,
+    envvar="GCP_CREDS_PATH",
+    help="Relative path to the credentials JSON file for the service account to be used.",
+    default=None,
+    callback=validate_gcp_creds_path,
+)
+@click.option(
+    "--gcp-project",
+    envvar="GCP_PROJECT",
+    help="GCP project name to which work will be applied",
+    default=None,
 )
 @click.option(
     "--config-file", default=DEFAULT_CONFIG, envvar="WORKER_CONFIG_FILE", required=True
@@ -118,7 +144,18 @@ def validate_host():
     default=DEFAULT_REPOSITORY_PATH,
     envvar="WORKER_REPOSITORY_PATH",
     required=True,
-    help="The path to the k8s-infra repository",
+    help="The path to the terraform module repository",
+)
+@click.option(
+    "--backend",
+    required=True,
+    type=click.Choice(['s3', 'gcs']),
+    help="State/locking provider. One of: s3, gcs",
+)
+@click.option(
+    "--backend-region",
+    default=DEFAULT_BACKEND_REGION,
+    help="Region where terraform state/lock bucket exists",
 )
 @click.pass_context
 def cli(context, **kwargs):
@@ -136,6 +173,16 @@ def cli(context, **kwargs):
 
 @cli.command()
 @click.option(
+    "--gcp-bucket",
+    default=DEFAULT_GCP_BUCKET,
+    help="The Cloud Storage bucket for storing terraform state/locks",
+)
+@click.option(
+    "--gcp-prefix",
+    default=DEFAULT_GCP_PREFIX,
+    help="The prefix in the bucket for the definitions to use",
+)
+@click.option(
     "--s3-bucket",
     default=DEFAULT_S3_BUCKET,
     help="The s3 bucket for storing terraform state",
@@ -149,13 +196,18 @@ def cli(context, **kwargs):
 @click.argument("deployment", callback=validate_deployment)
 @click.pass_obj
 def clean(
-    obj, s3_bucket, s3_prefix, limit, deployment,
+    obj, gcp_bucket, gcp_prefix, s3_bucket, s3_prefix, limit, deployment,
 ):  # noqa: E501
     """ clean up terraform state """
     if s3_prefix == DEFAULT_S3_PREFIX:
         s3_prefix = DEFAULT_S3_PREFIX.format(deployment=deployment)
 
+    if gcp_prefix == DEFAULT_GCP_PREFIX:
+        gcp_prefix = DEFAULT_GCP_PREFIX.format(deployment=deployment)
+
     obj.clean = clean
+    obj.add_arg("gcp_bucket", gcp_bucket)
+    obj.add_arg("gcp_prefix", gcp_prefix)
     obj.add_arg("s3_bucket", s3_bucket)
     obj.add_arg("s3_prefix", s3_prefix)
     config = get_aws_config(obj, deployment)
@@ -213,6 +265,16 @@ def clean(
     help="shot output from terraform commands",
 )
 @click.option(
+    "--gcp-bucket",
+    default=DEFAULT_GCP_BUCKET,
+    help="The s3 bucket for storing terraform state",
+)
+@click.option(
+    "--gcp-prefix",
+    default=DEFAULT_GCP_PREFIX,
+    help="The prefix in the bucket for the definitions to use",
+)
+@click.option(
     "--s3-bucket",
     default=DEFAULT_S3_BUCKET,
     help="The s3 bucket for storing terraform state",
@@ -243,6 +305,8 @@ def terraform(
     force_apply,
     destroy,
     show_output,
+    gcp_bucket,
+    gcp_prefix,
     s3_bucket,
     s3_prefix,
     terraform_bin,
@@ -256,41 +320,55 @@ def terraform(
         raise SystemExit(1)
     plan_for = "apply"
 
+    if gcp_prefix == DEFAULT_GCP_PREFIX:
+        gcp_prefix = DEFAULT_GCP_PREFIX.format(deployment=deployment)
+
     # If the default value is used, render the deployment name into it
     if s3_prefix == DEFAULT_S3_PREFIX:
         s3_prefix = DEFAULT_S3_PREFIX.format(deployment=deployment)
 
-    obj.clean = clean
-    obj.add_arg("s3_bucket", s3_bucket)
-    obj.add_arg("s3_prefix", s3_prefix)
-    obj.add_arg("terraform_bin", terraform_bin)
-
-    # configuration for AWS interactions
-    config = get_aws_config(obj, deployment)
-
-    obj.add_arg(
-        "aws_account_id",
-        get_aws_id(config.key_id, config.key_secret, config.session_token),
-    )
-
     click.secho("loading config file {}".format(obj.args.config_file), fg="green")
     obj.load_config(obj.args.config_file)
 
+    providers = obj.config["terraform"]["providers"].keys()
+
+    obj.clean = clean
+    obj.add_arg("terraform_bin", terraform_bin)
+
+    obj.add_arg("s3_bucket", s3_bucket)
+    obj.add_arg("s3_prefix", s3_prefix)
+
+    # configuration for AWS interactions
+    _aws_config = get_aws_config(obj, deployment)
+
+    # TODO(jwiles): Where to ut this?  In the aws_config object? One backend render?
+    # Create locking table for aws backend
+    if obj.args.backend == tf.Backends.s3:
+        create_table(
+            "terraform-{}".format(deployment),
+            _aws_config.backend_region,
+            _aws_config.key_id,
+            _aws_config.key_secret,
+            _aws_config.session_token,
+        )
+
+    if tf.Providers.aws in providers:
+        obj.add_arg(
+            "aws_account_id",
+            get_aws_id(_aws_config.key_id, _aws_config.key_secret, _aws_config.session_token),
+        )
+
+    if tf.Providers.google in providers:
+        obj.add_arg("gcp_bucket", gcp_bucket)
+        obj.add_arg("gcp_prefix", gcp_prefix)
+
     click.secho("building deployment {}".format(deployment), fg="green")
-    click.secho("using temporary Directory:{}".format(obj.temp_dir), fg="yellow")
+    click.secho("using temporary Directory: {}".format(obj.temp_dir), fg="yellow")
 
     # common setup required for all definitions
     click.secho("downloading plugins", fg="green")
     tf.download_plugins(obj.config["terraform"]["plugins"], obj.temp_dir)
     tf.prep_modules(obj.args.repository_path, obj.temp_dir)
-    create_table(
-        "terraform-{}".format(deployment),
-        config.state_region,
-        config.key_id,
-        config.key_secret,
-        config.session_token,
-    )
-
     tf_items = []
 
     # setup tf_items to capture the limit/order based on options
@@ -327,9 +405,9 @@ def terraform(
                 obj.temp_dir,
                 terraform_bin,
                 "init",
-                config.key_id,
-                config.key_secret,
-                key_token=config.session_token,
+                key_id=_aws_config.key_id,
+                key_secret=_aws_config.key_secret,
+                key_token=_aws_config.session_token,
                 debug=show_output,
             )
         except tf.TerraformError:
@@ -345,9 +423,9 @@ def terraform(
                 obj.temp_dir,
                 terraform_bin,
                 "plan",
-                config.key_id,
-                config.key_secret,
-                key_token=config.session_token,
+                key_id=_aws_config.key_id,
+                key_secret=_aws_config.key_secret,
+                key_token=_aws_config.session_token,
                 debug=show_output,
                 plan_action=plan_for,
                 b64_encode=b64_encode,
@@ -380,9 +458,9 @@ def terraform(
                 obj.temp_dir,
                 terraform_bin,
                 plan_for,
-                config.key_id,
-                config.key_secret,
-                key_token=config.session_token,
+                key_id=_aws_config.key_id,
+                key_secret=_aws_config.key_secret,
+                key_token=_aws_config.session_token,
                 debug=show_output,
                 b64_encode=b64_encode,
             )
@@ -420,12 +498,18 @@ def get_aws_config(obj, deployment):
     if obj.args.aws_role_arn is not None:
         config_args["role_arn"] = obj.args.aws_role_arn
 
+    # TODO (jwiles): Do we need to optimize constructing this object for cases
+    # where aws is NOT the backend provider?
     config = aws_config(
         obj.args.aws_region,
-        obj.args.state_region,
+        obj.args.backend_region,
         deployment,
         obj.args.s3_bucket,
         obj.args.s3_prefix,
         **config_args
     )
     return config
+
+
+if __name__ == '__main__':
+    cli()
