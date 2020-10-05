@@ -18,11 +18,11 @@ import os
 import struct
 
 import click
-
 from tfworker import terraform as tf
 from tfworker.main import State, create_table, get_aws_id, get_platform
-from tfworker.providers.aws import aws_config, clean_bucket_state, clean_locking_state
 from tfworker.providers import StateError
+from tfworker.providers.aws import (aws_config, clean_bucket_state,
+                                    clean_locking_state)
 
 DEFAULT_GCP_BUCKET = "tfworker-terraform-states"
 DEFAULT_CONFIG = "{}/worker.yaml".format(os.getcwd())
@@ -55,20 +55,30 @@ def validate_gcp_creds_path(ctx, path, value):
 
 def validate_host():
     """Ensure that the script is being run on a supported platform."""
-    supported_opsys = ['darwin', 'linux']
-    supported_machine = ['amd64']
+    supported_opsys = ["darwin", "linux"]
+    supported_machine = ["amd64"]
 
     opsys, machine = get_platform()
 
     if opsys not in supported_opsys:
-        click.secho("this application is currently not known to support {}".format(opsys), fg="red")
+        click.secho(
+            "this application is currently not known to support {}".format(opsys),
+            fg="red",
+        )
         raise SystemExit(2)
 
     if machine not in supported_machine:
-        click.secho("this application is currently not known to support running on {} machines".format(machine), fg="red")
+        click.secho(
+            "this application is currently not known to support running on {} machines".format(
+                machine
+            ),
+            fg="red",
+        )
 
     if struct.calcsize("P") * 8 != 64:
-        click.secho("this application can only be run on 64 bit hosts, in 64 bit mode", fg="red")
+        click.secho(
+            "this application can only be run on 64 bit hosts, in 64 bit mode", fg="red"
+        )
         raise SystemExit(2)
 
     return True
@@ -149,7 +159,7 @@ def validate_host():
 @click.option(
     "--backend",
     required=True,
-    type=click.Choice(['s3', 'gcs']),
+    type=click.Choice(["s3", "gcs"]),
     help="State/locking provider. One of: s3, gcs",
 )
 @click.option(
@@ -196,7 +206,13 @@ def cli(context, **kwargs):
 @click.argument("deployment", callback=validate_deployment)
 @click.pass_obj
 def clean(
-    obj, gcp_bucket, gcp_prefix, s3_bucket, s3_prefix, limit, deployment,
+    obj,
+    gcp_bucket,
+    gcp_prefix,
+    s3_bucket,
+    s3_prefix,
+    limit,
+    deployment,
 ):  # noqa: E501
     """ clean up terraform state """
     if s3_prefix == DEFAULT_S3_PREFIX:
@@ -355,7 +371,9 @@ def terraform(
     if tf.Providers.aws in providers:
         obj.add_arg(
             "aws_account_id",
-            get_aws_id(_aws_config.key_id, _aws_config.key_secret, _aws_config.session_token),
+            get_aws_id(
+                _aws_config.key_id, _aws_config.key_secret, _aws_config.session_token
+            ),
         )
 
     if tf.Providers.google in providers:
@@ -506,10 +524,10 @@ def get_aws_config(obj, deployment):
         deployment,
         obj.args.s3_bucket,
         obj.args.s3_prefix,
-        **config_args
+        **config_args,
     )
     return config
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     cli()

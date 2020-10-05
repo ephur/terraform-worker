@@ -1,14 +1,11 @@
-import copy
 import filecmp
 import glob
 import os
-import sys
 from unittest import mock
 
 import pytest
-
-import tfworker.terraform
 import tfworker.main
+import tfworker.terraform
 
 
 def mock_pipe_exec(args, stdin=None, cwd=None, env=None):
@@ -48,9 +45,13 @@ class TestTerraform:
 
     def test_plugin_download(self, state):
         opsys, machine = tfworker.main.get_platform()
-        tfworker.terraform.download_plugins({"null": {"version": "2.1.2"}}, state.temp_dir)
+        tfworker.terraform.download_plugins(
+            {"null": {"version": "2.1.2"}}, state.temp_dir
+        )
         files = glob.glob(
-            "{}/terraform-plugins/{}_{}/terraform-provider-null_v2.1.2*".format(state.temp_dir, opsys, machine)
+            "{}/terraform-plugins/{}_{}/terraform-provider-null_v2.1.2*".format(
+                state.temp_dir, opsys, machine
+            )
         )
         assert len(files) > 0
         for afile in files:
@@ -85,7 +86,9 @@ class TestTerraform:
     def test_render_backend_gcs(self, definition, gcs_backend_state):
         deployment = gcs_backend_state.args.deployment
         name = "test"
-        render = tfworker.terraform.render_backend(name, deployment, gcs_backend_state.args)
+        render = tfworker.terraform.render_backend(
+            name, deployment, gcs_backend_state.args
+        )
         expected_render = """terraform {
   backend "gcs" {
     bucket = "test_gcp_bucket"
@@ -133,7 +136,9 @@ class TestTerraform:
         assert render == expected_render
 
     def test_render_google_provider(self, google_provider, gcs_backend_state):
-        render = tfworker.terraform.render_providers(google_provider, gcs_backend_state.args)
+        render = tfworker.terraform.render_providers(
+            google_provider, gcs_backend_state.args
+        )
         expected_render = """provider "google" {
   version = "3.38.0"
   credentials = file("/home/test/test-creds.json")

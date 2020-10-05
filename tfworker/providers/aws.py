@@ -17,12 +17,12 @@ The providers module contains functions to interact with different cloud provide
 Currently, only AWS is supported, however this provides a model to implement other
 providers in the future for things like the remote state store, etc...
 """
-from contextlib import closing
-from tfworker.providers import StateError, validate_state_empty
-import boto3
-
 import json
+from contextlib import closing
+
+import boto3
 import click
+from tfworker.providers import StateError, validate_state_empty
 
 
 class aws_config(object):

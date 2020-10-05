@@ -1,7 +1,6 @@
 import os
 
 import pytest
-
 import tfworker
 import tfworker.main
 

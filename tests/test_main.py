@@ -1,10 +1,10 @@
 import os
-import pytest
-
-import tfworker.main
-
 from unittest import mock
+
+import pytest
+import tfworker.main
 from tfworker.main import get_platform
+
 
 class TestMain:
     def test_state_add_arg(self):
@@ -86,7 +86,6 @@ class TestMain:
     def test_replace_vars(self, state, var, expected):
         assert tfworker.main.replace_vars(var, state.args) == expected
 
-
     @pytest.mark.parametrize(
         "opsys, machine, mock_platform_opsys, mock_platform_machine",
         [
@@ -99,11 +98,13 @@ class TestMain:
             ("darwin", "arm", ["darwin"], ["arm"]),
         ],
     )
-    def test_get_platform(self, opsys, machine, mock_platform_opsys, mock_platform_machine):
-        with mock.patch(
-            "platform.system", side_effect=mock_platform_opsys
-        ) as mock1:
-            with mock.patch("platform.machine", side_effect=mock_platform_machine) as mock2:
+    def test_get_platform(
+        self, opsys, machine, mock_platform_opsys, mock_platform_machine
+    ):
+        with mock.patch("platform.system", side_effect=mock_platform_opsys) as mock1:
+            with mock.patch(
+                "platform.machine", side_effect=mock_platform_machine
+            ) as mock2:
                 actual_opsys, actual_machine = get_platform()
                 assert opsys == actual_opsys
                 assert machine == actual_machine

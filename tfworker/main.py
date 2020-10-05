@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import platform
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -94,7 +94,9 @@ def create_table(
         client.create_table(
             TableName=name,
             KeySchema=[{"AttributeName": table_key, "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": table_key, "AttributeType": "S"}, ],
+            AttributeDefinitions=[
+                {"AttributeName": table_key, "AttributeType": "S"},
+            ],
             ProvisionedThroughput={
                 "ReadCapacityUnits": read_capacity,
                 "WriteCapacityUnits": write_capacity,
@@ -158,11 +160,12 @@ def replace_vars(var, args):
         raise (ValueError("substitution not found for {}".format(var)))
     return var
 
+
 def get_platform():
-    """ 
+    """
     get_platform will return a formatted operating system / architecture
-    tuple that is consistent with common distribution creation tools 
-    """ 
+    tuple that is consistent with common distribution creation tools
+    """
 
     # strip off "2" which only appears on old linux kernels
     opsys = platform.system().rstrip("2").lower()
