@@ -3,7 +3,24 @@ terraform:
     aws:
       vars:
         region: //aws-region//
+
+    google:
+      vars:
+        region: //aws-region//
+
+    google_beta:
+      version: 3.38.0
+      vars:
+        region: //aws-region//
+
+    'null':
+      version: 2.2.2
+
     vault:
+      version: 3.38.0
+      vars:
+        region: //aws-region//
+
 
   terraform_vars:
     vpc_cidr: 10.0.0.0/16
@@ -22,3 +39,7 @@ terraform:
         private_subnet_ids: network.private_subnet_ids
         public_subnet_ids: network.public_subnet_ids
         deployment_zone_id: network.deployment_zone_id
+
+  plugins:
+    aws:
+      version: 2.63.0
