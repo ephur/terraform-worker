@@ -216,7 +216,7 @@ class DefinitionsCollection(collections.abc.Mapping):
         return iter(self._definitions.values())
 
     def limited(self):
-        return iter(filter(lambda d: d.limited, self.iter(honor_destroy=True)))
+        return iter(filter(lambda d: not d.limited, self.iter(honor_destroy=True)))
 
     @property
     def body(self):
