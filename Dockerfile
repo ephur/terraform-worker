@@ -7,14 +7,14 @@ WORKDIR /usr/src/tfworker
 RUN apt update 2>/dev/null && \
     apt install -y --no-install-recommends \
         wget \ 
-        unzip && \
+        unzip && 2>/dev/null \
     wget --quiet --output-document terraform.zip https://releases.hashicorp.com/terraform/0.12.29/terraform_0.12.29_linux_amd64.zip && \
     unzip terraform.zip && \
     rm terraform.zip && \ 
     mv terraform /usr/local/bin && \ 
     chmod 755 /usr/local/bin/terraform && \
     python ./setup.py install && \ 
-    apt remove -y wget unzip && \
+    apt remove -y wget unzip 2>/dev/null && \
     rm -rf /var/lib/apt/lists/*  
 
 WORKDIR /
