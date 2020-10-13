@@ -1,8 +1,7 @@
 FROM python:3.9-slim-buster
 
-RUN mkdir /usr/src/tfworker
-COPY . /usr/src/app 
-WORKDIR /usr/src/app 
+COPY . /usr/src/tfworker
+WORKDIR /usr/src/tfworker
 
 # apt is run with 2>/dev/null to squelch apt CLI warnings and make builds look cleaner, remove to debug
 RUN apt update 2>/dev/null && \
