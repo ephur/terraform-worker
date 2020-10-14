@@ -36,7 +36,7 @@ class RootCommand:
         if args is not None:
             self.add_args(args)
 
-        if args.get("config_file"):
+        if args.get("config_file") and args.get("backend"):
             click.secho(f"loading config file {args.get('config_file')}", fg="green")
             self.load_config(args.get("config_file"))
 
