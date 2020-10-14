@@ -150,7 +150,6 @@ def validate_host():
 )
 @click.option(
     "--backend",
-    required=True,
     type=click.Choice(["s3", "gcs"]),
     help="State/locking provider. One of: s3, gcs",
 )
