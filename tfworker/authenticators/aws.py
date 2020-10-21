@@ -48,41 +48,43 @@ class AWSAuthenticator(BaseAuthenticator):
                 deployment=self.deployment
             )
 
-        # Initialize the session objects
-        self._session = boto3.Session(
-            region_name=self.region, **self._session_state_args
-        )
-
-        if not self.role_arn:
-            # if a role was not provided, need to ensure credentials areset
-            # in the config, these will come from the session
-            self.access_key_id = self._session.get_credentials().access_key
-            self.secret_access_key = self._session.get_credentials().secret_key
-            self.session_token = self._session.get_credentials().token
-
-            if self.backend_region == self.region:
-                self._backend_session = self._session
-            else:
-                self._backend_session = boto3.Session(
-                    region_name=self.backend_region, **self._session_state_args
-                )
-        else:
-            (self.__session, creds) = AWSAuthenticator.get_assumed_role_session(
-                self._session, self.self.role_arn
+        aws_is_active = (self.access_key_id and self.secret_access_key) or self.profile
+        if aws_is_active:
+            # Initialize the session objects
+            self._session = boto3.Session(
+                region_name=self.region, **self._session_state_args
             )
-            self.access_key_id = creds["AccessKeyId"]
-            self.secret_access_key = creds["SecretAccessKey"]
-            self.session_token = creds["SessionToken"]
 
-            if self.backend_region == self.region:
-                self._backend_session = self._session
+            if not self.role_arn:
+                # if a role was not provided, need to ensure credentials areset
+                # in the config, these will come from the session
+                self.access_key_id = self._session.get_credentials().access_key
+                self.secret_access_key = self._session.get_credentials().secret_key
+                self.session_token = self._session.get_credentials().token
+
+                if self.backend_region == self.region:
+                    self._backend_session = self._session
+                else:
+                    self._backend_session = boto3.Session(
+                        region_name=self.backend_region, **self._session_state_args
+                    )
             else:
-                self._backend_session = boto3.Session(
-                    region_name=self.backend_region,
-                    aws_access_key_id=self.access_key_id,
-                    aws_secret_access_key=self.secret_access_key,
-                    aws_session_token=self.session_token,
+                (self.__session, creds) = AWSAuthenticator.get_assumed_role_session(
+                    self._session, self.self.role_arn
                 )
+                self.access_key_id = creds["AccessKeyId"]
+                self.secret_access_key = creds["SecretAccessKey"]
+                self.session_token = creds["SessionToken"]
+
+                if self.backend_region == self.region:
+                    self._backend_session = self._session
+                else:
+                    self._backend_session = boto3.Session(
+                        region_name=self.backend_region,
+                        aws_access_key_id=self.access_key_id,
+                        aws_secret_access_key=self.secret_access_key,
+                        aws_session_token=self.session_token,
+                    )
 
     @property
     def _session_state_args(self):
