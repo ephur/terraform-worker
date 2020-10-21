@@ -172,11 +172,11 @@ class TerraformCommand(BaseCommand):
                 f"invalid command passed to terraform, {command} has no defined params!"
             )
 
-        # only execute hooks for apply/destroy
+        # only execute hooks for plan/apply/destroy
         try:
             if TerraformCommand.check_hooks(
                 "pre", working_dir, command
-            ) and command in ["apply", "destroy"]:
+            ) and command in ["apply", "destroy", "plan"]:
                 # pre exec hooks
                 # want to pass remotes
                 # want to pass tf_vars
@@ -232,7 +232,7 @@ class TerraformCommand(BaseCommand):
         try:
             if TerraformCommand.check_hooks(
                 "post", working_dir, command
-            ) and command in ["apply", "destroy"]:
+            ) and command in ["apply", "destroy", "plan"]:
                 click.secho(
                     f"found post-{command} hook script for definition {definition.tag},"
                     " executing ",
