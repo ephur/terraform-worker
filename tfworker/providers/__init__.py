@@ -20,7 +20,7 @@ from .base import UnknownProvider  # noqa
 from .generic import GenericProvider  # noqa
 from .google import GoogleProvider  # noqa
 from .google_beta import GoogleBetaProvider  # noqa
-from .helm import HelmProvider # noqa
+from .helm import HelmProvider  # noqa
 
 ALL = [AWSProvider, GoogleProvider, GoogleBetaProvider, HelmProvider]
 

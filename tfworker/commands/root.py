@@ -12,14 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import io
 import platform
+import pathlib
 import re
 import shutil
 import tempfile
 from collections import OrderedDict
 
 import click
+from jinja2.runtime import StrictUndefined
 import yaml
+import jinja2
 
 
 class RootCommand:
@@ -60,16 +64,30 @@ class RootCommand:
 
     def load_config(self, config_file):
         try:
-            with open(config_file, "r") as cfile:
-                self.config = ordered_config_load(cfile, self.args)
+            template_reader = io.StringIO()
+            jinja_env = jinja2.Environment(
+                undefined=StrictUndefined,
+                loader=jinja2.FileSystemLoader(pathlib.Path(config_file).parents[0]),
+            )
+            template_config = jinja_env.get_template(pathlib.Path(config_file).name)
+            template_config.stream(**self.args.dashed_items(return_as_dict=True)).dump(
+                template_reader
+            )
+            self.config = ordered_config_load(template_reader.getvalue(), self.args)
 
-                # A little arbitrary, but decorate the top two levels
-                # directly on self object
-                self.tf = self.config.get("terraform", OrderedDict())
-                self._pullup_keys()
-
-        except IOError:
-            click.secho(f"Unable to open configuration file: {config_file}", fg="red")
+            # A little arbitrary, but decorate the top two levels
+            # directly on self object
+            self.tf = self.config.get("terraform", OrderedDict())
+            self._pullup_keys()
+        except jinja2.exceptions.TemplateNotFound as e:
+            path = pathlib.Path(config_file).parents[0]
+            click.secho(f"can not read template file: {path}/{e}", fg="red")
+            raise SystemExit(1)
+        except jinja2.exceptions.UndefinedError as e:
+            click.secho(
+                f"configuration file contains invalid template substitutions: {e}",
+                fg="red",
+            )
             raise SystemExit(1)
 
     def _pullup_keys(self):
@@ -91,7 +109,31 @@ class RootCommand:
     class StateArgs:
         """A class to hold arguments in the state for easier access."""
 
-        pass
+        def __iter__(self):
+            return iter(self.__dict__)
+
+        def __getitem__(self, name):
+            return self.__dict__[name]
+
+        def keys(self):
+            return self.__dict__.keys()
+
+        def items(self):
+            return self.__dict__.items()
+
+        def values(self):
+            return self.__dict__.values()
+
+        def dashed_items(self, return_as_dict=False):
+            rvals = {}
+            for k, v in self.__dict__.items():
+                rvals[k] = v
+                dash_key = k.replace("_", "-")
+                if k != dash_key:
+                    rvals[dash_key] = v
+            if return_as_dict:
+                return rvals
+            return rvals.items()
 
 
 def ordered_config_load(
@@ -131,6 +173,10 @@ def replace_vars(var, args):
         return var
     try:
         var = getattr(args, match.group(1).replace("-", "_"))
+        click.secho(
+            f"DEPRECATION WARNING: the use of //{match.group(1)}// substituion is deprecated and will be removed in a future version, use Jinja2 template style: {{{{ {match.group(1)} }}}}",
+            fg="yellow",
+        )
     except AttributeError:
         raise (ValueError(f"substitution not found for {var}"))
     return var

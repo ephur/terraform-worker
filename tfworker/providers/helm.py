@@ -40,7 +40,7 @@ class HelmProvider(BaseProvider):
 
             # Handle special case for kubernetes block in helm provider
             if k.lower() == "kubernetes" and isinstance(v, OrderedDict):
-                result.append(f'  {k} {{')
+                result.append(f"  {k} {{")
                 for ik, iv in v.items():
                     if iv and '"' not in iv:
                         result.append(f'    {ik} = "{iv}"')
