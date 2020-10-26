@@ -13,3 +13,7 @@ format: init
 
 test: init
 	poetry run pytest
+
+clean:
+	rm -rf build dist .eggs terraform_worker.egg-info
+	find . -name *.pyc -exec rm {} \;
