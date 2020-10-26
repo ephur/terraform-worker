@@ -216,7 +216,12 @@ class DefinitionsCollection(collections.abc.Mapping):
         return iter(self._definitions.values())
 
     def limited(self):
-        return iter(filter(lambda d: d.limited, self.iter(honor_destroy=True)))
+        # handle the case where nothing is filtered
+        if len(list(filter(lambda d: d.limited, self.iter(honor_destroy=True)))) == 0:
+            # the run is not limited to anything, so return everything
+            return self.iter(honor_destroy=True)
+        else:
+            return iter(filter(lambda d: d.limited, self.iter(honor_destroy=True)))
 
     @property
     def body(self):
