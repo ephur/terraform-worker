@@ -294,7 +294,7 @@ class TerraformCommand(BaseCommand):
         if hook_script is None:
             raise HookError(f"hook script missing from {hook_dir}")
 
-        # populate environment with terraform vars
+        # populate environment with terraform remotes
         if os.path.isfile(f"{working_dir}/worker-locals.tf"):
             # I'm sorry. :-)
             r = re.compile(
@@ -322,7 +322,7 @@ class TerraformCommand(BaseCommand):
                             ).decode()
                         local_env[f"TF_REMOTE_{state}_{item}".upper()] = state_value
 
-        # populate environment with terraform remotes
+        # populate environment with terraform variables
         if os.path.isfile(f"{working_dir}/worker.auto.tfvars"):
             with open(f"{working_dir}/worker.auto.tfvars") as f:
                 for line in f:

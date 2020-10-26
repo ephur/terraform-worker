@@ -168,6 +168,12 @@ def validate_host():
     default=const.DEFAULT_BACKEND_REGION,
     help="Region where terraform rootc/lock bucket exists",
 )
+@click.option(
+    "--config-var",
+    multiple=True,
+    default=[],
+    help='key=value to be supplied as jinja variables in config_file under "var" dictionary, can be specified multiple times',
+)
 @click.pass_context
 def cli(context, **kwargs):
     """CLI for the worker utility."""
