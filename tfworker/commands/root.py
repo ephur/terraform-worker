@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import io
+import os
 import platform
 import pathlib
 import re
@@ -70,9 +71,10 @@ class RootCommand:
                 loader=jinja2.FileSystemLoader(pathlib.Path(config_file).parents[0]),
             )
             template_config = jinja_env.get_template(pathlib.Path(config_file).name)
-            template_config.stream(**self.args.dashed_items(return_as_dict=True)).dump(
-                template_reader
-            )
+            # maybe get_env should be optional?
+            template_config.stream(
+                **self.args.template_items(return_as_dict=True, get_env=True)
+            ).dump(template_reader)
             self.config = ordered_config_load(template_reader.getvalue(), self.args)
 
             # A little arbitrary, but decorate the top two levels
@@ -124,16 +126,42 @@ class RootCommand:
         def values(self):
             return self.__dict__.values()
 
-        def dashed_items(self, return_as_dict=False):
+        def template_items(self, return_as_dict=False, get_env=False):
             rvals = {}
             for k, v in self.__dict__.items():
-                rvals[k] = v
-                dash_key = k.replace("_", "-")
-                if k != dash_key:
-                    rvals[dash_key] = v
+                if k == "config_var":
+                    try:
+                        rvals["var"] = get_config_var_dict(v)
+                    except ValueError as e:
+                        click.secho(
+                            f'Invalid config-var specified: "{e}" must be in format key=value',
+                            fg="red",
+                        )
+                        raise SystemExit(1)
+                else:
+                    rvals[k] = v
+            if get_env is True:
+                rvals["env"] = dict()
+                for k, v in os.environ.items():
+                    rvals["env"][k] = v
             if return_as_dict:
                 return rvals
             return rvals.items()
+
+
+def get_config_var_dict(config_vars):
+    """
+    get_config_var_dict returns a dictionary of of key=value for each item
+    provided as a command line substitution
+    """
+    return_vars = dict()
+    for cv in config_vars:
+        try:
+            k, v = tuple(cv.split("="))
+            return_vars[k] = v
+        except ValueError:
+            raise ValueError(cv)
+    return return_vars
 
 
 def ordered_config_load(
