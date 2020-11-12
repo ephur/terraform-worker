@@ -20,6 +20,7 @@ import urllib
 import zipfile
 
 import click
+from tenacity import retry, wait_chain, wait_fixed, stop_after_attempt
 from tfworker.commands.root import get_platform
 
 
@@ -39,6 +40,16 @@ class PluginsCollection(collections.abc.Mapping):
     def __iter__(self):
         return iter(self._providers.values())
 
+    @retry(
+        wait=wait_chain(
+            wait_fixed(5),
+            wait_fixed(30),
+            wait_fixed(60),
+            wait_fixed(180),
+            wait_fixed(300),
+        ),
+        stop=stop_after_attempt(5),
+    )
     def download(self):
         """
         Download the required plugins.

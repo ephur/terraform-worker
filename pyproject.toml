@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "terraform-worker"
-version = "0.5.3"
+version = "0.7.0"
 description = ""
-authors = ["Your Name <you@example.com>"]
+authors = ["Richard Maynard <richard.maynard@objectrocket.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.7"
@@ -10,6 +10,7 @@ boto3 = "^1.15.8"
 click = "^7.1.2"
 awscli = "^1.18.152"
 jinja2 = "^2.11.2"
+tenacity = "^6.2.0"
 
 [tool.poetry.dev-dependencies]
 ipython = "^7.18.1"
