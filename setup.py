@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="terraform-worker",
-    version="0.7.0",
+    version="0.7.1",
     packages=find_packages(exclude=["tests*"]),
     author="Richard Maynard",
     author_email="richard.maynard@gmail.com",
