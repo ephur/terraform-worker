@@ -111,14 +111,8 @@ class AWSProvider(BaseProvider):
             self._clean_locking_state(deployment)
 
     def delete_with_versions(self, key):
-        """
         delete_with_versions should handle object deletions, and all references / versions of the object
 
-        note: in initial testing this isn't required, but is inconsistent with how S3 delete markers, and the boto
-        delete object call work there may be some selfurations that require extra handling.
-        """
-        s3_client = self.state_session.client("s3")
-        s3_client.delete_object(Bucket=self.state_bucket, Key=key)
 
     @staticmethod
     def filter_keys(paginator, bucket_name, prefix="/", delimiter="/", start_after=""):
