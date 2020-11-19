@@ -43,6 +43,7 @@ def validate_gcp_creds_path(ctx, path, value):
 
 
 def validate_host():
+    """Ensure that the script is being run on a supported platform."""
     supported_opsys = ["darwin", "linux"]
     supported_machine = ["amd64"]
 
@@ -50,6 +51,14 @@ def validate_host():
 
     if opsys not in supported_opsys:
         click.secho(
+            f"this application is currently not known to support {opsys}",
+            fg="red",
+        )
+        raise SystemExit(2)
+
+    if machine not in supported_machine:
+        click.secho(
+            f"this application is currently not known to support running on {machine} machines",
             fg="red",
         )
 
