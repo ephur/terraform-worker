@@ -2,16 +2,16 @@ terraform:
   providers:
     aws:
       vars:
-        region: //aws-region//
+        region: {{ aws_region }}
 
     google:
       vars:
-        region: //aws-region//
+        region: {{ aws_region }}
 
     google_beta:
       version: 3.38.0
       vars:
-        region: //aws-region//
+        region: {{ aws_region }}
 
     'null':
       version: 2.2.2
@@ -19,12 +19,12 @@ terraform:
     vault:
       version: 3.38.0
       vars:
-        region: //aws-region//
-
-
+        region: {{ aws_region }}
+ 
   terraform_vars:
     vpc_cidr: 10.0.0.0/16
-    region: //aws-region//
+    region: {{ aws_region }}
+    deprecated_region: //aws-region//
     domain: "test.domain.com"
     ip_list:
       - 127.0.0.1/32
