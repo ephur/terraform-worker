@@ -48,7 +48,9 @@ def rootc():
     return result
 
 
-@pytest.fixture(params=[lazy_fixture("tf_12cmd"), lazy_fixture("tf_13cmd"), lazy_fixture("tf_Xcmd")])
+@pytest.fixture(
+    params=[lazy_fixture("tf_12cmd"), lazy_fixture("tf_13cmd"), lazy_fixture("tf_Xcmd")]
+)
 def tf_cmd(request):
     return request.param
 
@@ -59,13 +61,13 @@ def tf_cmd(request):
 def basec(create_table, session, rootc):
     return tfworker.commands.base.BaseCommand(rootc, "test-0001")
 
+
 @pytest.fixture
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator.session")
 @mock.patch("tfworker.backends.s3.S3Backend.create_table")
 def tf_Xcmd(create_table, session, rootc):
-    return tfworker.commands.terraform.TerraformCommand(
-        rootc, deployment="test-0001"
-    )
+    return tfworker.commands.terraform.TerraformCommand(rootc, deployment="test-0001")
+
 
 @pytest.fixture
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator.session")

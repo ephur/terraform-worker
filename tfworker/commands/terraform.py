@@ -498,7 +498,9 @@ class TerraformCommand(BaseCommand):
 
     @staticmethod
     def get_terraform_version(terraform_bin):
-        (return_code, stdout, stderr) = TerraformCommand.pipe_exec(f"{terraform_bin} version")
+        (return_code, stdout, stderr) = TerraformCommand.pipe_exec(
+            f"{terraform_bin} version"
+        )
         if return_code != 0:
             click.secho(f"unable to get terraform version\n{stderr}", fg="red")
             raise SystemExit(1)

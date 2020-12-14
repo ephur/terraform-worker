@@ -20,6 +20,7 @@ import pytest
 from pytest_lazyfixture import lazy_fixture
 from tfworker.commands.terraform import TerraformCommand
 
+
 # context manager to allow testing exceptions in parameterized tests
 @contextmanager
 def does_not_raise():
@@ -28,6 +29,7 @@ def does_not_raise():
 
 def mock_pipe_exec(args, stdin=None, cwd=None, env=None):
     return (0, "".encode(), "".encode())
+
 
 def mock_tf_version(args):
     return (0, args.encode(), "".encode())
@@ -101,16 +103,18 @@ class TestTerraformCommand:
         [
             ("Terraform v0.12.29", 12, 29, does_not_raise()),
             ("Terraform v0.13.5", 13, 5, does_not_raise()),
-            ("TF 14", "", "", pytest.raises(SystemExit))
-        ]
+            ("TF 14", "", "", pytest.raises(SystemExit)),
+        ],
     )
     def test_get_tf_version(self, stdout, major, minor, expected_exception):
         with mock.patch(
             "tfworker.commands.terraform.TerraformCommand.pipe_exec",
-            side_effect=mock_tf_version
+            side_effect=mock_tf_version,
         ) as mocked:
             with expected_exception:
-                (actual_major, actual_minor) = TerraformCommand.get_terraform_version(stdout)
+                (actual_major, actual_minor) = TerraformCommand.get_terraform_version(
+                    stdout
+                )
                 assert actual_major == major
                 assert actual_minor == minor
                 mocked.assert_called_once()
