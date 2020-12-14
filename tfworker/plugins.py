@@ -93,6 +93,7 @@ class PluginsCollection(collections.abc.Mapping):
 
             click.secho(f"plugin installed to: {plugin_dir}/{_platform}/", fg="yellow")
 
+
 def get_url(name, details):
     """
     Determine the URL for the plugin

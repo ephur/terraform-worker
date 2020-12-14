@@ -21,6 +21,7 @@ import tfworker
 import tfworker.commands.base
 import tfworker.commands.root
 import tfworker.providers
+from pytest_lazyfixture import lazy_fixture
 
 
 @pytest.fixture
@@ -47,18 +48,50 @@ def rootc():
     return result
 
 
+@pytest.fixture(params=[lazy_fixture("tf_12cmd"), lazy_fixture("tf_13cmd"), lazy_fixture("tf_Xcmd")])
+def tf_cmd(request):
+    return request.param
+
+
 @pytest.fixture
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator.session")
 @mock.patch("tfworker.backends.s3.S3Backend.create_table")
 def basec(create_table, session, rootc):
     return tfworker.commands.base.BaseCommand(rootc, "test-0001")
 
+@pytest.fixture
+@mock.patch("tfworker.authenticators.aws.AWSAuthenticator.session")
+@mock.patch("tfworker.backends.s3.S3Backend.create_table")
+def tf_Xcmd(create_table, session, rootc):
+    return tfworker.commands.terraform.TerraformCommand(
+        rootc, deployment="test-0001"
+    )
 
 @pytest.fixture
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator.session")
 @mock.patch("tfworker.backends.s3.S3Backend.create_table")
-def tf_cmd(create_table, session, rootc):
-    return tfworker.commands.terraform.TerraformCommand(rootc, deployment="test-0001")
+def tf_13cmd(create_table, session, rootc):
+    return tfworker.commands.terraform.TerraformCommand(
+        rootc, deployment="test-0001", tf_version=(13, 5)
+    )
+
+
+@pytest.fixture
+@mock.patch("tfworker.authenticators.aws.AWSAuthenticator.session")
+@mock.patch("tfworker.backends.s3.S3Backend.create_table")
+def tf_12cmd(create_table, session, rootc):
+    return tfworker.commands.terraform.TerraformCommand(
+        rootc, deployment="test-0001", tf_version=(12, 27)
+    )
+
+
+@pytest.fixture
+@mock.patch("tfworker.authenticators.aws.AWSAuthenticator.session")
+@mock.patch("tfworker.backends.s3.S3Backend.create_table")
+def tf_13cmd(create_table, session, rootc):
+    return tfworker.commands.terraform.TerraformCommand(
+        rootc, deployment="test-0001", tf_version=(13, 5)
+    )
 
 
 @pytest.fixture
