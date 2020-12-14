@@ -20,7 +20,7 @@ import urllib
 import zipfile
 
 import click
-from tenacity import retry, wait_chain, wait_fixed, stop_after_attempt
+from tenacity import retry, stop_after_attempt, wait_chain, wait_fixed
 from tfworker.commands.root import get_platform
 
 
@@ -64,16 +64,17 @@ class PluginsCollection(collections.abc.Mapping):
         opsys, machine = get_platform()
         _platform = f"{opsys}_{machine}"
 
+        print("checking & making plugin dir")
         plugin_dir = f"{self._temp_dir}/terraform-plugins"
         if not os.path.isdir(plugin_dir):
             os.mkdir(plugin_dir)
 
+        print("starting download loop")
         for name, details in self._plugins.items():
-            # Get platform and strip 2 off linux 2.x kernels
-            file_name = (
-                f"terraform-provider-{name}_{details['version']}_{_platform}.zip"
-            )
-            uri = f"https://releases.hashicorp.com/terraform-provider-{name}/{details['version']}/{file_name}"
+            uri = get_url(name, details)
+            file_name = uri.split("/")[-1]
+
+            print(f"using {uri} and {file_name}")
             click.secho(
                 f"getting plugin: {name} version {details['version']} from {uri}",
                 fg="yellow",
@@ -90,3 +91,36 @@ class PluginsCollection(collections.abc.Mapping):
             files = glob.glob(f"{plugin_dir}/{_platform}/terraform-provider*")
             for afile in files:
                 os.chmod(afile, 0o755)
+
+
+def get_url(name, details):
+    """
+    Determine the URL for the plugin
+
+    get URL returns a fully qualifed URL, including the file name.
+
+    In order to support third party terraform plugins we can not
+    assume the hashicorp repository. It will function as a default,
+    but if baseURL is provided in the plugin settings it will be
+    used instead. The logic to determine the complete remote path
+    will also be here to simplify the logic in the download method.
+    """
+    opsys, machine = get_platform()
+    _platform = f"{opsys}_{machine}"
+
+    try:
+        version = details["version"]
+    except KeyError:
+        raise KeyError(f"version must be specified for plugin {name}")
+
+    # set the file name, allow it to be overridden with key "filename"
+    default_file_name = f"terraform-provider-{name}_{version}_{_platform}.zip"
+    file_name = details.get("filename", default_file_name)
+
+    # set the base url, allow it to be overridden with key "baseURL"
+    default_base_url = (
+        f"https://releases.hashicorp.com/terraform-provider-{name}/{version}"
+    )
+    base_uri = details.get("baseURL", default_base_url).rstrip("/")
+
+    return f"{base_uri}/{file_name}"
