@@ -88,6 +88,10 @@ class PluginsCollection(collections.abc.Mapping):
             files = glob.glob(f"{plugin_dir}/{_platform}/terraform-provider*")
             for afile in files:
                 os.chmod(afile, 0o755)
+                filename = os.path.basename(afile)
+                os.rename(afile, f"{plugin_dir}/{filename}")
+
+            click.secho(f"plugin installed to: {plugin_dir}/{_platform}/", fg="yellow")
 
 
 def get_url(name, details):

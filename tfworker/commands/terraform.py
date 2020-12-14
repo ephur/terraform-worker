@@ -51,6 +51,14 @@ class TerraformCommand(BaseCommand):
         self._terraform_bin = kwargs.get("terraform_bin")
 
         self._plan_for = "destroy" if kwargs.get("destroy") else "apply"
+        (self._tf_version_major, self._tf_version_minor) = kwargs.get(
+            "tf_version", (None, None)
+        )
+        if self._tf_version_major is None or self._tf_version_minor is None:
+            (
+                self._tf_version_major,
+                self._tf_version_minor,
+            ) = self.get_terraform_version(self._terraform_bin)
         super(TerraformCommand, self).__init__(rootc, plan_for=self._plan_for, **kwargs)
 
     @property
@@ -149,12 +157,20 @@ class TerraformCommand(BaseCommand):
 
     def _run(self, definition, command, debug=False, plan_action="init"):
         """Run terraform."""
-        params = {
-            "init": "-input=false -no-color",
-            "plan": "-input=false -detailed-exitcode -no-color",
-            "apply": "-input=false -no-color -auto-approve",
-            "destroy": "-input=false -no-color -force",
-        }
+        if self._tf_version_major == 12:
+            params = {
+                "init": f"-input=false -no-color -plugin-dir={self._temp_dir}/terraform-plugins",
+                "plan": "-input=false -detailed-exitcode -no-color",
+                "apply": "-input=false -no-color -auto-approve",
+                "destroy": "-input=false -no-color -force",
+            }
+        else:
+            params = {
+                "init": "-input=false -no-color",
+                "plan": "-input=false -detailed-exitcode -no-color",
+                "apply": "-input=false -no-color -auto-approve",
+                "destroy": "-input=false -no-color -force",
+            }
 
         if plan_action == "destroy":
             params["plan"] += " -destroy"
@@ -479,3 +495,23 @@ class TerraformCommand(BaseCommand):
             )
         json_output = json.loads(stdout)
         return json.dumps(json_output, indent=None, separators=(",", ":"))
+
+    @staticmethod
+    def get_terraform_version(terraform_bin):
+        (return_code, stdout, stderr) = TerraformCommand.pipe_exec(
+            f"{terraform_bin} version"
+        )
+        if return_code != 0:
+            click.secho(f"unable to get terraform version\n{stderr}", fg="red")
+            raise SystemExit(1)
+        version = stdout.decode("UTF-8").split("\n")[0]
+        version_search = re.search(r".* v\d+\.(\d+)\.(\d+)", version)
+        if version_search:
+            click.secho(
+                f"Terraform Version Result: {version}, using major:{version_search.group(1)}, minor:{version_search.group(2)}",
+                fg="yellow",
+            )
+            return (int(version_search.group(1)), int(version_search.group(2)))
+        else:
+            click.secho(f"unable to get terraform version\n{stderr}", fg="red")
+            raise SystemExit(1)

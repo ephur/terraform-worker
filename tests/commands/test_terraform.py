@@ -13,17 +13,30 @@
 # limitations under the License.
 
 import filecmp
+from contextlib import contextmanager
 from unittest import mock
 
 import pytest
+from pytest_lazyfixture import lazy_fixture
 from tfworker.commands.terraform import TerraformCommand
+
+
+# context manager to allow testing exceptions in parameterized tests
+@contextmanager
+def does_not_raise():
+    yield
 
 
 def mock_pipe_exec(args, stdin=None, cwd=None, env=None):
     return (0, "".encode(), "".encode())
 
 
+def mock_tf_version(args):
+    return (0, args.encode(), "".encode())
+
+
 class TestTerraformCommand:
+    @pytest.mark.parametrize("tf_cmd", [lazy_fixture("tf_12cmd")])
     def test_prep_modules(self, tf_cmd, rootc):
         tf_cmd.prep_modules()
         for test_file in [
@@ -34,7 +47,17 @@ class TestTerraformCommand:
             dst = rootc.temp_dir + test_file
             assert filecmp.cmp(src, dst, shallow=False)
 
-    @pytest.mark.parametrize("method", ["init", "plan", "apply"])
+    @pytest.mark.parametrize(
+        "method, tf_cmd",
+        [
+            ("init", lazy_fixture("tf_12cmd")),
+            ("plan", lazy_fixture("tf_12cmd")),
+            ("apply", lazy_fixture("tf_12cmd")),
+            ("init", lazy_fixture("tf_13cmd")),
+            ("plan", lazy_fixture("tf_13cmd")),
+            ("apply", lazy_fixture("tf_13cmd")),
+        ],
+    )
     def test_run(self, tf_cmd, method):
         with mock.patch(
             "tfworker.commands.terraform.TerraformCommand.pipe_exec",
@@ -74,3 +97,24 @@ class TestTerraformCommand:
         assert return_exit_code == exit_code
         assert stdout.encode() in return_stdout.rstrip()
         assert return_stderr.rstrip() in stderr.encode()
+
+    @pytest.mark.parametrize(
+        "stdout, major, minor, expected_exception",
+        [
+            ("Terraform v0.12.29", 12, 29, does_not_raise()),
+            ("Terraform v0.13.5", 13, 5, does_not_raise()),
+            ("TF 14", "", "", pytest.raises(SystemExit)),
+        ],
+    )
+    def test_get_tf_version(self, stdout, major, minor, expected_exception):
+        with mock.patch(
+            "tfworker.commands.terraform.TerraformCommand.pipe_exec",
+            side_effect=mock_tf_version,
+        ) as mocked:
+            with expected_exception:
+                (actual_major, actual_minor) = TerraformCommand.get_terraform_version(
+                    stdout
+                )
+                assert actual_major == major
+                assert actual_minor == minor
+                mocked.assert_called_once()

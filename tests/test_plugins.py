@@ -74,7 +74,7 @@ class TestPlugins:
         )
         plugins.download()
         files = glob.glob(
-            f"{rootc.temp_dir}/terraform-plugins/{opsys}_{machine}/terraform-provider-null_v2.1.2*"
+            f"{rootc.temp_dir}/terraform-plugins/terraform-provider-null_v2.1.2*"
         )
         assert len(files) > 0
         for afile in files:
