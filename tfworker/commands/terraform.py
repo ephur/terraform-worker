@@ -166,7 +166,7 @@ class TerraformCommand(BaseCommand):
             }
         else:
             params = {
-                "init": f"-input=false -no-color",
+                "init": "-input=false -no-color",
                 "plan": "-input=false -detailed-exitcode -no-color",
                 "apply": "-input=false -no-color -auto-approve",
                 "destroy": "-input=false -no-color -force",

@@ -88,15 +88,6 @@ def tf_12cmd(create_table, session, rootc):
 
 
 @pytest.fixture
-@mock.patch("tfworker.authenticators.aws.AWSAuthenticator.session")
-@mock.patch("tfworker.backends.s3.S3Backend.create_table")
-def tf_13cmd(create_table, session, rootc):
-    return tfworker.commands.terraform.TerraformCommand(
-        rootc, deployment="test-0001", tf_version=(13, 5)
-    )
-
-
-@pytest.fixture
 def definition_odict():
     one_def = {
         "test": collections.OrderedDict(
