@@ -128,7 +128,7 @@ class Definition:
             with open(f"{target}/worker-locals.tf", "w+") as tflocals:
                 tflocals.write("locals {\n")
                 for k, v in self._remote_vars.items():
-                    tflocals.write(f'  {k} = "${{data.terraform_remote_state.{v}}}"\n')
+                    tflocals.write(f"  {k} = data.terraform_remote_state.{v}\n")
                 tflocals.write("}\n\n")
 
         with open(f"{target}/terraform.tf", "w+") as tffile:

@@ -14,17 +14,17 @@
 
 import io
 import os
-import platform
 import pathlib
+import platform
 import re
 import shutil
 import tempfile
 from collections import OrderedDict
 
 import click
-from jinja2.runtime import StrictUndefined
-import yaml
 import jinja2
+import yaml
+from jinja2.runtime import StrictUndefined
 
 
 class RootCommand:
