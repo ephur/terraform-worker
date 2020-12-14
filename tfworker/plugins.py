@@ -64,17 +64,14 @@ class PluginsCollection(collections.abc.Mapping):
         opsys, machine = get_platform()
         _platform = f"{opsys}_{machine}"
 
-        print("checking & making plugin dir")
         plugin_dir = f"{self._temp_dir}/terraform-plugins"
         if not os.path.isdir(plugin_dir):
             os.mkdir(plugin_dir)
 
-        print("starting download loop")
         for name, details in self._plugins.items():
             uri = get_url(name, details)
             file_name = uri.split("/")[-1]
 
-            print(f"using {uri} and {file_name}")
             click.secho(
                 f"getting plugin: {name} version {details['version']} from {uri}",
                 fg="yellow",
