@@ -150,7 +150,7 @@ class TerraformCommand(BaseCommand):
     def _run(self, definition, command, debug=False, plan_action="init"):
         """Run terraform."""
         params = {
-            "init": "-input=false -no-color",
+            "init": f"-input=false -no-color -plugin-dir={self._temp_dir}/terraform-plugins",
             "plan": "-input=false -detailed-exitcode -no-color",
             "apply": "-input=false -no-color -auto-approve",
             "destroy": "-input=false -no-color -force",
