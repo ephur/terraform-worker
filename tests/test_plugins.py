@@ -14,14 +14,61 @@
 
 import glob
 import os
+from contextlib import contextmanager
 
+import pytest
 import tfworker.commands.root
 import tfworker.plugins
 
+# values needed by multiple tests
+opsys, machine = tfworker.commands.root.get_platform()
+_platform = f"{opsys}_{machine}"
+
+
+# context manager to allow testing exceptions in parameterized tests
+@contextmanager
+def does_not_raise():
+    yield
+
+
+# test data to ensure URL's are formed correctly, and exception is thrown
+# when version is not passed
+test_get_url_data = [
+    (
+        "default_test",
+        {"version": "1.0.0"},
+        f"https://releases.hashicorp.com/terraform-provider-default_test/1.0.0/terraform-provider-default_test_1.0.0_{_platform}.zip",
+        does_not_raise(),
+    ),
+    (
+        "uri_test",
+        {"version": "1.5.0", "baseURL": "http://localhost/"},
+        f"http://localhost/terraform-provider-uri_test_1.5.0_{_platform}.zip",
+        does_not_raise(),
+    ),
+    (
+        "filename_test",
+        {"version": "2.0.0", "filename": "filename_test.zip"},
+        "https://releases.hashicorp.com/terraform-provider-filename_test/2.0.0/filename_test.zip",
+        does_not_raise(),
+    ),
+    (
+        "filename_and_uri_test",
+        {
+            "version": "2.5.0",
+            "filename": "filename_test.zip",
+            "baseURL": "http://localhost/",
+        },
+        "http://localhost/filename_test.zip",
+        does_not_raise(),
+    ),
+    ("bad_version", {}, None, pytest.raises(KeyError)),
+]
+
 
 class TestPlugins:
+    @pytest.mark.depends(on="get_url")
     def test_plugin_download(self, rootc):
-        opsys, machine = tfworker.commands.root.get_platform()
         plugins = tfworker.plugins.PluginsCollection(
             {"null": {"version": "2.1.2"}}, rootc.temp_dir
         )
@@ -33,3 +80,12 @@ class TestPlugins:
         for afile in files:
             assert os.path.isfile(afile)
             assert (os.stat(afile).st_mode & 0o777) == 0o755
+
+    @pytest.mark.depends(name="get_url")
+    @pytest.mark.parametrize(
+        "name,details,expected_url, expected_exception", test_get_url_data
+    )
+    def test_get_url(self, name, details, expected_url, expected_exception):
+        with expected_exception:
+            actual_url = tfworker.plugins.get_url(name, details)
+            assert expected_url == actual_url
