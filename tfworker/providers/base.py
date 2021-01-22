@@ -19,6 +19,7 @@ class BaseProvider:
     def __init__(self, body):
         self.vars = body.get("vars", {})
         self.version = self.vars.get("version")
+        self.source = body.get("source")
 
     def hcl(self):
         result = []
@@ -38,6 +39,16 @@ class BaseProvider:
                 result.append(f"  {k} = {v}")
         result.append("}")
         return "\n".join(result)
+
+    def required(self):
+        return "\n".join(
+            [
+                f"    {self.tag} = {{",
+                f'      source = "{self.source}"',
+                f'      version = "{self.version}"',
+                "     }",
+            ]
+        )
 
     def clean(self, deployment, limit, config):
         """Nothing to do here so far"""

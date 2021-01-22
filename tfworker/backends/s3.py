@@ -86,7 +86,6 @@ class S3Backend(BaseBackend):
 
     def hcl(self, name):
         state_config = []
-        state_config.append("terraform {")
         state_config.append('  backend "s3" {')
         state_config.append(f'    region = "{self._authenticator.backend_region}"')
         state_config.append(f'    bucket = "{self._authenticator.bucket}"')
@@ -96,7 +95,6 @@ class S3Backend(BaseBackend):
         state_config.append(f'    dynamodb_table = "terraform-{self._deployment}"')
         state_config.append('    encrypt = "true"')
         state_config.append("  }")
-        state_config.append("}")
         return "\n".join(state_config)
 
     def data_hcl(self, exclude):

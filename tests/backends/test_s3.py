@@ -15,15 +15,13 @@
 
 def test_s3_hcl(basec):
     render = basec.backend.hcl("test")
-    expected_render = """terraform {
-  backend "s3" {
+    expected_render = """  backend "s3" {
     region = "us-west-2"
     bucket = "test_bucket"
     key = "terraform/test-0001/test/terraform.tfstate"
     dynamodb_table = "terraform-test-0001"
     encrypt = "true"
-  }
-}"""
+  }"""
     assert render == expected_render
 
 

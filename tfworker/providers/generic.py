@@ -23,4 +23,4 @@ class GenericProvider(BaseProvider):
 
         self.tag = kwargs.get("tag", self.tag)
         self.vars = body.get("vars", {})
-        self.version = body.get("version")
+        self.version = self.vars.get("version")
