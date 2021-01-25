@@ -23,6 +23,14 @@ import click
 import jinja2
 from tfworker import constants as const
 
+TERRAFORM_TPL = """\
+terraform {{
+{0}
+
+{1}
+}}
+"""
+
 
 class ReservedFileError(Exception):
     pass
@@ -133,7 +141,12 @@ class Definition:
 
         with open(f"{target}/terraform.tf", "w+") as tffile:
             tffile.write(f"{self._providers.hcl()}\n\n")
-            tffile.write(f"{backend.hcl(self.tag)}\n\n")
+            tffile.write(
+                TERRAFORM_TPL.format(
+                    f"{backend.hcl(self.tag)}",
+                    f"{self._providers.required_providers()}",
+                )
+            )
             tffile.write(backend.data_hcl(self.tag))
 
         # Create the variable definitions

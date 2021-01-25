@@ -24,6 +24,11 @@ from .helm import HelmProvider  # noqa
 
 ALL = [AWSProvider, GoogleProvider, GoogleBetaProvider, HelmProvider]
 
+REQUIRED_PROVIDERS_TPL = """\
+  required_providers {{
+{0}
+  }}"""
+
 
 class ProvidersCollection(collections.abc.Mapping):
     def __init__(self, providers_odict, rootc):
@@ -49,3 +54,9 @@ class ProvidersCollection(collections.abc.Mapping):
 
     def hcl(self):
         return "\n".join([prov.hcl() for _, prov in self._providers.items()])
+
+    def required_providers(self):
+        content = "\n".join(
+            [prov.required() for _, prov in self._providers.items() if prov.source]
+        )
+        return REQUIRED_PROVIDERS_TPL.format(content)

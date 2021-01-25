@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "terraform-worker"
-version = "0.7.1"
+version = "0.7.2"
 description = ""
 authors = ["Richard Maynard <richard.maynard@objectrocket.com>"]
 

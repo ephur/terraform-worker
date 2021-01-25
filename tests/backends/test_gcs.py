@@ -29,13 +29,11 @@ def gbasec(rootc):
 
 def test_google_hcl(gbasec):
     render = gbasec.backend.hcl("test")
-    expected_render = """terraform {
-  backend "gcs" {
+    expected_render = """  backend "gcs" {
     bucket = "test_gcp_bucket"
     prefix = "terraform/test-0002/test"
     credentials = "/home/test/test-creds.json"
-  }
-}"""
+  }"""
     assert render == expected_render
 
 

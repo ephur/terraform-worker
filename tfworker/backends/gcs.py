@@ -27,14 +27,12 @@ class GCSBackend(BaseBackend):
 
     def hcl(self, name):
         state_config = []
-        state_config.append("terraform {")
         state_config.append('  backend "gcs" {')
         state_config.append(f'    bucket = "{self._authenticator.bucket}"')
         state_config.append(f'    prefix = "{self._authenticator.prefix}/{name}"')
         if self._authenticator.creds_path:
             state_config.append(f'    credentials = "{self._authenticator.creds_path}"')
         state_config.append("  }")
-        state_config.append("}")
         return "\n".join(state_config)
 
     def data_hcl(self, exclude):

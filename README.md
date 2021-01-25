@@ -33,6 +33,17 @@ terraform:
 % worker --aws-profile default --backend s3 terraform --show-output example1
 ```
 
+**NOTE:** When adding a provider from a non-hashicorp source, use a `source` field, as follows:
+
+```yaml
+providers:
+...
+  kubectl:
+    vars:
+      version: "~> 1.9"
+    source: "gavinbunney/kubectl"
+```
+
 ## Development
 
 ```sh
