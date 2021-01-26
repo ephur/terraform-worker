@@ -25,9 +25,7 @@ from tfworker import constants as const
 
 TERRAFORM_TPL = """\
 terraform {{
-{0}
-
-{1}
+{0}{1}
 }}
 """
 
@@ -48,6 +46,7 @@ class Definition:
         providers,
         repository_path,
         temp_dir,
+        tf_version_major,
         limited=False,
     ):
         self.tag = definition
@@ -67,6 +66,7 @@ class Definition:
         self._repository_path = repository_path
         self._providers = providers
         self._temp_dir = temp_dir
+        self._tf_version_major = tf_version_major
         self._limited = limited
 
     @property
@@ -141,10 +141,13 @@ class Definition:
 
         with open(f"{target}/terraform.tf", "w+") as tffile:
             tffile.write(f"{self._providers.hcl()}\n\n")
+            required_providers = ""
+            if self._tf_version_major >= 13:
+                required_providers = f"\n\n{self._providers.required_providers()}"
             tffile.write(
                 TERRAFORM_TPL.format(
                     f"{backend.hcl(self.tag)}",
-                    f"{self._providers.required_providers()}",
+                    required_providers,
                 )
             )
             tffile.write(backend.data_hcl(self.tag))
@@ -193,6 +196,7 @@ class DefinitionsCollection(collections.abc.Mapping):
         repository_path,
         rootc,
         temp_dir,
+        tf_version_major,
     ):
         self._body = definitions
         self._plan_for = plan_for
@@ -208,6 +212,7 @@ class DefinitionsCollection(collections.abc.Mapping):
                 providers,
                 repository_path,
                 temp_dir,
+                tf_version_major,
                 True if limit and definition in limit else False,
             )
 

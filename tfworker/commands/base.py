@@ -23,7 +23,13 @@ from tfworker.providers import ProvidersCollection
 
 class BaseCommand:
     def __init__(
-        self, rootc, deployment="undefined", limit=None, plan_for="apply", **kwargs
+        self,
+        rootc,
+        deployment="undefined",
+        limit=None,
+        plan_for="apply",
+        tf_version_major=0,
+        **kwargs
     ):
         self._version = None
         self._providers = None
@@ -54,6 +60,7 @@ class BaseCommand:
             self._repository_path,
             rootc,
             self._temp_dir,
+            tf_version_major,
         )
         self._plugins = PluginsCollection(rootc.plugins_odict, self._temp_dir)
         self._backend = select_backend(

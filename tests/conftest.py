@@ -59,7 +59,7 @@ def tf_cmd(request):
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator.session")
 @mock.patch("tfworker.backends.s3.S3Backend.create_table")
 def basec(create_table, session, rootc):
-    return tfworker.commands.base.BaseCommand(rootc, "test-0001")
+    return tfworker.commands.base.BaseCommand(rootc, "test-0001", tf_version_major=13)
 
 
 @pytest.fixture

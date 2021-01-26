@@ -23,7 +23,7 @@ EXPECTED_TEST_BLOCK = """resource "null_resource" "test_a" {
 }
 """
 
-EXPECTED_TF_BLOCK = """terraform {
+EXPECTED_13PLUS_TF_BLOCK = """terraform {
   backend "s3" {
     region = "us-west-2"
     bucket = "test_bucket"
@@ -37,6 +37,17 @@ EXPECTED_TF_BLOCK = """terraform {
   }
 }"""
 
+EXPECTED_12LESS_TF_BLOCK = """terraform {
+  backend "s3" {
+    region = "us-west-2"
+    bucket = "test_bucket"
+    key = "terraform/test-0001/test/terraform.tfstate"
+    dynamodb_table = "terraform-test-0001"
+    encrypt = "true"
+  }
+}"""
+
+
 EXPECTED_VARS_BLOCK = """vpc_cidr = "10.0.0.0/16"
 region = "us-west-2"
 deprecated_region = "us-west-2"
@@ -47,8 +58,17 @@ deployment = "test-0001"
 
 
 class TestDefinitions:
-    def test_prep(self, basec):
+    @pytest.mark.parametrize(
+        "tf_version, expected_tf_block",
+        [
+            (14, EXPECTED_13PLUS_TF_BLOCK),
+            (13, EXPECTED_13PLUS_TF_BLOCK),
+            (12, EXPECTED_12LESS_TF_BLOCK),
+        ],
+    )
+    def test_prep(self, basec, tf_version, expected_tf_block):
         definition = basec.definitions["test"]
+        definition._tf_version_major = tf_version
         definition.prep(basec.backend)
         # File contents of rendered files are not tested, the rendering functions are tested in other tests
         assert os.path.isfile(basec.temp_dir + "/definitions/test/test.tf")
@@ -56,7 +76,7 @@ class TestDefinitions:
             assert EXPECTED_TEST_BLOCK in reader.read()
         assert os.path.isfile(basec.temp_dir + "/definitions/test/terraform.tf")
         with open(basec.temp_dir + "/definitions/test/terraform.tf", "r") as reader:
-            assert EXPECTED_TF_BLOCK in reader.read()
+            assert expected_tf_block in reader.read()
         assert os.path.isfile(basec.temp_dir + "/definitions/test/worker.auto.tfvars")
         with open(
             basec.temp_dir + "/definitions/test/worker.auto.tfvars", "r"
@@ -65,7 +85,11 @@ class TestDefinitions:
 
     @pytest.mark.parametrize(
         "base, expected",
-        [({"terraform_vars": {"c": 1}}, 3), ({"miss": {"c": "bad_val"}}, 3), ({}, 3)],
+        [
+            ({"terraform_vars": {"c": 1}}, 3),
+            ({"miss": {"c": "bad_val"}}, 3),
+            ({}, 3),
+        ],
     )
     def test_make_vars(self, definition_odict, base, expected):
         name = "test"
@@ -79,6 +103,7 @@ class TestDefinitions:
             None,
             "",
             "",
+            12,
         )
         test_vars = definition.make_vars(
             definition_odict[name].get("terraform_vars", collections.OrderedDict()),

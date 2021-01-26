@@ -65,6 +65,10 @@ class TerraformCommand(BaseCommand):
     def plan_for(self):
         return self._plan_for
 
+    @property
+    def tf_version_major(self):
+        return self._tf_version_major
+
     def prep_modules(self):
         """Puts the modules sub directories into place."""
         mod_source = f"{self._repository_path}/terraform-modules".replace("//", "/")

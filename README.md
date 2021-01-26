@@ -33,7 +33,8 @@ terraform:
 % worker --aws-profile default --backend s3 terraform --show-output example1
 ```
 
-**NOTE:** When adding a provider from a non-hashicorp source, use a `source` field, as follows:
+**NOTE:** When adding a provider from a non-hashicorp source, use a `source` field, as follows
+(_the `source` field is only valid for terraform 13+ and is not emitted when using 12_):
 
 ```yaml
 providers:
