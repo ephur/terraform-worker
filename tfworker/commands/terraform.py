@@ -65,6 +65,10 @@ class TerraformCommand(BaseCommand):
     def plan_for(self):
         return self._plan_for
 
+    @property
+    def tf_version_major(self):
+        return self._tf_version_major
+
     def prep_modules(self):
         """Puts the modules sub directories into place."""
         mod_source = f"{self._repository_path}/terraform-modules".replace("//", "/")
@@ -157,7 +161,7 @@ class TerraformCommand(BaseCommand):
 
     def _run(self, definition, command, debug=False, plan_action="init"):
         """Run terraform."""
-        if self._tf_version_major == 12:
+        if self._tf_version_major >= 12:
             params = {
                 "init": f"-input=false -no-color -plugin-dir={self._temp_dir}/terraform-plugins",
                 "plan": "-input=false -detailed-exitcode -no-color",
