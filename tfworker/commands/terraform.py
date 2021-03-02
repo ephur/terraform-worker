@@ -46,7 +46,7 @@ class TerraformCommand(BaseCommand):
 
         self._b64_encode = kwargs.get("b64_encode")
         self._deployment = kwargs.get("deployment")
-        self._force_apply = kwargs.get("force_apply")
+        self._force = kwargs.get("force")
         self._show_output = kwargs.get("show_output")
         self._terraform_bin = kwargs.get("terraform_bin")
 
@@ -98,7 +98,10 @@ class TerraformCommand(BaseCommand):
                 click.secho("error running terraform init", fg="red")
                 raise SystemExit(1)
 
-            click.secho(f"planning definition: {definition.tag}", fg="green")
+            click.secho(
+                f"planning definition for {self._plan_for}: {definition.tag}",
+                fg="green",
+            )
 
             # run terraform plan
             try:
@@ -109,6 +112,11 @@ class TerraformCommand(BaseCommand):
                     plan_action=self._plan_for,
                 )
             except PlanChange:
+                # on destroy, terraform ALWAYS indicates a plan change, at least as of
+                # version 0.12.x, unsure why
+                click.secho(
+                    f"plan changes for {self._plan_for} {definition.tag}", fg="red"
+                )
                 execute = True
             except TerraformError:
                 click.secho(
@@ -117,27 +125,19 @@ class TerraformCommand(BaseCommand):
                 )
                 raise SystemExit(2)
 
-            if self._force_apply:
-                execute = True
-
-            if execute and self._tf_apply:
-                if self._force_apply:
-                    click.secho(
-                        f"force apply for {definition.tag}, applying",
-                        fg="yellow",
-                    )
-                else:
-                    click.secho(
-                        f"plan changes for {definition.tag}, applying",
-                        fg="yellow",
-                    )
-            elif execute and self._destroy:
-                click.secho(
-                    f"plan changes for {definition.tag}, destroying",
-                    fg="yellow",
-                )
-            elif not execute:
+            if not execute:
                 click.secho(f"no plan changes for {definition.tag}", fg="yellow")
+
+            if self._force and (self._tf_apply or self._destroy):
+                execute = True
+                click.secho(f"forcing {self._plan_for} due to --force", fg="red")
+
+            # there are no plan changes, and no forced execution, so move on
+            if not execute:
+                continue
+
+            # no apply/destroy requested, so move on
+            if not self._tf_apply and not self._destroy:
                 continue
 
             try:
