@@ -243,13 +243,13 @@ class DefinitionsCollection(collections.abc.Mapping):
         if iter_size == 0:
             # a limit was supplied, but not matched, raise an error
             if self._limit:
-                raise ValueError("no items matching limit")
+                raise ValueError("no definitions matching --limit")
             # the run is not limited to anything, so return everything
             else:
                 return self.iter(honor_destroy=True)
         elif iter_size < self._limit_size:
             # not all limit items are matched
-            raise ValueError("not all items matching limit")
+            raise ValueError("not all definitions match --limit")
         else:
             return iter(filter(lambda d: d.limited, self.iter(honor_destroy=True)))
 
