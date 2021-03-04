@@ -201,6 +201,8 @@ class DefinitionsCollection(collections.abc.Mapping):
         self._body = definitions
         self._plan_for = plan_for
         self._definitions = collections.OrderedDict()
+        self._limit = True if len(limit) > 0 else False
+        self._limit_size = len(limit)
         for definition, body in definitions.items():
             self._definitions[definition] = Definition(
                 definition,
@@ -235,9 +237,19 @@ class DefinitionsCollection(collections.abc.Mapping):
 
     def limited(self):
         # handle the case where nothing is filtered
-        if len(list(filter(lambda d: d.limited, self.iter(honor_destroy=True)))) == 0:
+        iter_size = len(
+            list(filter(lambda d: d.limited, self.iter(honor_destroy=True)))
+        )
+        if iter_size == 0:
+            # a limit was supplied, but not matched, raise an error
+            if self._limit:
+                raise ValueError("no definitions matching --limit")
             # the run is not limited to anything, so return everything
-            return self.iter(honor_destroy=True)
+            else:
+                return self.iter(honor_destroy=True)
+        elif iter_size < self._limit_size:
+            # not all limit items are matched
+            raise ValueError("not all definitions match --limit")
         else:
             return iter(filter(lambda d: d.limited, self.iter(honor_destroy=True)))
 

@@ -26,7 +26,7 @@ class BaseCommand:
         self,
         rootc,
         deployment="undefined",
-        limit=None,
+        limit=tuple(),
         plan_for="apply",
         tf_version_major=0,
         **kwargs

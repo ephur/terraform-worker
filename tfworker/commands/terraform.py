@@ -84,7 +84,13 @@ class TerraformCommand(BaseCommand):
         )
 
     def exec(self):
-        for definition in self.definitions.limited():
+        try:
+            def_iter = self.definitions.limited()
+        except ValueError as e:
+            click.secho(f"Error with supplied limit: {e}", fg="red")
+            raise SystemExit(1)
+
+        for definition in def_iter:
             execute = False
             # copy definition files / templates etc.
             click.secho(f"preparing definition: {definition.tag}", fg="green")
