@@ -210,10 +210,10 @@ def clean(rootc, *args, **kwargs):  # noqa: E501
     help="apply the terraform configuration",
 )
 @click.option(
-    "--force-apply/--no-force-apply",
-    "force_apply",
+    "--force/--no-force",
+    "force",
     default=False,
-    help="force apply without plan change",
+    help="force apply/destroy without plan change",
 )
 @click.option(
     "--destroy/--no-destroy",
