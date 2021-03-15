@@ -117,19 +117,23 @@ class TestDefinitions:
         "base, expected, inner",
         [
             ("a_test_str", '"a_test_str"', False),
-            ({"key1": "val1", "key2": "val2"}, '{"key1": "val1", "key2": "val2"}', False),
+            (
+                {"key1": "val1", "key2": "val2"},
+                '{"key1": "val1", "key2": "val2"}',
+                False,
+            ),
             ({"key1": "val1", "key2": "val2"}, {"key1": "val1", "key2": "val2"}, True),
             (["item1", "item2", "item3"], '["item1", "item2", "item3"]', False),
             (["item1", "item2", "item3"], ["item1", "item2", "item3"], True),
             (
                 {"lkey": ["item1", "item2", "item3"]},
                 '{"lkey": ["item1", "item2", "item3"]}',
-                False
+                False,
             ),
             (
                 {"lkey": ["item1", "item2", "item3"]},
                 {"lkey": ["item1", "item2", "item3"]},
-                True
+                True,
             ),
         ],
     )
