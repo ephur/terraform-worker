@@ -29,6 +29,17 @@ terraform:
     ip_list:
       - 127.0.0.1/32
       - 192.168.0.1/32
+    map_list:
+      list:
+        - a
+        - b
+        - c
+    map_map:
+      map:
+        list:
+          - x
+          - y
+          - z 
   definitions:
     test:
       path: /definitions/test_a
