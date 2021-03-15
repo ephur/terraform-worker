@@ -114,16 +114,24 @@ class TestDefinitions:
         assert test_vars["c"] == expected
 
     @pytest.mark.parametrize(
-        "base, expected",
+        "base, expected, inner",
         [
-            ("a_test_str", '"a_test_str"'),
-            ({"key1": "val1", "key2": "val2"}, '{"key1": "val1", "key2": "val2"}'),
-            (["item1", "item2", "item3"], '["item1", "item2", "item3"]'),
+            ("a_test_str", '"a_test_str"', False),
+            ({"key1": "val1", "key2": "val2"}, '{"key1": "val1", "key2": "val2"}', False),
+            ({"key1": "val1", "key2": "val2"}, {"key1": "val1", "key2": "val2"}, True),
+            (["item1", "item2", "item3"], '["item1", "item2", "item3"]', False),
+            (["item1", "item2", "item3"], ["item1", "item2", "item3"], True),
             (
                 {"lkey": ["item1", "item2", "item3"]},
                 '{"lkey": ["item1", "item2", "item3"]}',
+                False
+            ),
+            (
+                {"lkey": ["item1", "item2", "item3"]},
+                {"lkey": ["item1", "item2", "item3"]},
+                True
             ),
         ],
     )
-    def test_var_typer(self, base, expected):
-        assert Definition.vars_typer(base) == expected
+    def test_var_typer(self, base, expected, inner):
+        assert Definition.vars_typer(base, inner=inner) == expected
