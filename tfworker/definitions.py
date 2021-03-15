@@ -14,10 +14,12 @@
 
 import collections
 import copy
+import json
 import os
 import shutil
 import sys
 from pathlib import Path
+from typing import OrderedDict
 
 import click
 import jinja2
@@ -155,11 +157,7 @@ class Definition:
         # Create the variable definitions
         with open(f"{target}/worker.auto.tfvars", "w+") as varfile:
             for k, v in self._terraform_vars.items():
-                if isinstance(v, list):
-                    varstring = f'[{", ".join(map(Definition.quote_str, v))}]'
-                    varfile.write(f"{k} = {varstring}\n")
-                else:
-                    varfile.write(f'{k} = "{v}"\n')
+                varfile.write(f"{k} = {self.vars_typer(v)}\n")
 
     @staticmethod
     def quote_str(some_string):
@@ -171,18 +169,44 @@ class Definition:
         global_vars = global_vars or collections.OrderedDict()
         item_vars = copy.deepcopy(global_vars)
         for k, v in local_vars.items():
-            # terraform expects variables in a specific type, so need to convert bools to a lower case true/false
-            matched_type = False
-            if v is True:
-                item_vars[k] = "true"
-                matched_type = True
-            if v is False:
-                item_vars[k] = "false"
-                matched_type = True
-            if not matched_type:
-                item_vars[k] = v
-
+            item_vars[k] = v
         return item_vars
+
+    @staticmethod
+    def vars_typer(v, inner=False):
+        """
+        vars_typer is used to assemble variables as they are parsed from the yaml configuration
+        into the required format to be used in terraform
+        """
+        if v is True:
+            return "true"
+        elif v is False:
+            return "false"
+        elif isinstance(v, list):
+            rval = []
+            for val in v:
+                result = Definition.vars_typer(val, inner=True)
+                try:
+                    rval.append(result.strip('"').strip("'"))
+                except AttributeError:
+                    rval.append(result)
+            if inner:
+                return rval
+            else:
+                return json.dumps(rval)
+        elif isinstance(v, OrderedDict) or isinstance(v, dict):
+            rval = {}
+            for k, val in v.items():
+                result = Definition.vars_typer(val, inner=True)
+                try:
+                    rval[k] = result.strip('"').strip("'")
+                except AttributeError:
+                    rval[k] = result
+            if inner:
+                return rval
+            else:
+                return json.dumps(rval)
+        return f'"{v}"'
 
 
 class DefinitionsCollection(collections.abc.Mapping):
