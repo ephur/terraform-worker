@@ -125,6 +125,9 @@ class Definition:
         if os.path.isdir(f"{repo}/repos".replace("//", "/")):
             shutil.copytree(f"{repo}/repos", f"{target}/repos")
 
+        if os.path.isdir(f"{repo}/cfn".replace("//", "/")):
+            shutil.copytree(f"{repo}/cfn", f"{target}/cfn")
+
         # Render jinja templates and put in place
         env = jinja2.Environment(loader=jinja2.FileSystemLoader)
 
