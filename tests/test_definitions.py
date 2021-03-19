@@ -53,6 +53,8 @@ region = "us-west-2"
 deprecated_region = "us-west-2"
 domain = "test.domain.com"
 ip_list = ["127.0.0.1/32", "192.168.0.1/32"]
+map_list = {"list": ["a", "b", "c"]}
+map_map = {"map": {"list": ["x", "y", "z"]}}
 deployment = "test-0001"
 """
 
@@ -110,3 +112,30 @@ class TestDefinitions:
             base.get("terraform_vars"),
         )
         assert test_vars["c"] == expected
+
+    @pytest.mark.parametrize(
+        "base, expected, inner",
+        [
+            ("a_test_str", '"a_test_str"', False),
+            (
+                {"key1": "val1", "key2": "val2"},
+                '{"key1": "val1", "key2": "val2"}',
+                False,
+            ),
+            ({"key1": "val1", "key2": "val2"}, {"key1": "val1", "key2": "val2"}, True),
+            (["item1", "item2", "item3"], '["item1", "item2", "item3"]', False),
+            (["item1", "item2", "item3"], ["item1", "item2", "item3"], True),
+            (
+                {"lkey": ["item1", "item2", "item3"]},
+                '{"lkey": ["item1", "item2", "item3"]}',
+                False,
+            ),
+            (
+                {"lkey": ["item1", "item2", "item3"]},
+                {"lkey": ["item1", "item2", "item3"]},
+                True,
+            ),
+        ],
+    )
+    def test_var_typer(self, base, expected, inner):
+        assert Definition.vars_typer(base, inner=inner) == expected
