@@ -22,6 +22,7 @@ import click
 from tfworker import constants as const
 from tfworker.commands import CleanCommand, RootCommand, TerraformCommand
 from tfworker.commands.root import get_platform
+from tfworker.commands.version import VersionCommand
 
 
 def validate_deployment(ctx, deployment, name):
@@ -198,6 +199,13 @@ def clean(rootc, *args, **kwargs):  # noqa: E501
 
 
 @cli.command()
+def version():
+    """ display program version """
+    VersionCommand().exec()
+    sys.exit(0)
+
+
+@cli.command()
 @click.option(
     "--clean/--no-clean",
     default=True,
@@ -243,7 +251,7 @@ def clean(rootc, *args, **kwargs):  # noqa: E501
 @click.argument("deployment", callback=validate_deployment)
 @click.pass_obj
 def terraform(rootc, *args, **kwargs):
-    """ No do nothing """
+    """ execute terraform orchestration """
     tfc = TerraformCommand(rootc, *args, **kwargs)
 
     click.secho(f"building deployment {kwargs.get('deployment')}", fg="green")
