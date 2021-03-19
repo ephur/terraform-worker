@@ -29,10 +29,9 @@ class S3Backend(BaseBackend):
         if deployment:
             self._deployment = deployment
 
-        # Create locking table for aws backend
-
+        # Check locking table for aws backend
         click.secho(
-            f"Creating backend locking table: terraform-{deployment}", fg="yellow"
+            f"Checking backend locking table: terraform-{deployment}", fg="yellow"
         )
         self.create_table(
             f"terraform-{deployment}",
