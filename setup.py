@@ -20,7 +20,7 @@ setup(
     packages=find_packages(exclude=["tests*"]),
     author="Richard Maynard",
     author_email="richard.maynard@gmail.com",
-    description=str(project_info["name"]),
+    description=str(project_info["description"]),
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/ephur/terraform-worker",
