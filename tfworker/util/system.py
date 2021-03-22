@@ -22,64 +22,48 @@ def pipe_exec(args, stdin=None, cwd=None, env=None):
 
     Takes optional stdin to give to the first item in the pipe chain.
     """
-    count = 0
-    commands = []
+    count = 0  # int used to manage communication between processes
+    commands = []  # listed used to hold all the popen objects
+
+    # use the default environment if one is not specified
     if env is None:
         env = os.environ.copy()
 
+    # if a single command was passed as a string, make it a list
     if not isinstance(args, list):
         args = [args]
 
+    # setup various arguments for popen/popen.communicate, account for optional stdin
+    popen_kwargs = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "cwd": cwd,
+        "env": env,
+    }
+    popen_stdin_kwargs = {}
+    communicate_kwargs = {}
+    if stdin is not None:
+        popen_stdin_kwargs["stdin"] = subprocess.PIPE
+        communicate_kwargs["input"] = stdin.encode()
+
+    # handle the first process
+    i = args.pop(0)
+    commands.append(
+        subprocess.Popen(shlex.split(i), **popen_kwargs, **popen_stdin_kwargs)
+    )
+
+    # handle any additional arguments
     for i in args:
-        if count == 0:
-            if stdin is None:
-                commands.append(
-                    subprocess.Popen(
-                        shlex.split(i),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        cwd=cwd,
-                        env=env,
-                    )
-                )
-            else:
-                commands.append(
-                    subprocess.Popen(
-                        shlex.split(i),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        stdin=subprocess.PIPE,
-                        cwd=cwd,
-                        env=env,
-                    )
-                )
-        else:
-            commands.append(
-                subprocess.Popen(
-                    shlex.split(i),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    stdin=commands[count - 1].stdout,
-                    cwd=cwd,
-                    env=env,
-                )
-            )
+        popen_kwargs["stdin"] = commands[count].stdout
+        commands.append(subprocess.Popen(shlex.split(i), **popen_kwargs))
+        commands[count].stdout.close()
         count = count + 1
 
-    if stdin is not None:
-        stdin_bytes = stdin.encode()
-        if len(commands) > 1:
-            commands[0].communicate(input=stdin_bytes)
-            stdout, stderr = commands[-1].communicate()
-            commands[-1].wait()
-            returncode = commands[-1].returncode
-        else:
-            stdout, stderr = commands[0].communicate(input=stdin_bytes)
-            commands[0].wait()
-            returncode = commands[0].returncode
-    else:
-        stdout, stderr = commands[-1].communicate()
-        commands[-1].wait()
-        returncode = commands[-1].returncode
+    # communicate with first command, ensure it gets any optional input
+    commands[0].communicate(**communicate_kwargs)
+
+    # communicate with final command, which will trigger the entire pipeline
+    stdout, stderr = commands[-1].communicate()
+    returncode = commands[-1].returncode
 
     return (returncode, stdout, stderr)

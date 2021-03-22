@@ -19,8 +19,7 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
-from tfworker.util.copier import (Copier, CopyFactory, FileSystemCopier,
-                                  GitCopier)
+from tfworker.util.copier import Copier, CopyFactory, FileSystemCopier, GitCopier
 
 C_CONFLICTS = ["test.txt", "foo", "test.tf"]
 C_SOURCE = "test_source"
@@ -35,6 +34,7 @@ def cwp(tmp_path):
         root_path=C_ROOT_PATH,
         destination=f"{str(tmp_path)}",
         conflicts=C_CONFLICTS,
+        arbitrary="value",
     )
     return c
 
@@ -111,11 +111,13 @@ class TestCopier:
         assert not hasattr(copier, "_root_path")
         assert not hasattr(copier, "_destination")
         assert not hasattr(copier, "_conflicts")
+        assert len(copier._kwargs) == 0
 
         assert cwp._source == C_SOURCE
         assert cwp._root_path == C_ROOT_PATH
         assert cwp._destination == str(tmp_path)
         assert cwp._conflicts == C_CONFLICTS
+        assert cwp._kwargs["arbitrary"] == "value"
 
         with pytest.raises(ValueError):
             Copier(source="test_source", conflicts="bad_value")

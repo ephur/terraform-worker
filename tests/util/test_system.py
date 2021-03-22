@@ -28,7 +28,7 @@ def mock_pipe_exec(args, stdin=None, cwd=None, env=None):
     return (0, "".encode(), "".encode())
 
 
-def mock_tf_version(args):
+def mock_tf_version(args: str):
     return (0, args.encode(), "".encode())
 
 
@@ -51,6 +51,7 @@ class TestUtilSystem:
             ),
             (["/bin/echo foo", "/usr/bin/env grep foo"], 0, None, None, "foo", ""),
             (["/bin/echo foo", "/usr/bin/env grep bar"], 1, None, None, "", ""),
+            (["/bin/cat", "/usr/bin/env grep foo"], 0, None, "foo", "foo", ""),
         ],
     )
     def test_pipe_exec(self, commands, exit_code, cwd, stdin, stdout, stderr):

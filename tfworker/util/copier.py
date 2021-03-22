@@ -60,9 +60,15 @@ class Copier(metaclass=ABCMeta):
 
     def __init__(self, source: str, **kwargs):
         self._source = source
+        self._kwargs = {}
 
         for k, v in kwargs.items():
-            setattr(self, f"_{k}", v)
+            if k in ["conflicts", "destination", "root_path"]:
+                setattr(self, f"_{k}", v)
+            else:
+                self._kwargs[k] = v
+
+        self._kwargs = kwargs
 
         if hasattr(self, "_conflicts"):
             if type(self._conflicts) is not list:
