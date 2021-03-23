@@ -248,7 +248,7 @@ class TestFileSystemCopier:
             root_path=f"{request.config.rootdir}",
             destination=f"{str(tmp_path)}",
         )
-        assert c.copy() is True
+        c.copy()
         assert os.path.isfile(f"{str(tmp_path)}/test.tf")
 
     def test_local_path(self):

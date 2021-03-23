@@ -80,7 +80,7 @@ class Copier(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def copy(self, **kwargs) -> bool:  # pragma: no cover
+    def copy(self, **kwargs) -> None:  # pragma: no cover
         """ copy executes the copy from the source, into the working path """
         pass
 
@@ -135,7 +135,7 @@ class Copier(metaclass=ABCMeta):
 
 @CopyFactory.register("git")
 class GitCopier(Copier):
-    def copy(self, **kwargs) -> bool:
+    def copy(self, **kwargs) -> None:
         """ copy clones a remote git repo, and puts the requested files into the destination """
         dest = self.get_destination(**kwargs)
         branch = "master"
@@ -164,8 +164,6 @@ class GitCopier(Copier):
         shutil.copytree(temp_path, dest, dirs_exist_ok=True)
         self.clean_temp()
 
-        return True
-
     @staticmethod
     def type_match(source: str, **kwargs) -> bool:
         """ type matches uses git to see if the source is a valid git remote """
@@ -191,12 +189,11 @@ class GitCopier(Copier):
 
 @CopyFactory.register("fs")
 class FileSystemCopier(Copier):
-    def copy(self, **kwargs) -> bool:
+    def copy(self, **kwargs) -> None:
         """ copy copies files from a local source on the file system to a destination path """
         dest = self.get_destination(**kwargs)
         self.check_conflicts(self.local_path)
         shutil.copytree(self.local_path, dest, dirs_exist_ok=True)
-        return True
 
     @property
     def local_path(self):
