@@ -4,7 +4,7 @@ init:
 default: lint test
 
 lint: init
-	poetry run flake8 --ignore E501 tfworker tests
+	poetry run flake8 --ignore E501,W503 tfworker tests
 
 format: init
 	poetry run black tfworker tests
@@ -13,6 +13,7 @@ format: init
 
 test: init
 	poetry run pytest
+	poetry run coverage report --fail-under=65 -m --skip-empty
 
 clean:
 	rm -rf build dist .eggs terraform_worker.egg-info

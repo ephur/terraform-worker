@@ -14,6 +14,7 @@
 
 import filecmp
 from contextlib import contextmanager
+from typing import Tuple
 from unittest import mock
 
 import pytest
@@ -27,11 +28,11 @@ def does_not_raise():
     yield
 
 
-def mock_pipe_exec(args, stdin=None, cwd=None, env=None):
+def mock_pipe_exec(args: str, stdin: str = None, cwd: str = None, env: list = None):
     return (0, "".encode(), "".encode())
 
 
-def mock_tf_version(args):
+def mock_tf_version(args: str) -> Tuple[int, str, str]:
     return (0, args.encode(), "".encode())
 
 
@@ -58,9 +59,9 @@ class TestTerraformCommand:
             ("apply", lazy_fixture("tf_13cmd")),
         ],
     )
-    def test_run(self, tf_cmd, method):
+    def test_run(self, tf_cmd: str, method: callable):
         with mock.patch(
-            "tfworker.commands.terraform.TerraformCommand.pipe_exec",
+            "tfworker.commands.terraform.pipe_exec",
             side_effect=mock_pipe_exec,
         ) as mocked:
             tf_cmd._run(
@@ -70,35 +71,6 @@ class TestTerraformCommand:
             mocked.assert_called_once()
 
     @pytest.mark.parametrize(
-        "commands, exit_code, cwd, stdin, stdout, stderr",
-        [
-            ("/usr/bin/env true", 0, None, None, "", ""),
-            ("/usr/bin/env false", 1, None, None, "", ""),
-            ("/bin/echo foo", 0, None, None, "foo", ""),
-            ("/usr/bin/env grep foo", 0, None, "foo", "foo", ""),
-            ("/bin/pwd", 0, "/tmp", None, "/tmp", ""),
-            (
-                "/bin/cat /yisohwo0AhK8Ah ",
-                1,
-                None,
-                None,
-                "",
-                "/bin/cat: /yisohwo0AhK8Ah: No such file or directory",
-            ),
-            (["/bin/echo foo", "/usr/bin/env grep foo"], 0, None, None, "foo", ""),
-            (["/bin/echo foo", "/usr/bin/env grep bar"], 1, None, None, "", ""),
-        ],
-    )
-    def test_run_pipe_exec(self, commands, exit_code, cwd, stdin, stdout, stderr):
-        (return_exit_code, return_stdout, return_stderr) = TerraformCommand.pipe_exec(
-            commands, cwd=cwd, stdin=stdin
-        )
-
-        assert return_exit_code == exit_code
-        assert stdout.encode() in return_stdout.rstrip()
-        assert return_stderr.rstrip() in stderr.encode()
-
-    @pytest.mark.parametrize(
         "stdout, major, minor, expected_exception",
         [
             ("Terraform v0.12.29", 12, 29, does_not_raise()),
@@ -106,9 +78,11 @@ class TestTerraformCommand:
             ("TF 14", "", "", pytest.raises(SystemExit)),
         ],
     )
-    def test_get_tf_version(self, stdout, major, minor, expected_exception):
+    def test_get_tf_version(
+        self, stdout: str, major: int, minor: int, expected_exception: callable
+    ):
         with mock.patch(
-            "tfworker.commands.terraform.TerraformCommand.pipe_exec",
+            "tfworker.commands.terraform.pipe_exec",
             side_effect=mock_tf_version,
         ) as mocked:
             with expected_exception:

@@ -16,12 +16,11 @@ import base64
 import json
 import os
 import re
-import shlex
 import shutil
-import subprocess
 
 import click
 from tfworker.commands.base import BaseCommand
+from tfworker.util.system import pipe_exec
 
 
 class HookError(Exception):
@@ -230,7 +229,7 @@ class TerraformCommand(BaseCommand):
         click.secho(
             f"cmd: {self._terraform_bin} {command} {command_params}", fg="yellow"
         )
-        (exit_code, stdout, stderr) = TerraformCommand.pipe_exec(
+        (exit_code, stdout, stderr) = pipe_exec(
             f"{self._terraform_bin} {command} {command_params}",
             cwd=working_dir,
             env=env,
@@ -372,7 +371,7 @@ class TerraformCommand(BaseCommand):
             )
 
         # execute the hook
-        (exit_code, stdout, stderr) = TerraformCommand.pipe_exec(
+        (exit_code, stdout, stderr) = pipe_exec(
             f"{hook_script} {phase} {command}",
             cwd=hook_dir,
             env=local_env,
@@ -388,75 +387,6 @@ class TerraformCommand(BaseCommand):
 
         if exit_code != 0:
             raise HookError("hook script {}")
-
-    @staticmethod
-    def pipe_exec(args, stdin=None, cwd=None, env=None):
-        """
-        A function to accept a list of commands and pipe them together.
-
-        Takes optional stdin to give to the first item in the pipe chain.
-        """
-        count = 0
-        commands = []
-        if env is None:
-            env = os.environ.copy()
-
-        if not isinstance(args, list):
-            args = [args]
-
-        for i in args:
-            if count == 0:
-                if stdin is None:
-                    commands.append(
-                        subprocess.Popen(
-                            shlex.split(i),
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            cwd=cwd,
-                            env=env,
-                        )
-                    )
-                else:
-                    commands.append(
-                        subprocess.Popen(
-                            shlex.split(i),
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            stdin=subprocess.PIPE,
-                            cwd=cwd,
-                            env=env,
-                        )
-                    )
-            else:
-                commands.append(
-                    subprocess.Popen(
-                        shlex.split(i),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        stdin=commands[count - 1].stdout,
-                        cwd=cwd,
-                        env=env,
-                    )
-                )
-            count = count + 1
-
-        if stdin is not None:
-            stdin_bytes = stdin.encode()
-            if len(commands) > 1:
-                commands[0].communicate(input=stdin_bytes)
-                stdout, stderr = commands[-1].communicate()
-                commands[-1].wait()
-                returncode = commands[-1].returncode
-            else:
-                stdout, stderr = commands[0].communicate(input=stdin_bytes)
-                commands[0].wait()
-                returncode = commands[0].returncode
-        else:
-            stdout, stderr = commands[-1].communicate()
-            commands[-1].wait()
-            returncode = commands[-1].returncode
-
-        return (returncode, stdout, stderr)
 
     @staticmethod
     def check_hooks(phase, working_dir, command):
@@ -482,7 +412,7 @@ class TerraformCommand(BaseCommand):
         """
         base_dir, _ = os.path.split(working_dir)
         try:
-            (exit_code, stdout, stderr) = TerraformCommand.pipe_exec(
+            (exit_code, stdout, stderr) = pipe_exec(
                 f"{terraform_bin} output -json -no-color {item}",
                 cwd=f"{base_dir}/{state}",
                 env=env,
@@ -508,9 +438,7 @@ class TerraformCommand(BaseCommand):
 
     @staticmethod
     def get_terraform_version(terraform_bin):
-        (return_code, stdout, stderr) = TerraformCommand.pipe_exec(
-            f"{terraform_bin} version"
-        )
+        (return_code, stdout, stderr) = pipe_exec(f"{terraform_bin} version")
         if return_code != 0:
             click.secho(f"unable to get terraform version\n{stderr}", fg="red")
             raise SystemExit(1)

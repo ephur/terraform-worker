@@ -1,23 +1,32 @@
-from setuptools import setup, find_packages
+import tomlkit
+from setuptools import find_packages, setup
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
+
+def _get_project_meta():
+    with open("pyproject.toml") as fh:
+        contents = fh.read()
+
+    return tomlkit.parse(contents)["tool"]["poetry"]
+
+
+project_info = _get_project_meta()
+
 setup(
-    name="terraform-worker",
-    version="0.7.5",
+    name=str(project_info["name"]),
+    version=str(project_info["version"]),
     packages=find_packages(exclude=["tests*"]),
     author="Richard Maynard",
     author_email="richard.maynard@gmail.com",
-    description="An orchestration tool for Terraform",
+    description=str(project_info["description"]),
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/ephur/terraform-worker",
     include_package_data=True,
     install_requires=[
         "boto3",
-        "hvac",
-        "pyhcl",
         "tenacity",
         "cryptography",
         "click",
@@ -38,5 +47,5 @@ setup(
     ],
     entry_points={"console_scripts": ["worker=tfworker.cli:cli"]},
     setup_requires=["flake8"],
-    python_requires=">=3.6",
+    python_requires=">=3.7",
 )

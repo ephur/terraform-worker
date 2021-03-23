@@ -15,15 +15,11 @@
 import collections
 import copy
 import json
-import os
-import shutil
-import sys
-from pathlib import Path
 from typing import OrderedDict
 
 import click
-import jinja2
 from tfworker import constants as const
+from tfworker.util.copier import CopyFactory
 
 TERRAFORM_TPL = """\
 terraform {{
@@ -85,56 +81,31 @@ class Definition:
 
     def prep(self, backend):
         """ prepare the definitions for running """
-        repo = Path(f"{self._repository_path}/{self.path}".replace("//", "/"))
-        target = Path(f"{self._temp_dir}/definitions/{self.tag}".replace("//", "/"))
-        target.mkdir(parents=True, exist_ok=True)
+        target = f"{self._temp_dir}/definitions/{self.tag}".replace("//", "/")
 
-        if not repo.exists():
+        try:
+            c = CopyFactory.create(
+                self.path,
+                root_path=self._repository_path,
+                conflicts=const.RESERVED_FILES,
+            )
+        except NotImplementedError:
             click.secho(
-                f"Error preparing definition {self.tag}, path {repo.resolve()} does not"
-                " exist",
+                f"could not handle source path {self.path} for definition {self.tag}, either file does not exist or could not handle remote URI",
                 fg="red",
             )
-            sys.exit(1)
+            raise SystemExit(1)
+
+        remote_options = dict(self.body.get("remote_path_options", {}))
+
+        try:
+            c.copy(destination=target, **remote_options)
+        except FileExistsError as e:
+            raise ReservedFileError(e)
 
         # Prepare variables
         self._template_vars["deployment"] = self._deployment
         self._terraform_vars["deployment"] = self._deployment
-
-        # Put terraform files in place
-        for tf in repo.glob("*.tf"):
-            if tf.name in const.RESERVED_FILES:
-                raise ReservedFileError(f"{tf} is not allowed")
-            shutil.copy(str(tf), str(target))
-
-        for tf in repo.glob("*.tfvars"):
-            shutil.copy(str(tf), str(target))
-
-        if os.path.isdir(f"{repo}/templates".replace("//", "/")):
-            shutil.copytree(f"{repo}/templates", f"{target}/templates")
-
-        if os.path.isdir(f"{repo}/policies".replace("//", "/")):
-            shutil.copytree(f"{repo}/policies", f"{target}/policies")
-
-        if os.path.isdir(f"{repo}/scripts".replace("//", "/")):
-            shutil.copytree(f"{repo}/scripts", f"{target}/scripts")
-
-        if os.path.isdir(f"{repo}/hooks".replace("//", "/")):
-            shutil.copytree(f"{repo}/hooks", f"{target}/hooks")
-
-        if os.path.isdir(f"{repo}/repos".replace("//", "/")):
-            shutil.copytree(f"{repo}/repos", f"{target}/repos")
-
-        if os.path.isdir(f"{repo}/cfn".replace("//", "/")):
-            shutil.copytree(f"{repo}/cfn", f"{target}/cfn")
-
-        # Render jinja templates and put in place
-        env = jinja2.Environment(loader=jinja2.FileSystemLoader)
-
-        for j2 in repo.glob("*.j2"):
-            contents = env.get_template(str(j2)).render(**self._template_vars)
-            with open(f"{target}/{j2}", "w+") as j2_file:
-                j2_file.write(contents)
 
         # Create local vars from remote data sources
         if len(list(self._remote_vars.keys())) > 0:
