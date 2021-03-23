@@ -97,7 +97,6 @@ class RootCommand:
         directly on the RootCommand instance."""
         for k in [
             "definitions",
-            "plugins",
             "providers",
             "remote_vars",
             "template_vars",
@@ -202,7 +201,7 @@ def replace_vars(var, args):
     try:
         var = getattr(args, match.group(1).replace("-", "_"))
         click.secho(
-            f"DEPRECATION WARNING: the use of //{match.group(1)}// substituion is deprecated and will be removed in a future version, use Jinja2 template style: {{{{ {match.group(1)} }}}}",
+            f"DEPRECATION WARNING: the use of //{match.group(1)}// substitution is deprecated and will be removed in a future version, use Jinja2 template style: {{{{ {match.group(1)} }}}}",
             fg="yellow",
         )
     except AttributeError:

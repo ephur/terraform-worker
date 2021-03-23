@@ -2,23 +2,26 @@ terraform:
   providers:
     aws:
       vars:
+        version: "2.63"
         region: {{ aws_region }}
 
     google:
       vars:
+        version: "~> 3.39"
         region: {{ aws_region }}
 
     google_beta:
-      version: 3.38.0
       vars:
+        version: 3.38.0
         region: {{ aws_region }}
 
     'null':
-      version: 2.2.2
+        vars:
+          version: 2.2.2
 
     vault:
-      version: 3.38.0
       vars:
+        version: 3.38.0
         region: {{ aws_region }}
  
   terraform_vars:
@@ -50,7 +53,3 @@ terraform:
         private_subnet_ids: network.private_subnet_ids
         public_subnet_ids: network.public_subnet_ids
         deployment_zone_id: network.deployment_zone_id
-
-  plugins:
-    aws:
-      version: 2.63.0

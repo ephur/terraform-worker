@@ -62,7 +62,16 @@ class BaseCommand:
             self._temp_dir,
             tf_version_major,
         )
-        self._plugins = PluginsCollection(rootc.plugins_odict, self._temp_dir)
+        plugins_odict = OrderedDict()
+        for provider in rootc.providers_odict:
+            raw_version = rootc.providers_odict[provider]['vars']['version']
+            version = raw_version.split(' ')[-1]
+            vals = {'version': version}
+            base_url = rootc.providers_odict[provider].get('baseURL')
+            if base_url:
+                vals['baseURL'] = base_url
+            plugins_odict[str(provider)] = vals
+        self._plugins = PluginsCollection(plugins_odict, self._temp_dir)
         self._backend = select_backend(
             rootc.args.backend,
             deployment,

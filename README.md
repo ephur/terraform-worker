@@ -23,10 +23,6 @@ terraform:
 
     database:
       path: /definitions/aws/rds
-
-  plugins:
-    aws:
-      version: 2.61.0
 ```
 
 ```sh
