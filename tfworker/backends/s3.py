@@ -100,9 +100,7 @@ class S3Backend(BaseBackend):
         remote_data_config = []
 
         for remote in remotes:
-            remote_data_config.append(
-                f'data "terraform_remote_state" "{remote}" {{'
-            )
+            remote_data_config.append(f'data "terraform_remote_state" "{remote}" {{')
             remote_data_config.append('  backend = "s3"')
             remote_data_config.append("  config = {")
             remote_data_config.append(
@@ -116,25 +114,3 @@ class S3Backend(BaseBackend):
             remote_data_config.append("  }")
             remote_data_config.append("}\n")
         return "\n".join(remote_data_config)
-
-
-        # Call the iter method for explicit control of iteration order
-        # for definition in self._definitions.iter():
-        #     if definition.tag == exclude:
-        #         break
-        #     remote_data_config.append(
-        #         f'data "terraform_remote_state" "{definition.tag}" {{'
-        #     )
-        #     remote_data_config.append('  backend = "s3"')
-        #     remote_data_config.append("  config = {")
-        #     remote_data_config.append(
-        #         f'    region = "{self._authenticator.backend_region}"'
-        #     )
-        #     remote_data_config.append(f'    bucket = "{self._authenticator.bucket}"')
-        #     remote_data_config.append(
-        #         "    key ="
-        #         f' "{self._authenticator.prefix}/{definition.tag}/terraform.tfstate"'
-        #     )
-        #     remote_data_config.append("  }")
-        #     remote_data_config.append("}\n")
-        # return "\n".join(remote_data_config)
