@@ -26,7 +26,7 @@ def test_s3_hcl(basec):
 
 
 def test_s3_data_hcl(basec):
-    render = basec.backend.data_hcl("test2")
+    render = basec.backend.data_hcl(["test"])
     expected_render = """data "terraform_remote_state" "test" {
   backend = "s3"
   config = {
