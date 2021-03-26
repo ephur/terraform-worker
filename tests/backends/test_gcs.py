@@ -38,7 +38,7 @@ def test_google_hcl(gbasec):
 
 
 def test_google_data_hcl(gbasec):
-    render = gbasec.backend.data_hcl("test2")
+    render = gbasec.backend.data_hcl(["test"])
     expected_render = """data "terraform_remote_state" "test" {
   backend = "gcs"
   config = {

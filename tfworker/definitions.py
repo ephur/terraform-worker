@@ -115,6 +115,8 @@ class Definition:
                     tflocals.write(f"  {k} = data.terraform_remote_state.{v}\n")
                 tflocals.write("}\n\n")
 
+        # create remote data sources, and required providers
+        remotes = map(lambda x: x.split(".")[0], self._remote_vars.values())
         with open(f"{target}/terraform.tf", "w+") as tffile:
             tffile.write(f"{self._providers.hcl()}\n\n")
             required_providers = ""
@@ -126,7 +128,7 @@ class Definition:
                     required_providers,
                 )
             )
-            tffile.write(backend.data_hcl(self.tag))
+            tffile.write(backend.data_hcl(remotes))
 
         # Create the variable definitions
         with open(f"{target}/worker.auto.tfvars", "w+") as varfile:
