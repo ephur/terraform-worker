@@ -38,7 +38,7 @@ class GCSBackend(BaseBackend):
     def data_hcl(self, remotes: list) -> str:
         remote_data_config = []
 
-        for remote in remotes:
+        for remote in set(remotes):
             remote_data_config.append(f'data "terraform_remote_state" "{remote}" {{')
             remote_data_config.append('  backend = "gcs"')
             remote_data_config.append("  config = {")
