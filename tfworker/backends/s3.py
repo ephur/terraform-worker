@@ -98,6 +98,8 @@ class S3Backend(BaseBackend):
 
     def data_hcl(self, remotes: list) -> str:
         remote_data_config = []
+        if type(remotes) is not list:
+            raise ValueError("remotes must be a list")
 
         for remote in set(remotes):
             remote_data_config.append(f'data "terraform_remote_state" "{remote}" {{')

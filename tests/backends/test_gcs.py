@@ -38,7 +38,6 @@ def test_google_hcl(gbasec):
 
 
 def test_google_data_hcl(gbasec):
-    render = gbasec.backend.data_hcl(["test"])
     expected_render = """data "terraform_remote_state" "test" {
   backend = "gcs"
   config = {
@@ -47,4 +46,11 @@ def test_google_data_hcl(gbasec):
     credentials = "/home/test/test-creds.json"
   }
 }"""
-    assert render == expected_render
+    render = []
+    render.append(gbasec.backend.data_hcl(["test", "test"]))
+    render.append(gbasec.backend.data_hcl(["test"]))
+    for i in render:
+        assert i == expected_render
+
+    with pytest.raises(ValueError):
+        render.append(gbasec.backend.data_hcl("test"))

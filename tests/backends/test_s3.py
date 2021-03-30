@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pytest
+
 
 def test_s3_hcl(basec):
     render = basec.backend.hcl("test")
@@ -26,7 +28,6 @@ def test_s3_hcl(basec):
 
 
 def test_s3_data_hcl(basec):
-    render = basec.backend.data_hcl(["test"])
     expected_render = """data "terraform_remote_state" "test" {
   backend = "s3"
   config = {
@@ -36,4 +37,11 @@ def test_s3_data_hcl(basec):
   }
 }
 """
-    assert render == expected_render
+    render = []
+    render.append(basec.backend.data_hcl(["test", "test"]))
+    render.append(basec.backend.data_hcl(["test"]))
+    for i in render:
+        assert i == expected_render
+
+    with pytest.raises(ValueError):
+        render.append(basec.backend.data_hcl("test"))
