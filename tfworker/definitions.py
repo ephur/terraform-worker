@@ -116,7 +116,7 @@ class Definition:
                 tflocals.write("}\n\n")
 
         # create remote data sources, and required providers
-        remotes = map(lambda x: x.split(".")[0], self._remote_vars.values())
+        remotes = list(map(lambda x: x.split(".")[0], self._remote_vars.values()))
         with open(f"{target}/terraform.tf", "w+") as tffile:
             tffile.write(f"{self._providers.hcl()}\n\n")
             required_providers = ""
