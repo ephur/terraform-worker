@@ -98,19 +98,23 @@ class S3Backend(BaseBackend):
 
     def data_hcl(self, remotes: list) -> str:
         remote_data_config = []
+        processed = [] 
 
         for remote in remotes:
-            remote_data_config.append(f'data "terraform_remote_state" "{remote}" {{')
-            remote_data_config.append('  backend = "s3"')
-            remote_data_config.append("  config = {")
-            remote_data_config.append(
-                f'    region = "{self._authenticator.backend_region}"'
-            )
-            remote_data_config.append(f'    bucket = "{self._authenticator.bucket}"')
-            remote_data_config.append(
-                "    key ="
-                f' "{self._authenticator.prefix}/{remote}/terraform.tfstate"'
-            )
-            remote_data_config.append("  }")
-            remote_data_config.append("}\n")
+            if remote not in processed:
+                processed.append(remote)
+
+                remote_data_config.append(f'data "terraform_remote_state" "{remote}" {{')
+                remote_data_config.append('  backend = "s3"')
+                remote_data_config.append("  config = {")
+                remote_data_config.append(
+                    f'    region = "{self._authenticator.backend_region}"'
+                )
+                remote_data_config.append(f'    bucket = "{self._authenticator.bucket}"')
+                remote_data_config.append(
+                    "    key ="
+                    f' "{self._authenticator.prefix}/{remote}/terraform.tfstate"'
+                )
+                remote_data_config.append("  }")
+                remote_data_config.append("}\n")
         return "\n".join(remote_data_config)
