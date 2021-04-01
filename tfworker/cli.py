@@ -247,6 +247,14 @@ def version():
         " open will base64 encode the values for use in hook scripts"
     ),
 )
+@click.option(
+    "--terraform-modules-dir",
+    default="",
+    help=(
+        "Absolute path to the directory where terraform modules will be stored."
+        "If this is not set it will be relative to the repository path at ./terraform-modules"
+    ),
+)
 @click.option("--limit", help="limit operations to a single definition", multiple=True)
 @click.argument("deployment", callback=validate_deployment)
 @click.pass_obj
