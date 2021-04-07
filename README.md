@@ -44,7 +44,7 @@ providers:
 ## Development
 
 ```sh
- # virtualenv setup stuf... and then:
+ # virtualenv setup stuff... and then:
  % pip install poetry && make init
 ```
 
