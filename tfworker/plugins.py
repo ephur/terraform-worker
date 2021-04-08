@@ -25,9 +25,10 @@ from tfworker.commands.root import get_platform
 
 
 class PluginsCollection(collections.abc.Mapping):
-    def __init__(self, body, temp_dir):
+    def __init__(self, body, temp_dir, tf_version_major):
         self._plugins = body
         self._temp_dir = temp_dir
+        self._tf_version_major = tf_version_major
 
     def __len__(self):
         return len(self._providers)
@@ -65,8 +66,18 @@ class PluginsCollection(collections.abc.Mapping):
         _platform = f"{opsys}_{machine}"
 
         plugin_dir = f"{self._temp_dir}/terraform-plugins"
+        # HACK JESSE: temporarily assume hashicorp registry
+        registry_host_dir = os.path.join(plugin_dir, "registry.terraform.io")
+        maintainer_dir = os.path.join(registry_host_dir, "hashicorp")
+
         if not os.path.isdir(plugin_dir):
             os.mkdir(plugin_dir)
+            click.secho(f"version major: {self._tf_version_major}", fg="bright_blue")
+            click.secho(
+                f"type version major: {type(self._tf_version_major)}", fg="bright_blue"
+            )
+            if self._tf_version_major >= 13:
+                os.makedirs(maintainer_dir)
 
         for name, details in self._plugins.items():
             uri = get_url(name, details)
@@ -89,7 +100,14 @@ class PluginsCollection(collections.abc.Mapping):
             for afile in files:
                 os.chmod(afile, 0o755)
                 filename = os.path.basename(afile)
-                os.rename(afile, f"{plugin_dir}/{filename}")
+                if self._tf_version_major >= 13:
+                    provider_dir = os.path.join(maintainer_dir, name)
+                    version_dir = os.path.join(provider_dir, details["version"])
+                    platform_dir = os.path.join(version_dir, _platform)
+                    os.makedirs(platform_dir)
+                    os.rename(afile, os.path.join(platform_dir, filename))
+                else:
+                    os.rename(afile, f"{plugin_dir}/{filename}")
 
             click.secho(f"plugin installed to: {plugin_dir}/{_platform}/", fg="yellow")
 

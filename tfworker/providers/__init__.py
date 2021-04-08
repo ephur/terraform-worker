@@ -52,6 +52,13 @@ class ProvidersCollection(collections.abc.Mapping):
     def __iter__(self):
         return iter(self._providers.values())
 
+    @property
+    def has_required_providers(self):
+        return (
+            len([prov.required() for _, prov in self._providers.items() if prov.source])
+            > 0
+        )
+
     def hcl(self):
         return "\n".join([prov.hcl() for _, prov in self._providers.items()])
 

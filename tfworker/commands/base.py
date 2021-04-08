@@ -71,7 +71,9 @@ class BaseCommand:
             if base_url:
                 vals["baseURL"] = base_url
             plugins_odict[str(provider)] = vals
-        self._plugins = PluginsCollection(plugins_odict, self._temp_dir)
+        self._plugins = PluginsCollection(
+            plugins_odict, self._temp_dir, tf_version_major
+        )
         self._backend = select_backend(
             rootc.args.backend,
             deployment,

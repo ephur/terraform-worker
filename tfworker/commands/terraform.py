@@ -59,7 +59,12 @@ class TerraformCommand(BaseCommand):
                 self._tf_version_major,
                 self._tf_version_minor,
             ) = self.get_terraform_version(self._terraform_bin)
-        super(TerraformCommand, self).__init__(rootc, plan_for=self._plan_for, **kwargs)
+        super(TerraformCommand, self).__init__(
+            rootc,
+            plan_for=self._plan_for,
+            tf_version_major=self._tf_version_major,
+            **kwargs,
+        )
 
     @property
     def plan_for(self):
@@ -76,13 +81,19 @@ class TerraformCommand(BaseCommand):
             mod_source = self._terraform_modules_dir
             mod_path = pathlib.Path(mod_source)
             if not mod_path.exists():
-                click.secho(f'The specified terraform-modules directory "{mod_source}" does not exists', fg="red")
+                click.secho(
+                    f'The specified terraform-modules directory "{mod_source}" does not exists',
+                    fg="red",
+                )
                 raise SystemExit(1)
         else:
             mod_source = f"{self._repository_path}/terraform-modules".replace("//", "/")
             mod_path = pathlib.Path(mod_source)
             if not mod_path.exists():
-                click.secho("The terraform-modules directory does not exist.  Skipping.", fg="green")
+                click.secho(
+                    "The terraform-modules directory does not exist.  Skipping.",
+                    fg="green",
+                )
                 return
         mod_destination = f"{self._temp_dir}/terraform-modules".replace("//", "/")
         click.secho(
