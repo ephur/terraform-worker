@@ -23,5 +23,4 @@ class CleanCommand(BaseCommand):
         super(CleanCommand, self).__init__(rootc, **kwargs)
 
     def exec(self):
-        for prov in self._providers:
-            prov.clean(self._deployment, self._limit)
+        self._backend.clean(self._deployment, limit=self._limit)

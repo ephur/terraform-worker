@@ -12,10 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
+from contextlib import closing
+
 import boto3
 import click
 
-from .base import BaseBackend
+from .base import BackendError, BaseBackend, validate_backend_empty
 
 
 class S3Backend(BaseBackend):
@@ -29,61 +32,58 @@ class S3Backend(BaseBackend):
         if deployment:
             self._deployment = deployment
 
-        # Check locking table for aws backend
-        click.secho(
-            f"Checking backend locking table: terraform-{deployment}", fg="yellow"
-        )
-        self.create_table(
-            f"terraform-{deployment}",
-            self._authenticator.backend_region,
-            self._authenticator.access_key_id,
-            self._authenticator.secret_access_key,
-            self._authenticator.session_token,
+        self._ddb_client = boto3.client(
+            "dynamodb",
+            region_name=self._authenticator.backend_region,
+            aws_access_key_id=self._authenticator.access_key_id,
+            aws_secret_access_key=self._authenticator.secret_access_key,
+            aws_session_token=self._authenticator.session_token,
         )
 
-    @staticmethod
-    def create_table(
-        name,
-        region,
-        key_id,
-        key_secret,
-        session_token,
-        read_capacity=1,
-        write_capacity=1,
-    ):
-        """Create a dynamodb table."""
-        client = boto3.client(
-            "dynamodb",
-            region_name=region,
-            aws_access_key_id=key_id,
-            aws_secret_access_key=key_secret,
-            aws_session_token=session_token,
+        locking_table_name = f"terraform-{deployment}"
+
+        # Check locking table for aws backend
+        click.secho(
+            f"Checking backend locking table: {locking_table_name}", fg="yellow"
         )
-        tables = client.list_tables()
-        table_key = "LockID"
-        if name in tables["TableNames"]:
+
+        if self._check_table_exists(locking_table_name):
             click.secho("DynamoDB lock table found, continuing.", fg="yellow")
         else:
             click.secho(
                 "DynamoDB lock table not found, creating, please wait...", fg="yellow"
             )
-            client.create_table(
-                TableName=name,
-                KeySchema=[{"AttributeName": table_key, "KeyType": "HASH"}],
-                AttributeDefinitions=[
-                    {"AttributeName": table_key, "AttributeType": "S"},
-                ],
-                ProvisionedThroughput={
-                    "ReadCapacityUnits": read_capacity,
-                    "WriteCapacityUnits": write_capacity,
-                },
-            )
+            self._create_table(locking_table_name)
 
-            client.get_waiter("table_exists").wait(
-                TableName=name, WaiterConfig={"Delay": 10, "MaxAttempts": 30}
-            )
+    def _create_table(
+        self, name: str, read_capacity: int = 1, write_capacity: int = 1
+    ) -> None:
+        """Create a dynamodb table."""
+        table_key = "LockID"
+        self._ddb_client.create_table(
+            TableName=name,
+            KeySchema=[{"AttributeName": table_key, "KeyType": "HASH"}],
+            AttributeDefinitions=[
+                {"AttributeName": table_key, "AttributeType": "S"},
+            ],
+            ProvisionedThroughput={
+                "ReadCapacityUnits": read_capacity,
+                "WriteCapacityUnits": write_capacity,
+            },
+        )
 
-    def hcl(self, name):
+        self._ddb_client.get_waiter("table_exists").wait(
+            TableName=name, WaiterConfig={"Delay": 10, "MaxAttempts": 30}
+        )
+
+    # @staticmethod
+    def _check_table_exists(self, name: str) -> bool:
+        """ check if a supplied dynamodb table exists """
+        if name in self._ddb_client.list_tables()["TableNames"]:
+            return True
+        return False
+
+    def hcl(self, name: str) -> str:
         state_config = []
         state_config.append('  backend "s3" {')
         state_config.append(f'    region = "{self._authenticator.backend_region}"')
@@ -116,3 +116,115 @@ class S3Backend(BaseBackend):
             remote_data_config.append("  }")
             remote_data_config.append("}\n")
         return "\n".join(remote_data_config)
+
+    # Provider-specific methods
+    def _clean_bucket_state(self, definition=None):
+        """
+        clean_state validates all of the terraform states are empty,
+        and then removes the backend objects from S3
+
+        optionally definition can be passed to limit the cleanup
+        to a single definition
+        """
+        s3_paginator = self._authenticator.backend_session.client("s3").get_paginator(
+            "list_objects_v2"
+        )
+        s3_client = self._authenticator.backend_session.client("s3")
+
+        if definition is None:
+            prefix = self._authenticator.prefix
+        else:
+            prefix = f"{self._authenticator.prefix}/{definition}"
+
+        for s3_object in self.filter_keys(
+            s3_paginator, self._authenticator.bucket, prefix
+        ):
+            backend_file = s3_client.get_object(
+                Bucket=self._authenticator.bucket, Key=s3_object
+            )
+            body = backend_file["Body"]
+            with closing(backend_file["Body"]):
+                backend = json.load(body)
+
+            if validate_backend_empty(backend):
+                self.delete_with_versions(s3_object)
+                click.secho(f"backend file removed: {s3_object}", fg="yellow")
+            else:
+                raise BackendError(f"backend at: {s3_object} is not empty!")
+
+    def _clean_locking_state(self, deployment, definition=None):
+        """
+        clean_locking_state when called removes the dynamodb table
+        that holds all of the state checksums and locking table
+        entries
+        """
+        dynamo_client = self._authenticator.backend_session.resource("dynamodb")
+        if definition is None:
+            table = dynamo_client.Table(f"terraform-{deployment}")
+            table.delete()
+            click.secho(f"locking table: terraform-{deployment} removed", fg="yellow")
+        else:
+            # delete only the entry for a single state resource
+            table = dynamo_client.Table(f"terraform-{deployment}")
+            table.delete_item(
+                Key={
+                    "LockID": f"{self._authenticator.bucket}/{self._authenticator.prefix}/{definition}/terraform.tfstate-md5"
+                }
+            )
+            click.secho(
+                f"locking table key: '{self._authenticator.bucket}/{self._authenticator.prefix}/{definition}/terraform.tfstate-md5' removed",
+                fg="yellow",
+            )
+
+    def clean(self, deployment: str, limit: list = None) -> None:
+        if limit:
+            for limit_item in limit:
+                click.secho(
+                    "when using limit, dynamodb tables won't be completely dropped",
+                    fg="yellow",
+                )
+                try:
+                    # the bucket state deployment is part of the s3 prefix
+                    self._clean_bucket_state(definition=limit_item)
+                    # deployment name needs specified to determine the dynamo table
+                    self._clean_locking_state(deployment, definition=limit_item)
+                except BackendError as e:
+                    click.secho(f"error deleting state: {e}", fg="red")
+                    raise SystemExit(1)
+        else:
+            try:
+                self._clean_bucket_state()
+            except BackendError as e:
+                click.secho(f"error deleting state: {e}")
+                raise SystemExit(1)
+            self._clean_locking_state(deployment)
+
+    def delete_with_versions(self, key):
+        """
+        delete_with_versions should handle object deletions, and all references / versions of the object
+
+        note: in initial testing this isn't required, but is inconsistent with how S3 delete markers, and the boto
+        delete object call work there may be some selfurations that require extra handling.
+        """
+        s3_client = self._authenticator.backend_session.client("s3")
+        s3_client.delete_object(Bucket=self._authenticator.bucket, Key=key)
+
+    @staticmethod
+    def filter_keys(paginator, bucket_name, prefix="/", delimiter="/", start_after=""):
+        """
+        filter_keys returns just they keys that are needed
+        primarily from: https://stackoverflow.com/questions/30249069/listing-contents-of-a-bucket-with-boto3
+        """
+
+        prefix = prefix[1:] if prefix.startswith(delimiter) else prefix
+        start_after = (
+            (start_after or prefix) if prefix.endswith(delimiter) else start_after
+        )
+        try:
+            for page in paginator.paginate(
+                Bucket=bucket_name, Prefix=prefix, StartAfter=start_after
+            ):
+                for content in page.get("Contents", ()):
+                    yield content["Key"]
+        except TypeError:
+            pass

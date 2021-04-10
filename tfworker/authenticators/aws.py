@@ -70,7 +70,7 @@ class AWSAuthenticator(BaseAuthenticator):
                     )
             else:
                 (self.__session, creds) = AWSAuthenticator.get_assumed_role_session(
-                    self._session, self.self.role_arn
+                    self._session, self.role_arn
                 )
                 self.access_key_id = creds["AccessKeyId"]
                 self.secret_access_key = creds["SecretAccessKey"]

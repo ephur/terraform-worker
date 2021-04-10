@@ -19,7 +19,7 @@ import tfworker
 
 
 @pytest.fixture
-def gbasec(rootc):
+def gbasec(rootc, s3_client, dynamodb_client):
     _copy = copy.deepcopy(rootc)
     _copy.args.backend = "gcs"
     _copy.args.backend_bucket = "test_gcp_bucket"

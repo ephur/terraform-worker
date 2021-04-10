@@ -15,8 +15,8 @@
 import filecmp
 import tempfile
 from contextlib import contextmanager
-from typing import Tuple
 from pathlib import Path
+from typing import Tuple
 from unittest import mock
 
 import pytest
@@ -53,11 +53,10 @@ class TestTerraformCommand:
     @pytest.mark.parametrize("tf_cmd", [lazy_fixture("tf_12cmd")])
     def test_terraform_modules_dir(self, tf_cmd, rootc):
         with tempfile.TemporaryDirectory() as d:
-            test_files = [Path('test_a/test.tf'),
-                          Path('test_b/test.tf')]
+            test_files = [Path("test_a/test.tf"), Path("test_b/test.tf")]
             for f in test_files:
-                testfile = Path(f'{d}/{f}')
-                sourcefile = Path(f'tests/fixtures/terraform-modules/{f}')
+                testfile = Path(f"{d}/{f}")
+                sourcefile = Path(f"tests/fixtures/terraform-modules/{f}")
                 parent = testfile.parent
                 parent.mkdir(parents=True)
                 testfile.write_bytes(sourcefile.read_bytes())
@@ -65,8 +64,8 @@ class TestTerraformCommand:
             tf_cmd._terraform_modules_dir = d
             tf_cmd.prep_modules()
             for test_file in [
-                    "/terraform-modules/test_a/test.tf",
-                    "/terraform-modules/test_b/test.tf",
+                "/terraform-modules/test_a/test.tf",
+                "/terraform-modules/test_b/test.tf",
             ]:
                 src = rootc.args.repository_path + test_file
                 dst = rootc.temp_dir + test_file

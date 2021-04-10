@@ -60,25 +60,6 @@ class UnknownProvider(Exception):
         super().__init__(f"{provider} is not a known value.")
 
 
-class BackendError(Exception):
-    pass
-
-
-def validate_backend_empty(state):
-    """
-    validate_backend_empty ensures that the provided state file
-    is empty
-    """
-
-    try:
-        if len(state["resources"]) > 0:
-            return False
-        else:
-            return True
-    except KeyError:
-        raise BackendError("resources key does not exist in state!")
-
-
 def validate_backend_region(state):
     """
     validate_backend_region validates that a statefile

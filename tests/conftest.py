@@ -16,17 +16,85 @@ import collections
 import os
 from unittest import mock
 
+import boto3
 import pytest
 import tfworker
 import tfworker.commands.base
 import tfworker.commands.root
 import tfworker.providers
+from moto import mock_dynamodb2, mock_s3, mock_sts
 from pytest_lazyfixture import lazy_fixture
-from tfworker.util.copier import Copier, CopyFactory
 
 
-@pytest.fixture
-def rootc():
+@pytest.fixture(scope="class")
+def aws_credentials():
+    """Mocked AWS Credentials for moto."""
+    os.environ["AWS_ACCESS_KEY_ID"] = "testing"
+    os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
+    os.environ["AWS_SECURITY_TOKEN"] = "testing"
+    os.environ["AWS_SESSION_TOKEN"] = "testing"
+
+
+@pytest.fixture(scope="class")
+def s3_client(aws_credentials):
+    with mock_s3():
+        boto3.setup_default_session()
+        yield boto3.client("s3", region_name="us-west-2")
+
+
+@pytest.fixture(scope="class")
+def dynamodb_client(aws_credentials):
+    with mock_dynamodb2():
+        # boto3.setup_default_session()
+        yield boto3.client("dynamodb", region_name="us-west-2")
+
+
+@pytest.fixture(scope="class")
+def sts_client(aws_credentials):
+    with mock_sts():
+        boto3.setup_default_session()
+        yield boto3.client("sts", region_name="us-west-2")
+
+
+class MockAWSAuth:
+    def __init__(self):
+        self._session = boto3.Session()
+        self.bucket = "test_bucket"
+        self.prefix = "terraform/test-0001"
+
+    @property
+    def session(self):
+        return self._session
+
+
+@pytest.fixture(scope="function")
+@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
+def rootc(s3_client, dynamodb_client, sts_client):
+    result = tfworker.commands.root.RootCommand(
+        args={
+            "aws_access_key_id": "1234567890",
+            "aws_secret_access_key": "1234567890",
+            "aws_region": "us-west-2",
+            "backend": "s3",
+            "backend_region": "us-west-2",
+            "backend_bucket": "test_bucket",
+            "backend_prefix": "terraform/test-0001",
+            "config_file": os.path.join(
+                os.path.dirname(__file__), "fixtures", "test_config.yaml"
+            ),
+            "deployment": "test-0001",
+            "gcp_creds_path": "/home/test/test-creds.json",
+            "gcp_project": "test_project",
+            "gcp_region": "us-west-2b",
+            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+        }
+    )
+    return result
+
+
+@pytest.fixture(scope="class")
+@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
+def cls_rootc(s3_client, dynamodb_client, sts_client):
     result = tfworker.commands.root.RootCommand(
         args={
             "aws_access_key_id": "1234567890",
@@ -57,32 +125,24 @@ def tf_cmd(request):
 
 
 @pytest.fixture
-@mock.patch("tfworker.authenticators.aws.AWSAuthenticator.session")
-@mock.patch("tfworker.backends.s3.S3Backend.create_table")
-def basec(create_table, session, rootc):
+def basec(rootc):
     return tfworker.commands.base.BaseCommand(rootc, "test-0001", tf_version_major=13)
 
 
 @pytest.fixture
-@mock.patch("tfworker.authenticators.aws.AWSAuthenticator.session")
-@mock.patch("tfworker.backends.s3.S3Backend.create_table")
-def tf_Xcmd(create_table, session, rootc):
+def tf_Xcmd(rootc):
     return tfworker.commands.terraform.TerraformCommand(rootc, deployment="test-0001")
 
 
 @pytest.fixture
-@mock.patch("tfworker.authenticators.aws.AWSAuthenticator.session")
-@mock.patch("tfworker.backends.s3.S3Backend.create_table")
-def tf_13cmd(create_table, session, rootc):
+def tf_13cmd(rootc):
     return tfworker.commands.terraform.TerraformCommand(
         rootc, deployment="test-0001", tf_version=(13, 5)
     )
 
 
 @pytest.fixture
-@mock.patch("tfworker.authenticators.aws.AWSAuthenticator.session")
-@mock.patch("tfworker.backends.s3.S3Backend.create_table")
-def tf_12cmd(create_table, session, rootc):
+def tf_12cmd(rootc):
     return tfworker.commands.terraform.TerraformCommand(
         rootc, deployment="test-0001", tf_version=(12, 27)
     )
@@ -101,18 +161,3 @@ def definition_odict():
         )
     }
     return collections.OrderedDict(one_def)
-
-
-@pytest.fixture(scope="session")
-def register_test_copier():
-    @CopyFactory.register("testfixture")
-    class TestCopierFixture(Copier):
-        @staticmethod
-        def type_match(source: str) -> bool:
-            if source == "test":
-                return True
-            else:
-                return False
-
-        def copy(self) -> bool:
-            return True
