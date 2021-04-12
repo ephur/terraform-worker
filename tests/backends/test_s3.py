@@ -23,13 +23,12 @@ STATE_REGION = "us-west-2"
 STATE_DEPLOYMENT = "test-0001"
 EMPTY_STATE = f"{STATE_PREFIX}/{STATE_DEPLOYMENT}/empty/terraform.tfstate"
 OCCUPIED_STATE = f"{STATE_PREFIX}/{STATE_DEPLOYMENT}/occupied/terraform.tfstate"
-OTHER1_STATE = f"{STATE_PREFIX}/{STATE_DEPLOYMENT}/other1/terraform.tfstate"
-OTHER2_STATE = f"{STATE_PREFIX}/{STATE_DEPLOYMENT}/other2/terraform.tfstate"
 LOCK_DIGEST = "1234123412341234"
 
 
 @pytest.fixture(scope="class")
 def state_setup(request, s3_client, dynamodb_client):
+    # location constraint is required due to how we create the client with a specific region
     location = {"LocationConstraint": STATE_REGION}
     s3_client.create_bucket(Bucket=STATE_BUCKET, CreateBucketConfiguration=location)
 
@@ -43,18 +42,9 @@ def state_setup(request, s3_client, dynamodb_client):
     ) as f:
         s3_client.put_object(Bucket=STATE_BUCKET, Key=OCCUPIED_STATE, Body=f)
 
-    with open(
-        f"{request.config.rootdir}/tests/fixtures/states/empty.tfstate", "rb"
-    ) as f:
-        s3_client.put_object(Bucket=STATE_BUCKET, Key=OTHER1_STATE, Body=f)
-
-    with open(
-        f"{request.config.rootdir}/tests/fixtures/states/empty.tfstate", "rb"
-    ) as f:
-        s3_client.put_object(Bucket=STATE_BUCKET, Key=OTHER2_STATE, Body=f)
-
+    # depending on how basec was called/used this may already be created, so don't fail
+    # if it already exists
     try:
-        # depending on the class this may or may not already exist depending how basec is used
         dynamodb_client.create_table(
             TableName=f"terraform-{STATE_DEPLOYMENT}",
             KeySchema=[{"AttributeName": "LockID", "KeyType": "HASH"}],
@@ -83,20 +73,6 @@ def state_setup(request, s3_client, dynamodb_client):
             "Digest": {"S": f"{LOCK_DIGEST}"},
         },
     )
-    dynamodb_client.put_item(
-        TableName=f"terraform-{STATE_DEPLOYMENT}",
-        Item={
-            "LockID": {"S": f"{STATE_BUCKET}/{OTHER1_STATE}-md5"},
-            "Digest": {"S": f"{LOCK_DIGEST}"},
-        },
-    )
-    dynamodb_client.put_item(
-        TableName=f"terraform-{STATE_DEPLOYMENT}",
-        Item={
-            "LockID": {"S": f"{STATE_BUCKET}/{OTHER2_STATE}-md5"},
-            "Digest": {"S": f"{LOCK_DIGEST}"},
-        },
-    )
 
 
 class TestS3BackendLimit:
@@ -111,11 +87,10 @@ class TestS3BackendLimit:
         assert basec.backend._check_table_exists(self.local_test_name) is True
 
     def test_clean_bucket_state(self, basec, state_setup, s3_client):
-        # occupied is not empty, so it shall raise an error
+        # occupied is not empty, so it should raise an error
         with pytest.raises(BackendError):
             basec.backend._clean_bucket_state(definition="occupied")
-
-        # ensure it is still present
+        # ensure it was not removed
         assert s3_client.get_object(Bucket=STATE_BUCKET, Key=OCCUPIED_STATE)
 
         # ensure the empty state is present
@@ -179,6 +154,7 @@ class TestS3BackendAll:
 
 
 def test_backend_clean_all(basec, request, state_setup, dynamodb_client, s3_client):
+    # this function should trigger an exit
     with pytest.raises(SystemExit):
         basec.backend.clean(STATE_DEPLOYMENT)
 
@@ -188,6 +164,7 @@ def test_backend_clean_all(basec, request, state_setup, dynamodb_client, s3_clie
     ) as f:
         s3_client.put_object(Bucket=STATE_BUCKET, Key=OCCUPIED_STATE, Body=f)
 
+    # now clean should run and return nothing
     assert basec.backend.clean(STATE_DEPLOYMENT) is None
 
 

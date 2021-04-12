@@ -38,25 +38,28 @@ def aws_credentials():
 @pytest.fixture(scope="class")
 def s3_client(aws_credentials):
     with mock_s3():
-        boto3.setup_default_session()
         yield boto3.client("s3", region_name="us-west-2")
 
 
 @pytest.fixture(scope="class")
 def dynamodb_client(aws_credentials):
     with mock_dynamodb2():
-        # boto3.setup_default_session()
         yield boto3.client("dynamodb", region_name="us-west-2")
 
 
 @pytest.fixture(scope="class")
 def sts_client(aws_credentials):
     with mock_sts():
-        boto3.setup_default_session()
         yield boto3.client("sts", region_name="us-west-2")
 
 
 class MockAWSAuth:
+    """
+    This class is used to replace the AWS authenticator, moto is unable to
+    provide mock support for the complex authentication options we support
+    (cross account assumed roles, user identity, etc...)
+    """
+
     def __init__(self):
         self._session = boto3.Session()
         self.bucket = "test_bucket"
@@ -70,31 +73,6 @@ class MockAWSAuth:
 @pytest.fixture(scope="function")
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
 def rootc(s3_client, dynamodb_client, sts_client):
-    result = tfworker.commands.root.RootCommand(
-        args={
-            "aws_access_key_id": "1234567890",
-            "aws_secret_access_key": "1234567890",
-            "aws_region": "us-west-2",
-            "backend": "s3",
-            "backend_region": "us-west-2",
-            "backend_bucket": "test_bucket",
-            "backend_prefix": "terraform/test-0001",
-            "config_file": os.path.join(
-                os.path.dirname(__file__), "fixtures", "test_config.yaml"
-            ),
-            "deployment": "test-0001",
-            "gcp_creds_path": "/home/test/test-creds.json",
-            "gcp_project": "test_project",
-            "gcp_region": "us-west-2b",
-            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-        }
-    )
-    return result
-
-
-@pytest.fixture(scope="class")
-@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def cls_rootc(s3_client, dynamodb_client, sts_client):
     result = tfworker.commands.root.RootCommand(
         args={
             "aws_access_key_id": "1234567890",
