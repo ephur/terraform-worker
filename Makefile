@@ -13,7 +13,7 @@ format: init
 
 test: init
 	poetry run pytest
-	poetry run coverage report --fail-under=65 -m --skip-empty
+	poetry run coverage report --fail-under=70 -m --skip-empty
 
 clean:
 	rm -rf build dist .eggs terraform_worker.egg-info

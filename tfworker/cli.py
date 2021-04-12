@@ -195,7 +195,6 @@ def clean(rootc, *args, **kwargs):  # noqa: E501
     """ clean up terraform state """
     # clean just items if limit supplied, or everything if no limit
     CleanCommand(rootc, *args, **kwargs).exec()
-    sys.exit(0)
 
 
 @cli.command()

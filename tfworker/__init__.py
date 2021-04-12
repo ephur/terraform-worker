@@ -11,3 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import typing
+
+# https://github.com/python/typing/issues/182 eventually this type should be placed somewhere else
+JSONType = typing.Union[
+    str, int, float, bool, None, typing.Dict[str, typing.Any], typing.List[typing.Any]
+]

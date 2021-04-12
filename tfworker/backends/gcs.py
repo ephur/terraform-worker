@@ -25,7 +25,7 @@ class GCSBackend(BaseBackend):
         if deployment:
             self._deployment = deployment
 
-    def hcl(self, name):
+    def hcl(self, name: str) -> str:
         state_config = []
         state_config.append('  backend "gcs" {')
         state_config.append(f'    bucket = "{self._authenticator.bucket}"')
@@ -55,3 +55,6 @@ class GCSBackend(BaseBackend):
             remote_data_config.append("  }")
             remote_data_config.append("}")
         return "\n".join(remote_data_config)
+
+    def clean(self):
+        pass
