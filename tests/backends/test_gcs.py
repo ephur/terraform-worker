@@ -111,7 +111,6 @@ class TestClean:
         with pytest.raises(BackendError):
             gbasec.backend._clean_deployment_limit(("zed",))
 
-        # @todo: there is a more accurate test, but I'm unable to get it working properly
         gbasec.backend._clean_deployment_limit(
             (
                 "foo",
@@ -119,14 +118,6 @@ class TestClean:
             )
         )
         assert mock_clean.call_count == 2
-        # both methods below are failing, attempted with decorator and yeilding the mock
-        # calls = [
-        #     call('terraform/test/foo',),
-        #     call('terraform/test/bar',),
-        #     ]
-        # assert mock_clean.assert_has_calls(calls)
-        # assert mock_clean.assert_called_with("terraform/test/bar")
-        # assert mock_clean.assert_called_with("terraform/test/foo")
 
     @patch("google.api_core.page_iterator.HTTPIterator")
     def test_clean_prefix(self, mock_iter, gbasec, request):

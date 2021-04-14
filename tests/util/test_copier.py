@@ -19,7 +19,8 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
-from tfworker.util.copier import Copier, CopyFactory, FileSystemCopier, GitCopier
+from tfworker.util.copier import (Copier, CopyFactory, FileSystemCopier,
+                                  GitCopier)
 
 C_CONFLICTS = ["test.txt", "foo", "test.tf"]
 C_SOURCE = "test_source"
