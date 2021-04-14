@@ -12,15 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import click
 from tfworker.commands.base import BaseCommand
+from tfworker.backends.base import BackendError
 
 
 class CleanCommand(BaseCommand):
     def __init__(self, rootc, *args, **kwargs):
         self._config = rootc.config
         self._deployment = kwargs.get("deployment")
-        self._limit = kwargs.get("limit", [])
+        self._limit = kwargs.get("limit", ())
         super(CleanCommand, self).__init__(rootc, **kwargs)
 
     def exec(self):
-        self._backend.clean(self._deployment, limit=self._limit)
+        try:
+            self._backend.clean(deployment=self._deployment, limit=self._limit)
+        except BackendError as e:
+            click.secho(f"error while cleaning: {e}", fg="red")
+            raise SystemExit(1)
+        click.secho("backend cleaning completed", fg="green")

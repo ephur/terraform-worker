@@ -70,6 +70,27 @@ class MockAWSAuth:
         return self._session
 
 
+@pytest.fixture()
+def grootc():
+    result = tfworker.commands.root.RootCommand(
+        args={
+            "backend": "gcs",
+            "backend_region": "us-central1",
+            "backend_bucket": "test_gcp_bucket",
+            "backend_prefix": "terraform/test-0002",
+            "config_file": os.path.join(
+                os.path.dirname(__file__), "fixtures", "gcp_test_config.yaml"
+            ),
+            "deployment": "test-0001",
+            "gcp_creds_path": "/home/test/test-creds.json",
+            "gcp_project": "test_project",
+            "gcp_region": "us-west-2b",
+            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+        }
+    )
+    return result
+
+
 @pytest.fixture(scope="function")
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
 def rootc(s3_client, dynamodb_client, sts_client):
@@ -105,6 +126,11 @@ def tf_cmd(request):
 @pytest.fixture
 def basec(rootc):
     return tfworker.commands.base.BaseCommand(rootc, "test-0001", tf_version_major=13)
+
+
+@pytest.fixture
+def gbasec(grootc):
+    return tfworker.commands.base.BaseCommand(grootc, "test-0001", tf_version_major=13)
 
 
 @pytest.fixture

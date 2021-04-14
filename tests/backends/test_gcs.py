@@ -12,19 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import copy
-
 import pytest
-import tfworker
-
-
-@pytest.fixture
-def gbasec(rootc, s3_client, dynamodb_client):
-    _copy = copy.deepcopy(rootc)
-    _copy.args.backend = "gcs"
-    _copy.args.backend_bucket = "test_gcp_bucket"
-    _copy.args.backend_prefix = "terraform/test-0002"
-    return tfworker.commands.base.BaseCommand(_copy, "test-0001-gcs")
 
 
 def test_google_hcl(gbasec):

@@ -93,7 +93,7 @@ class S3Backend(BaseBackend):
                 self._delete_with_versions(s3_object)
                 click.secho(f"backend file removed: {s3_object}", fg="yellow")
             else:
-                raise BackendError(f"backend at: {s3_object} is not empty!")
+                raise BackendError(f"state file at: {s3_object} is not empty")
 
     def _clean_locking_state(self, deployment, definition=None):
         """
@@ -152,7 +152,7 @@ class S3Backend(BaseBackend):
         s3_client = self._authenticator.backend_session.client("s3")
         s3_client.delete_object(Bucket=self._authenticator.bucket, Key=key)
 
-    def clean(self, deployment: str, limit: list = None) -> None:
+    def clean(self, deployment: str, limit: tuple = None) -> None:
         """
         clean handles determining the desired items to clean and acts as a director to the
         internal methods which handle actual resource removal
