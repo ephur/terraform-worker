@@ -12,11 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .base import BackendError, BaseBackend, validate_backend_empty
 import json
+
 import click
-from google.cloud import storage
 from google.api_core import page_iterator
+from google.cloud import storage
+
+from .base import BackendError, BaseBackend, validate_backend_empty
 
 
 class GCSBackend(BaseBackend):

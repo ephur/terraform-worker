@@ -12,41 +12,50 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from tfworker.backends.base import BackendError
-import pytest
-from unittest.mock import patch, call
 from unittest import mock
+from unittest.mock import call, patch
+
+import pytest
+from tfworker.backends.base import BackendError
 
 
 class MockGCSClient:
     def __init__(self):
         self._connection = MockGCSConnection()
-    
+
     @property
     def get_bucket(self):
         return MockGCSBucket
+
+
 class MockGCSConnection:
     @property
     def api_request(self):
         return None
+
 
 class MockGCSBucket:
     def __init__(self, bucket):
         self._blobs = [
             MockGCSBlob("terraform/test/foo/default.tfstate", "", b'{"resources":[]}'),
             MockGCSBlob("terraform/test/bar/default.tfstate", "", b'{"resources":[]}'),
-            MockGCSBlob("terraform/fail/tflock/default.tflock", "", b'{"resources":[]}'),
+            MockGCSBlob(
+                "terraform/fail/tflock/default.tflock", "", b'{"resources":[]}'
+            ),
             MockGCSBlob("terraform/fail/other/other.file", "", b'{"resources":[]}'),
         ]
 
         with open(f"{bucket}/tests/fixtures/states/occupied.tfstate", "rb") as f:
-            self._blobs.append(MockGCSBlob("terraform/fail/occupied/default.tfstate", "", f.read()))
-
+            self._blobs.append(
+                MockGCSBlob("terraform/fail/occupied/default.tfstate", "", f.read())
+            )
 
     def list_blobs(self, prefix):
         blobs = list(filter(lambda x: x.name.startswith(prefix), self._blobs))
         assert len(blobs) > 0
         return blobs
+
+
 class MockGCSBlob:
     def __init__(self, name, path, content):
         self.name = name
@@ -58,6 +67,7 @@ class MockGCSBlob:
 
     def delete(self):
         pass
+
 
 class TestClean:
     def test_clean_prefix_check(self, gbasec):
@@ -102,13 +112,17 @@ class TestClean:
         with pytest.raises(BackendError):
             gbasec.backend._clean_deployment_limit(("zed",))
 
-
         # @todo: there is a more accurate test, but I'm unable to get it working properly
-        gbasec.backend._clean_deployment_limit(("foo", "bar",))
+        gbasec.backend._clean_deployment_limit(
+            (
+                "foo",
+                "bar",
+            )
+        )
         assert mock_clean.call_count == 2
         # both methods below are failing, attempted with decorator and yeilding the mock
         # calls = [
-        #     call('terraform/test/foo',), 
+        #     call('terraform/test/foo',),
         #     call('terraform/test/bar',),
         #     ]
         # assert mock_clean.assert_has_calls(calls)
@@ -164,7 +178,6 @@ class TestClean:
                 gbasec.backend._parse_gcs_items(inval)
         else:
             assert gbasec.backend._parse_gcs_items(inval) == outval
-
 
 
 def test_google_hcl(gbasec):

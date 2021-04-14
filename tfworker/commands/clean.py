@@ -13,8 +13,8 @@
 # limitations under the License.
 
 import click
-from tfworker.commands.base import BaseCommand
 from tfworker.backends.base import BackendError
+from tfworker.commands.base import BaseCommand
 
 
 class CleanCommand(BaseCommand):
