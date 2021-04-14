@@ -53,7 +53,7 @@ class GCSBackend(BaseBackend):
 
     def _clean_prefix(self, prefix: str) -> None:
         bucket = self._storage_client.get_bucket(self._gcs_bucket)
-        blobs = bucket.list_blobs(prefix=self._gcs_prefix)
+        blobs = bucket.list_blobs(prefix=prefix)
         for b in blobs:
             name = b.name.split("/")[-1]
             # check specifically for a locking operation to indicate failure condition
