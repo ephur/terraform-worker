@@ -1,0 +1,55 @@
+terraform:
+  providers:
+    aws:
+      vars:
+        version: "2.63"
+        region: {{ gcp_region }}
+
+    google:
+      vars:
+        version: "~> 3.39"
+        region: {{ gcp_region }}
+
+    google_beta:
+      vars:
+        version: 3.38.0
+        region: {{ gcp_region }}
+
+    'null':
+        vars:
+          version: 2.2.2
+
+    vault:
+      vars:
+        version: 3.38.0
+        region: {{ gcp_region }}
+ 
+  terraform_vars:
+    vpc_cidr: 10.0.0.0/16
+    region: {{ gcp_region }}
+    deprecated_region: //gcp-region//
+    domain: "test.domain.com"
+    ip_list:
+      - 127.0.0.1/32
+      - 192.168.0.1/32
+    map_list:
+      list:
+        - a
+        - b
+        - c
+    map_map:
+      map:
+        list:
+          - x
+          - y
+          - z 
+  definitions:
+    test:
+      path: /definitions/test_a
+    test2:
+      path: /definitions/test_b
+      remote_vars:
+        vpc_id: network.vpc_id
+        private_subnet_ids: network.private_subnet_ids
+        public_subnet_ids: network.public_subnet_ids
+        deployment_zone_id: network.deployment_zone_id
