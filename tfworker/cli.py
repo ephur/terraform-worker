@@ -157,12 +157,12 @@ def validate_host():
 @click.option(
     "--backend-bucket",
     default=const.DEFAULT_BACKEND_BUCKET,
-    help="Region where terraform rootc/lock bucket exists",
+    help="Bucket (must exist) where all terraform states are stored",
 )
 @click.option(
     "--backend-prefix",
     default=const.DEFAULT_BACKEND_PREFIX,
-    help="Region where terraform rootc/lock bucket exists",
+    help=f"Prefix to use in backend storage bucket for all terraform states (DEFAULT: {const.DEFAULT_BACKEND_PREFIX})",
 )
 @click.option(
     "--backend-region",
@@ -195,7 +195,6 @@ def clean(rootc, *args, **kwargs):  # noqa: E501
     """ clean up terraform state """
     # clean just items if limit supplied, or everything if no limit
     CleanCommand(rootc, *args, **kwargs).exec()
-    sys.exit(0)
 
 
 @cli.command()

@@ -27,6 +27,21 @@ C_SOURCE = "test_source"
 C_ROOT_PATH = "/tmp/test"
 
 
+@pytest.fixture(scope="session")
+def register_test_copier():
+    @CopyFactory.register("testfixture")
+    class TestCopierFixture(Copier):
+        @staticmethod
+        def type_match(source: str) -> bool:
+            if source == "test":
+                return True
+            else:
+                return False
+
+        def copy(self) -> bool:
+            return True
+
+
 @pytest.fixture
 @patch.multiple(Copier, __abstractmethods__=set())
 def cwp(tmp_path):

@@ -12,17 +12,46 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from abc import ABCMeta, abstractmethod
 
-class BaseBackend:
+from tfworker import JSONType
+
+
+class BackendError(Exception):
+    pass
+
+
+class BaseBackend(metaclass=ABCMeta):
     tag = "base"
 
-    def hcl(self, name):
-        raise NotImplementedError
+    @abstractmethod
+    def hcl(self, name: str) -> str:
+        pass
 
-    def data_hcl(self, exclude):
-        raise NotImplementedError
+    @abstractmethod
+    def data_hcl(self, exclude: list) -> str:
+        pass
+
+    @abstractmethod
+    def clean(self, deployment: str, limit: tuple) -> str:
+        pass
 
 
 class Backends:
     s3 = "s3"
     gcs = "gcs"
+
+
+def validate_backend_empty(state: JSONType) -> bool:
+    """
+    validate_backend_empty ensures that the provided state file
+    is empty
+    """
+
+    try:
+        if len(state["resources"]) > 0:
+            return False
+        else:
+            return True
+    except KeyError:
+        raise BackendError("resources key does not exist in state!")

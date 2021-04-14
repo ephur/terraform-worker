@@ -34,6 +34,7 @@ awscli = "^1.18.152"
 jinja2 = "^2.11.2"
 tenacity = "^6.2.0"
 requests = "^2.25"
+google-cloud-storage = "^1.37.1"
 
 [tool.poetry.dev-dependencies]
 ipython = "^7.18.1"
@@ -47,6 +48,7 @@ pytest-depends = "^1.0.1"
 pytest-lazy-fixture = "^0.6.3"
 coverage = "^5.5"
 pytest-cov = "^2.11.1"
+moto = "^2.0.4"
 
 [tool.poetry.scripts]
 worker = 'tfworker.cli:cli'
