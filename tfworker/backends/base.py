@@ -33,7 +33,7 @@ class BaseBackend(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def clean(self, name: str, limit: str) -> str:
+    def clean(self, deployment: str, limit: tuple) -> str:
         pass
 
 

@@ -157,12 +157,12 @@ def validate_host():
 @click.option(
     "--backend-bucket",
     default=const.DEFAULT_BACKEND_BUCKET,
-    help="Region where terraform rootc/lock bucket exists",
+    help="Bucket (must exist) where all terraform states are stored",
 )
 @click.option(
     "--backend-prefix",
     default=const.DEFAULT_BACKEND_PREFIX,
-    help="Region where terraform rootc/lock bucket exists",
+    help=f"Prefix to use in backend storage bucket for all terraform states (DEFAULT: {const.DEFAULT_BACKEND_PREFIX})",
 )
 @click.option(
     "--backend-region",

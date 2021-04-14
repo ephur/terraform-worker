@@ -34,6 +34,7 @@ awscli = "^1.18.152"
 jinja2 = "^2.11.2"
 tenacity = "^6.2.0"
 requests = "^2.25"
+google-cloud-storage = "^1.37.1"
 
 [tool.poetry.dev-dependencies]
 ipython = "^7.18.1"
