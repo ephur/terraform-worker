@@ -23,21 +23,7 @@ EXPECTED_TEST_BLOCK = """resource "null_resource" "test_a" {
 }
 """
 
-EXPECTED_13PLUS_TF_BLOCK = """terraform {
-  backend "s3" {
-    region = "us-west-2"
-    bucket = "test_bucket"
-    key = "terraform/test-0001/test/terraform.tfstate"
-    dynamodb_table = "terraform-test-0001"
-    encrypt = "true"
-  }
-
-  required_providers {
-
-  }
-}"""
-
-EXPECTED_12LESS_TF_BLOCK = """terraform {
+EXPECTED_TF_BLOCK = """terraform {
   backend "s3" {
     region = "us-west-2"
     bucket = "test_bucket"
@@ -63,9 +49,9 @@ class TestDefinitions:
     @pytest.mark.parametrize(
         "tf_version, expected_tf_block",
         [
-            (14, EXPECTED_13PLUS_TF_BLOCK),
-            (13, EXPECTED_13PLUS_TF_BLOCK),
-            (12, EXPECTED_12LESS_TF_BLOCK),
+            (14, EXPECTED_TF_BLOCK),
+            (13, EXPECTED_TF_BLOCK),
+            (12, EXPECTED_TF_BLOCK),
         ],
     )
     def test_prep(self, basec, tf_version, expected_tf_block):

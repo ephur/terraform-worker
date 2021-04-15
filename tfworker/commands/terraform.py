@@ -59,7 +59,12 @@ class TerraformCommand(BaseCommand):
                 self._tf_version_major,
                 self._tf_version_minor,
             ) = self.get_terraform_version(self._terraform_bin)
-        super(TerraformCommand, self).__init__(rootc, plan_for=self._plan_for, **kwargs)
+        super(TerraformCommand, self).__init__(
+            rootc,
+            plan_for=self._plan_for,
+            tf_version_major=self._tf_version_major,
+            **kwargs,
+        )
 
     @property
     def plan_for(self):
