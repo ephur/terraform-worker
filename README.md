@@ -8,8 +8,8 @@ terraform:
   providers:
     aws:
       vars:
-        region: //aws-region//
-        version: "~> 2.61"
+        region: {{ aws_region }}
+        version: "~> 2.61.0"
 
   # global level variables
   terraform_vars:
@@ -72,12 +72,12 @@ terraform:
   providers:
     aws:
       vars:
-        region: {{ aws-region }}
-        version: "~> 2.61"
+        region: {{ aws_region }}
+        version: "~> 2.61.0"
 
   # global level variables
   terraform_vars:
-    region: {{ aws-region }}
+    region: {{ aws_region }}
     environment: dev
 
   definitions:
@@ -93,7 +93,7 @@ terraform:
 
 In this config, the worker manages two separate terraform modules, a `network` and a `database` definition, and shares an output from the network definition with the database definition. This is made available inside of the `database` definition through the `local.subnet` value.
 
-`aws-region` is substituted at runtime for the value of `--aws-region` passed through the command line.
+`aws_region` is substituted at runtime for the value of `--aws-region` passed through the command line.
 
 ## Troubleshooting
 
