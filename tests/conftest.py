@@ -14,6 +14,8 @@
 
 import collections
 import os
+import random
+import string
 from unittest import mock
 
 import boto3
@@ -24,6 +26,36 @@ import tfworker.commands.root
 import tfworker.providers
 from moto import mock_dynamodb2, mock_s3, mock_sts
 from pytest_lazyfixture import lazy_fixture
+
+
+@pytest.fixture
+def aws_access_key_id():
+    suffix = "".join(random.choices("RAX", k=16))
+    return f"AKIA{suffix}"
+
+
+@pytest.fixture
+def aws_secret_access_key():
+    return "".join(
+        random.choices(
+            string.ascii_uppercase + string.ascii_lowercase + string.digits, k=40
+        )
+    )
+
+
+@pytest.fixture
+def aws_role_arn(aws_account_id, aws_role_name):
+    return f"arn:aws:iam:{aws_account_id}:role/{aws_role_name}"
+
+
+@pytest.fixture
+def aws_role_name():
+    return "".join(random.choices(string.ascii_lowercase, k=8))
+
+
+@pytest.fixture
+def aws_account_id():
+    return "".join(random.choices(string.digits, k=12))
 
 
 @pytest.fixture(scope="class")
