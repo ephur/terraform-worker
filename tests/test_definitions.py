@@ -47,14 +47,15 @@ deployment = "test-0001"
 
 class TestDefinitions:
     @pytest.mark.parametrize(
-        "tf_version, expected_tf_block",
+        "tf_version, expected_tf_block, expected_providers",
         [
-            (14, EXPECTED_TF_BLOCK),
-            (13, EXPECTED_TF_BLOCK),
-            (12, EXPECTED_TF_BLOCK),
+            (15, EXPECTED_TF_BLOCK, ["google", "null"]),
+            (14, EXPECTED_TF_BLOCK, ["google", "null"]),
+            (13, EXPECTED_TF_BLOCK, ["google", "null"]),
+            (12, EXPECTED_TF_BLOCK, ["aws", "google", "google_beta", "null", "vault"]),
         ],
     )
-    def test_prep(self, basec, tf_version, expected_tf_block):
+    def test_prep(self, basec, tf_version, expected_tf_block, expected_providers):
         definition = basec.definitions["test"]
         definition._tf_version_major = tf_version
         definition.prep(basec.backend)
@@ -64,7 +65,10 @@ class TestDefinitions:
             assert EXPECTED_TEST_BLOCK in reader.read()
         assert os.path.isfile(basec.temp_dir + "/definitions/test/terraform.tf")
         with open(basec.temp_dir + "/definitions/test/terraform.tf", "r") as reader:
-            assert expected_tf_block in reader.read()
+            tf_data = reader.read()
+            assert expected_tf_block in tf_data
+            for ep in expected_providers:
+                assert f'provider "{ep}" {{' in tf_data
         assert os.path.isfile(basec.temp_dir + "/definitions/test/worker.auto.tfvars")
         with open(
             basec.temp_dir + "/definitions/test/worker.auto.tfvars", "r"

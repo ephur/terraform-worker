@@ -197,6 +197,8 @@ class TerraformCommand(BaseCommand):
                 "apply": "-input=false -no-color -auto-approve",
                 "destroy": "-input=false -no-color -force",
             }
+            if self._tf_version_major >= 15:
+                params["destroy"] = "-input=false -no-color -auto-approve"
         else:
             params = {
                 "init": "-input=false -no-color",

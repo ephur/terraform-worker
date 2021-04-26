@@ -16,14 +16,14 @@ terraform:
         region: {{ aws_region }}
 
     'null':
-        vars:
-          version: 2.2.2
+      vars:
+        version: 2.2.2
 
     vault:
       vars:
         version: 3.38.0
         region: {{ aws_region }}
- 
+
   terraform_vars:
     vpc_cidr: 10.0.0.0/16
     region: {{ aws_region }}
@@ -42,7 +42,7 @@ terraform:
         list:
           - x
           - y
-          - z 
+          - z
   definitions:
     test:
       path: /definitions/test_a

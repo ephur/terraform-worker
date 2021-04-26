@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "terraform-worker"
-version = "0.10.0"
+version = "0.10.1"
 description = "An orchestration tool for Terraform"
 authors = ["Richard Maynard <richard.maynard@objectrocket.com>"]
 packages = [
@@ -36,6 +36,7 @@ tenacity = "^6.2.0"
 requests = "^2.25"
 google-cloud-storage = "^1.37.1"
 moto = {extras = ["sts"], version = "^2.0.5"}
+python-hcl2 = "^2.0.3"
 
 [tool.poetry.dev-dependencies]
 ipython = "^7.18.1"

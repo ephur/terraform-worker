@@ -49,7 +49,7 @@ class BaseCommand:
         rootc.clean = kwargs.get("clean", True)
 
         self._providers = ProvidersCollection(
-            rootc.providers_odict, self._authenticators
+            rootc.providers_odict, self._authenticators, tf_version_major
         )
         self._definitions = DefinitionsCollection(
             rootc.definitions_odict,

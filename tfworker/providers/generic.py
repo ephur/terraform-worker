@@ -18,9 +18,10 @@ from .base import BaseProvider
 class GenericProvider(BaseProvider):
     tag = "worker-generic"
 
-    def __init__(self, body, **kwargs):
-        super(GenericProvider, self).__init__(body)
+    def __init__(self, body, tf_version_major, **kwargs):
+        super(GenericProvider, self).__init__(body, tf_version_major)
 
+        self._tf_version_major = tf_version_major
         self.tag = kwargs.get("tag", self.tag)
         self.vars = body.get("vars", {})
         self.version = self.vars.get("version")

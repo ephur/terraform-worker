@@ -171,6 +171,20 @@ def tf_Xcmd(rootc):
 
 
 @pytest.fixture
+def tf_15cmd(rootc):
+    return tfworker.commands.terraform.TerraformCommand(
+        rootc, deployment="test-0001", tf_version=(15, 0)
+    )
+
+
+@pytest.fixture
+def tf_14cmd(rootc):
+    return tfworker.commands.terraform.TerraformCommand(
+        rootc, deployment="test-0001", tf_version=(14, 5)
+    )
+
+
+@pytest.fixture
 def tf_13cmd(rootc):
     return tfworker.commands.terraform.TerraformCommand(
         rootc, deployment="test-0001", tf_version=(13, 5)
