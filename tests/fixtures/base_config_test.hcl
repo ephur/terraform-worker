@@ -22,7 +22,7 @@ terraform {
     environment = "dev"
 
     makerenvironment = "Development"
-
+    makerenvironment = "dev"
     region = "{{ aws_region }}"
   }
   definitions {

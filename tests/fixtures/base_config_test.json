@@ -21,7 +21,10 @@
         "terraform_vars": {
             "region": "{{ aws_region }}",
             "environment": "dev",
-            "makerenvironment": "Development"
+            "makerenvironment": [
+                "Development",
+                "dev"
+            ]
         },
         "definitions": {
             "tags": {

@@ -145,7 +145,7 @@ class OrderedDictTransformer(Transformer):
             for key, value in arg.items():
                 key = str(key)
                 if key not in result:
-                    result[key] = [value]
+                    result[key] = value
                 else:
                     if isinstance(result[key], list):
                         if isinstance(value, list):

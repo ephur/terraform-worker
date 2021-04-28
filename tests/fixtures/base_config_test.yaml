@@ -15,7 +15,9 @@ terraform:
   terraform_vars:
     region: {{ aws_region }}
     environment: dev
-    makerenvironment: Development
+    makerenvironment:
+      - Development
+      - dev
 
   # a list of all the terraform definitions, they will be applied in order, and destroyed in reverse order
   definitions:

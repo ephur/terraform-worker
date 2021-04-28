@@ -173,8 +173,6 @@ def replace_hcl_vars(hcl, args):
         for key in hcl.keys():
             hcl[key] = replace_hcl_vars(hcl[key], args)
     elif isinstance(hcl, list):
-        if len(hcl) == 1:
-            return replace_hcl_vars(hcl[0], args)
         for i in range(len(hcl)):
             hcl[i] = replace_hcl_vars(hcl[i], args)
     elif isinstance(hcl, str):
