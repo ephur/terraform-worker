@@ -148,6 +148,81 @@ def rootc(s3_client, dynamodb_client, sts_client):
     return result
 
 
+@pytest.fixture(scope="function")
+@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
+def json_base_rootc(s3_client, dynamodb_client, sts_client):
+    result = tfworker.commands.root.RootCommand(
+        args={
+            "aws_access_key_id": "1234567890",
+            "aws_secret_access_key": "1234567890",
+            "aws_region": "us-west-2",
+            "backend": "s3",
+            "backend_region": "us-west-2",
+            "backend_bucket": "test_bucket",
+            "backend_prefix": "terraform/test-0001",
+            "config_file": os.path.join(
+                os.path.dirname(__file__), "fixtures", "base_config_test.json"
+            ),
+            "deployment": "test-0001",
+            "gcp_creds_path": "/home/test/test-creds.json",
+            "gcp_project": "test_project",
+            "gcp_region": "us-west-2b",
+            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+        }
+    )
+    return result
+
+
+@pytest.fixture(scope="function")
+@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
+def yaml_base_rootc(s3_client, dynamodb_client, sts_client):
+    result = tfworker.commands.root.RootCommand(
+        args={
+            "aws_access_key_id": "1234567890",
+            "aws_secret_access_key": "1234567890",
+            "aws_region": "us-west-2",
+            "backend": "s3",
+            "backend_region": "us-west-2",
+            "backend_bucket": "test_bucket",
+            "backend_prefix": "terraform/test-0001",
+            "config_file": os.path.join(
+                os.path.dirname(__file__), "fixtures", "base_config_test.yaml"
+            ),
+            "deployment": "test-0001",
+            "gcp_creds_path": "/home/test/test-creds.json",
+            "gcp_project": "test_project",
+            "gcp_region": "us-west-2b",
+            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+        }
+    )
+    return result
+
+
+@pytest.fixture(scope="function")
+@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
+def hcl_base_rootc(s3_client, dynamodb_client, sts_client):
+    result = tfworker.commands.root.RootCommand(
+        args={
+            "aws_access_key_id": "1234567890",
+            "aws_secret_access_key": "1234567890",
+            "aws_region": "us-west-2",
+            "backend": "s3",
+            "backend_region": "us-west-2",
+            "backend_bucket": "test_bucket",
+            "backend_prefix": "terraform/test-0001",
+            "config_file": os.path.join(
+                os.path.dirname(__file__), "fixtures", "base_config_test.hcl"
+            ),
+            "deployment": "test-0001",
+            "gcp_creds_path": "/home/test/test-creds.json",
+            "gcp_project": "test_project",
+            "gcp_region": "us-west-2b",
+            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+        }
+    )
+    return result
+
+
 @pytest.fixture(
     params=[lazy_fixture("tf_12cmd"), lazy_fixture("tf_13cmd"), lazy_fixture("tf_Xcmd")]
 )

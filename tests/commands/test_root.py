@@ -17,6 +17,7 @@ from unittest import mock
 
 import pytest
 import tfworker.commands.root
+from deepdiff import DeepDiff
 from tfworker.commands.root import get_platform, replace_vars
 
 
@@ -50,6 +51,15 @@ class TestMain:
 
         for k, v in expected_tf_vars.items():
             assert terraform_config["terraform_vars"][k] == v
+
+    def test_config_formats(self, yaml_base_rootc, json_base_rootc, hcl_base_rootc):
+        yaml_config = yaml_base_rootc.config
+        json_config = json_base_rootc.config
+        hcl_config = hcl_base_rootc.config
+        diff = DeepDiff(yaml_config, json_config)
+        assert len(diff) == 0
+        diff = DeepDiff(json_config, hcl_config)
+        assert len(diff) == 0
 
     @pytest.mark.parametrize(
         "var, expected",

@@ -8,12 +8,12 @@ terraform:
   providers:
     aws:
       vars:
-        region: //aws-region//
+        region: {{ aws_region }}
         version: "~> 2.61"
 
   # global level variables
   terraform_vars:
-    region: //aws-region//
+    region: {{ aws_region }}
     environment: dev
 
   definitions:
@@ -64,7 +64,7 @@ Build and publish the package to PYPI:
 
 ## Configuration
 
-A project is configured through a worker config, a yaml file that specifies the definitions, inputs, outputs, providers and all other necessary configuration. The worker config is what specifies how state is shared among your definitions. The config support jinja templating that can be used to conditionally pass state or pass in env variables through the command line via the `--config-var` option.
+A project is configured through a worker config, a yaml, json, or hcl2 file that specifies the definitions, inputs, outputs, providers and all other necessary configuration. The worker config is what specifies how state is shared among your definitions. The config support jinja templating that can be used to conditionally pass state or pass in env variables through the command line via the `--config-var` option.
 
 *./worker.yaml*
 ```yaml
@@ -72,12 +72,12 @@ terraform:
   providers:
     aws:
       vars:
-        region: {{ aws-region }}
+        region: {{ aws_region }}
         version: "~> 2.61"
 
   # global level variables
   terraform_vars:
-    region: {{ aws-region }}
+    region: {{ aws_region }}
     environment: dev
 
   definitions:
@@ -89,6 +89,68 @@ terraform:
       path: /definitions/aws/rds
       remote_vars:
         subnet: network.outputs.subnet_id
+```
+
+```json
+{
+    "terraform": {
+        "providers": {
+            "aws": {
+                "vars": {
+                    "region": "{{ aws_region }}",
+                    "version": "~> 2.61"
+                }
+            }
+        },
+        "terraform_vars": {
+            "region": "{{ aws_region }}",
+            "environment": "dev"
+        },
+        "definitions": {
+            "network": {
+                "path": "/definitions/aws/network-existing"
+            },
+            "database": {
+                "path": "/definitions/aws/rds",
+                "remote_vars": {
+                    "subnet": "network.outputs.subnet_id"
+                }
+            }
+        }
+    }
+}
+```
+
+```hcl
+terraform {
+  providers {
+    aws = {
+      vars = {
+        region = "{{ aws_region }}"
+        version = "2.63.0"
+      }
+    }
+  }
+
+  terraform_vars {
+    environment = "dev"
+    region = "{{ aws_region }}"
+  }
+
+  definitions {
+    network = {
+      path = "/definitions/aws/network-existing"
+    }
+
+    database = {
+      path = "/definitions/aws/rds"
+
+      remote_vars = {
+        subnet = "network.outputs.subnet_id"
+      }
+    }
+  }
+}
 ```
 
 In this config, the worker manages two separate terraform modules, a `network` and a `database` definition, and shares an output from the network definition with the database definition. This is made available inside of the `database` definition through the `local.subnet` value.
