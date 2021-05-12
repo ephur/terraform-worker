@@ -16,13 +16,30 @@ import os
 
 _CWD = os.getcwd()
 
-DEFAULT_BACKEND_BUCKET = "tfworker-terraform-states"
+
+def which(program):
+    """ From stack overflow """
+
+    def is_exe(fpath):
+        return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
+
+    fpath, fname = os.path.split(program)
+    if fpath:
+        if is_exe(program):
+            return program
+    else:
+        for path in os.environ["PATH"].split(os.pathsep):
+            exe_file = os.path.join(path, program)
+            if is_exe(exe_file):
+                return exe_file
+    return None
+
+
 DEFAULT_BACKEND_PREFIX = "terraform/state/{deployment}"
 DEFAULT_CONFIG = f"{_CWD}/worker.yaml"
 DEFAULT_REPOSITORY_PATH = _CWD
-DEFAULT_AWS_REGION = "us-west-2"
-DEFAULT_GCP_REGION = "us-west2b"
-DEFAULT_BACKEND_REGION = "us-west-2"
-DEFAULT_TERRFORM = "/usr/local/bin/terraform"
+DEFAULT_AWS_REGION = "us-east1"
+DEFAULT_GCP_REGION = "us-east1a"
+DEFAULT_TERRFORM = which("terraform")
 
 RESERVED_FILES = ["terraform.tf", "worker-locals.tf", "worker.auto.tfvars"]

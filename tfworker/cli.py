@@ -156,7 +156,7 @@ def validate_host():
 )
 @click.option(
     "--backend-bucket",
-    default=const.DEFAULT_BACKEND_BUCKET,
+    required=True,
     help="Bucket (must exist) where all terraform states are stored",
 )
 @click.option(
@@ -229,8 +229,8 @@ def version():
 )
 @click.option(
     "--show-output/--no-show-output",
-    default=False,
-    help="shot output from terraform commands",
+    default=True,
+    help="show output from terraform commands",
 )
 @click.option(
     "--terraform-bin",
