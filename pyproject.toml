@@ -39,6 +39,7 @@ moto = {extras = ["sts"], version = "^2.0.5"}
 python-hcl2 = "^2.0.3"
 lark-parser = "^0.10.0"
 pyyaml = "^5.4.1"
+Sphinx = "^3.5.4"
 
 [tool.poetry.dev-dependencies]
 ipython = "^7.18.1"
