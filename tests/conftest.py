@@ -113,7 +113,6 @@ def grootc():
             "config_file": os.path.join(
                 os.path.dirname(__file__), "fixtures", "gcp_test_config.yaml"
             ),
-            "deployment": "test-0001",
             "gcp_creds_path": "/home/test/test-creds.json",
             "gcp_project": "test_project",
             "gcp_region": "us-west-2b",
@@ -138,7 +137,6 @@ def rootc(s3_client, dynamodb_client, sts_client):
             "config_file": os.path.join(
                 os.path.dirname(__file__), "fixtures", "test_config.yaml"
             ),
-            "deployment": "test-0001",
             "gcp_creds_path": "/home/test/test-creds.json",
             "gcp_project": "test_project",
             "gcp_region": "us-west-2b",
@@ -163,7 +161,6 @@ def json_base_rootc(s3_client, dynamodb_client, sts_client):
             "config_file": os.path.join(
                 os.path.dirname(__file__), "fixtures", "base_config_test.json"
             ),
-            "deployment": "test-0001",
             "gcp_creds_path": "/home/test/test-creds.json",
             "gcp_project": "test_project",
             "gcp_region": "us-west-2b",
@@ -188,7 +185,6 @@ def yaml_base_rootc(s3_client, dynamodb_client, sts_client):
             "config_file": os.path.join(
                 os.path.dirname(__file__), "fixtures", "base_config_test.yaml"
             ),
-            "deployment": "test-0001",
             "gcp_creds_path": "/home/test/test-creds.json",
             "gcp_project": "test_project",
             "gcp_region": "us-west-2b",
@@ -213,7 +209,6 @@ def hcl_base_rootc(s3_client, dynamodb_client, sts_client):
             "config_file": os.path.join(
                 os.path.dirname(__file__), "fixtures", "base_config_test.hcl"
             ),
-            "deployment": "test-0001",
             "gcp_creds_path": "/home/test/test-creds.json",
             "gcp_project": "test_project",
             "gcp_region": "us-west-2b",

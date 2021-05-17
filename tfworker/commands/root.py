@@ -35,6 +35,7 @@ class RootCommand:
         self.clean = clean
         self.temp_dir = tempfile.mkdtemp()
         self.args = self.StateArgs()
+        self.config_file = None
 
         # Config accessors
         self.tf = None
@@ -45,7 +46,7 @@ class RootCommand:
 
         if args.get("config_file") and args.get("backend"):
             click.secho(f"loading config file {args.get('config_file')}", fg="green")
-            self.load_config(args.get("config_file"))
+            self.config_file = args.get("config_file")
 
     def __del__(self):
         """Cleanup the temporary directory after execution."""
@@ -65,19 +66,21 @@ class RootCommand:
         setattr(self.args, k, v)
         return None
 
-    def load_config(self, config_file):
+    def load_config(self):
+        if not self.config_file:
+            return
         try:
             template_reader = io.StringIO()
             jinja_env = jinja2.Environment(
                 undefined=StrictUndefined,
-                loader=jinja2.FileSystemLoader(pathlib.Path(config_file).parents[0]),
+                loader=jinja2.FileSystemLoader(pathlib.Path(self.config_file).parents[0]),
             )
-            template_config = jinja_env.get_template(pathlib.Path(config_file).name)
+            template_config = jinja_env.get_template(pathlib.Path(self.config_file).name)
             # maybe get_env should be optional?
             template_config.stream(
                 **self.args.template_items(return_as_dict=True, get_env=True)
             ).dump(template_reader)
-            if config_file.endswith(".hcl"):
+            if self.config_file.endswith(".hcl"):
                 self.config = ordered_config_load_hcl(template_reader.getvalue(), self.args)
             else:
                 self.config = ordered_config_load(template_reader.getvalue(), self.args)
@@ -87,7 +90,7 @@ class RootCommand:
             self.tf = self.config.get("terraform", OrderedDict())
             self._pullup_keys()
         except jinja2.exceptions.TemplateNotFound as e:
-            path = pathlib.Path(config_file).parents[0]
+            path = pathlib.Path(self.config_file).parents[0]
             click.secho(f"can not read template file: {path}/{e}", fg="red")
             raise SystemExit(1)
         except jinja2.exceptions.UndefinedError as e:

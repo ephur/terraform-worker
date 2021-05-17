@@ -55,9 +55,6 @@ class Definition:
         self._remote_vars = self.make_vars(
             body.get("remote_vars", collections.OrderedDict()), global_remote_vars
         )
-        self._template_vars = self.make_vars(
-            body.get("template_vars", collections.OrderedDict()), global_template_vars
-        )
         self._terraform_vars = self.make_vars(
             body.get("terraform_vars", collections.OrderedDict()), global_terraform_vars
         )
@@ -122,10 +119,6 @@ class Definition:
             c.copy(destination=self._target, **remote_options)
         except FileExistsError as e:
             raise ReservedFileError(e)
-
-        # Prepare variables
-        self._template_vars["deployment"] = self._deployment
-        self._terraform_vars["deployment"] = self._deployment
 
         # Create local vars from remote data sources
         if len(list(self._remote_vars.keys())) > 0:
