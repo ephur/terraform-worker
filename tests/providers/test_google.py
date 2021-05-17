@@ -16,7 +16,6 @@
 def test_google_hcl(basec):
     render = basec.providers["google"].hcl()
     expected_render = """provider "google" {
-  version = "~> 3.39"
   region = "us-west-2"
   credentials = file("/home/test/test-creds.json")
 }"""

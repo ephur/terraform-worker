@@ -70,7 +70,7 @@ class TestPlugins:
     @pytest.mark.depends(on="get_url")
     def test_plugin_download(self, rootc):
         plugins = tfworker.plugins.PluginsCollection(
-            {"null": {"version": "2.1.2"}}, rootc.temp_dir
+            {"null": {"version": "2.1.2"}}, rootc.temp_dir, 12
         )
         plugins.download()
         files = glob.glob(
@@ -89,3 +89,63 @@ class TestPlugins:
         with expected_exception:
             actual_url = tfworker.plugins.get_url(name, details)
             assert expected_url == actual_url
+
+    @pytest.mark.parametrize(
+        "name,details,expected_host,expected_ns,expected_provider,expected_exception",
+        [
+            (
+                "bar",
+                {"source": "foo/bar"},
+                "registry.terraform.io",
+                "foo",
+                "bar",
+                does_not_raise(),
+            ),
+            (
+                "bar",
+                {"source": "gh.com/foo/bar"},
+                "gh.com",
+                "foo",
+                "bar",
+                does_not_raise(),
+            ),
+            (
+                "bar",
+                {"source": "bar"},
+                "registry.terraform.io",
+                "hashicorp",
+                "bar",
+                does_not_raise(),
+            ),
+            (
+                "bar",
+                {},
+                "registry.terraform.io",
+                "hashicorp",
+                "bar",
+                does_not_raise(),
+            ),
+            (
+                "bar",
+                {"source": "gh.com/extra/foo/bar"},
+                "registry.terraform.io",
+                "hashicorp",
+                "bar",
+                pytest.raises(tfworker.plugins.PluginSourceParseException),
+            ),
+        ],
+    )
+    def test_plugin_source(
+        self,
+        name,
+        details,
+        expected_host,
+        expected_ns,
+        expected_provider,
+        expected_exception,
+    ):
+        with expected_exception:
+            source = tfworker.plugins.PluginSource(name, details)
+            assert source.host == expected_host
+            assert source.namespace == expected_ns
+            assert source.provider == expected_provider

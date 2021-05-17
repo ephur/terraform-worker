@@ -26,7 +26,7 @@ from tfworker.commands.version import VersionCommand
 
 
 def validate_deployment(ctx, deployment, name):
-    """Validate the deployment is an 8 char name."""
+    """Validate the deployment is no more than 16 characters."""
     if len(name) > 16:
         click.secho("deployment must be less than 16 characters", fg="red")
         raise SystemExit(2)

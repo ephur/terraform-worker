@@ -18,7 +18,7 @@ from .base import BaseProvider
 class AWSProvider(BaseProvider):
     tag = "aws"
 
-    def __init__(self, body, authenticators, *args, **kwargs):
-        super(AWSProvider, self).__init__(body)
+    def __init__(self, body, authenticators, tf_version_major, **kwargs):
+        super(AWSProvider, self).__init__(body, tf_version_major)
         self._authenticator = authenticators.get(self.tag)
         self.vars = body.get("vars", {})

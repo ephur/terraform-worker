@@ -16,7 +16,6 @@
 def test_aws_hcl(basec):
     render = basec.providers["aws"].hcl()
     expected_render = """provider "aws" {
-  version = "2.63"
   region = "us-west-2"
 }"""
     assert render == expected_render

@@ -18,8 +18,8 @@ from .base import BaseProvider
 class GoogleBetaProvider(BaseProvider):
     tag = "google-beta"
 
-    def __init__(self, body, authenticators, **kwargs):
-        super(GoogleBetaProvider, self).__init__(body)
+    def __init__(self, body, authenticators, tf_version_major, **kwargs):
+        super(GoogleBetaProvider, self).__init__(body, tf_version_major)
 
         self._authenticator = authenticators.get("google")
 

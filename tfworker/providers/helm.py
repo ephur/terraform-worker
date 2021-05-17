@@ -20,8 +20,8 @@ from .base import BaseProvider
 class HelmProvider(BaseProvider):
     tag = "helm"
 
-    def __init__(self, body, authenticators, **kwargs):
-        super(HelmProvider, self).__init__(body)
+    def __init__(self, body, authenticators, tf_version_major, **kwargs):
+        super(HelmProvider, self).__init__(body, tf_version_major)
         self.tag = kwargs.get("tag", self.tag)
         self.vars = body.get("vars", {})
         self.version = body.get("version")
@@ -31,7 +31,11 @@ class HelmProvider(BaseProvider):
         provider_vars = {}
         try:
             for k, v in self.vars.items():
-                provider_vars[k] = v
+                if self._tf_version_major >= 13:
+                    if k not in self._field_filter:
+                        provider_vars[k] = v
+                else:
+                    provider_vars[k] = v
         except (KeyError, TypeError):
             """No provider vars were set."""
             pass

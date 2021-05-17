@@ -14,6 +14,8 @@
 
 import collections
 import os
+import random
+import string
 from unittest import mock
 
 import boto3
@@ -24,6 +26,36 @@ import tfworker.commands.root
 import tfworker.providers
 from moto import mock_dynamodb2, mock_s3, mock_sts
 from pytest_lazyfixture import lazy_fixture
+
+
+@pytest.fixture
+def aws_access_key_id():
+    suffix = "".join(random.choices("RAX", k=16))
+    return f"AKIA{suffix}"
+
+
+@pytest.fixture
+def aws_secret_access_key():
+    return "".join(
+        random.choices(
+            string.ascii_uppercase + string.ascii_lowercase + string.digits, k=40
+        )
+    )
+
+
+@pytest.fixture
+def aws_role_arn(aws_account_id, aws_role_name):
+    return f"arn:aws:iam:{aws_account_id}:role/{aws_role_name}"
+
+
+@pytest.fixture
+def aws_role_name():
+    return "".join(random.choices(string.ascii_lowercase, k=8))
+
+
+@pytest.fixture
+def aws_account_id():
+    return "".join(random.choices(string.digits, k=12))
 
 
 @pytest.fixture(scope="class")
@@ -116,6 +148,81 @@ def rootc(s3_client, dynamodb_client, sts_client):
     return result
 
 
+@pytest.fixture(scope="function")
+@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
+def json_base_rootc(s3_client, dynamodb_client, sts_client):
+    result = tfworker.commands.root.RootCommand(
+        args={
+            "aws_access_key_id": "1234567890",
+            "aws_secret_access_key": "1234567890",
+            "aws_region": "us-west-2",
+            "backend": "s3",
+            "backend_region": "us-west-2",
+            "backend_bucket": "test_bucket",
+            "backend_prefix": "terraform/test-0001",
+            "config_file": os.path.join(
+                os.path.dirname(__file__), "fixtures", "base_config_test.json"
+            ),
+            "deployment": "test-0001",
+            "gcp_creds_path": "/home/test/test-creds.json",
+            "gcp_project": "test_project",
+            "gcp_region": "us-west-2b",
+            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+        }
+    )
+    return result
+
+
+@pytest.fixture(scope="function")
+@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
+def yaml_base_rootc(s3_client, dynamodb_client, sts_client):
+    result = tfworker.commands.root.RootCommand(
+        args={
+            "aws_access_key_id": "1234567890",
+            "aws_secret_access_key": "1234567890",
+            "aws_region": "us-west-2",
+            "backend": "s3",
+            "backend_region": "us-west-2",
+            "backend_bucket": "test_bucket",
+            "backend_prefix": "terraform/test-0001",
+            "config_file": os.path.join(
+                os.path.dirname(__file__), "fixtures", "base_config_test.yaml"
+            ),
+            "deployment": "test-0001",
+            "gcp_creds_path": "/home/test/test-creds.json",
+            "gcp_project": "test_project",
+            "gcp_region": "us-west-2b",
+            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+        }
+    )
+    return result
+
+
+@pytest.fixture(scope="function")
+@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
+def hcl_base_rootc(s3_client, dynamodb_client, sts_client):
+    result = tfworker.commands.root.RootCommand(
+        args={
+            "aws_access_key_id": "1234567890",
+            "aws_secret_access_key": "1234567890",
+            "aws_region": "us-west-2",
+            "backend": "s3",
+            "backend_region": "us-west-2",
+            "backend_bucket": "test_bucket",
+            "backend_prefix": "terraform/test-0001",
+            "config_file": os.path.join(
+                os.path.dirname(__file__), "fixtures", "base_config_test.hcl"
+            ),
+            "deployment": "test-0001",
+            "gcp_creds_path": "/home/test/test-creds.json",
+            "gcp_project": "test_project",
+            "gcp_region": "us-west-2b",
+            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+        }
+    )
+    return result
+
+
 @pytest.fixture(
     params=[lazy_fixture("tf_12cmd"), lazy_fixture("tf_13cmd"), lazy_fixture("tf_Xcmd")]
 )
@@ -136,6 +243,20 @@ def gbasec(grootc):
 @pytest.fixture
 def tf_Xcmd(rootc):
     return tfworker.commands.terraform.TerraformCommand(rootc, deployment="test-0001")
+
+
+@pytest.fixture
+def tf_15cmd(rootc):
+    return tfworker.commands.terraform.TerraformCommand(
+        rootc, deployment="test-0001", tf_version=(15, 0)
+    )
+
+
+@pytest.fixture
+def tf_14cmd(rootc):
+    return tfworker.commands.terraform.TerraformCommand(
+        rootc, deployment="test-0001", tf_version=(14, 5)
+    )
 
 
 @pytest.fixture

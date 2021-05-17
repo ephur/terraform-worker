@@ -23,7 +23,9 @@ from collections import OrderedDict
 
 import click
 import jinja2
+import tfworker.util.hcl2_transformer as hcl2_transformer
 import yaml
+from hcl2.lark_parser import Lark_StandAlone
 from jinja2.runtime import StrictUndefined
 
 
@@ -75,7 +77,10 @@ class RootCommand:
             template_config.stream(
                 **self.args.template_items(return_as_dict=True, get_env=True)
             ).dump(template_reader)
-            self.config = ordered_config_load(template_reader.getvalue(), self.args)
+            if config_file.endswith(".hcl"):
+                self.config = ordered_config_load_hcl(template_reader.getvalue(), self.args)
+            else:
+                self.config = ordered_config_load(template_reader.getvalue(), self.args)
 
             # A little arbitrary, but decorate the top two levels
             # directly on self object
@@ -161,6 +166,30 @@ def get_config_var_dict(config_vars):
         except ValueError:
             raise ValueError(cv)
     return return_vars
+
+
+def replace_hcl_vars(hcl, args):
+    if isinstance(hcl, dict):
+        for key in hcl.keys():
+            hcl[key] = replace_hcl_vars(hcl[key], args)
+    elif isinstance(hcl, list):
+        for i in range(len(hcl)):
+            hcl[i] = replace_hcl_vars(hcl[i], args)
+    elif isinstance(hcl, str):
+        return replace_vars(hcl, args)
+    return hcl
+
+
+def ordered_config_load_hcl(stream, args):
+    """
+    Load an hcl config, and replace templated items.
+
+    Derived from:
+    https://stackoverflow.com/questions/5121931/in-python-how-can-you-load-yaml-mappings-as-ordereddicts
+    """
+    hcl2_ordered = Lark_StandAlone(transformer=hcl2_transformer.OrderedDictTransformer())
+    doc = hcl2_ordered.parse(stream + "\n")
+    return replace_hcl_vars(doc, args)
 
 
 def ordered_config_load(

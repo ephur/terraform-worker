@@ -72,17 +72,91 @@ class TestTerraformCommand:
                 assert filecmp.cmp(src, dst, shallow=False)
 
     @pytest.mark.parametrize(
-        "method, tf_cmd",
+        "method, tf_cmd, args",
         [
-            ("init", lazy_fixture("tf_12cmd")),
-            ("plan", lazy_fixture("tf_12cmd")),
-            ("apply", lazy_fixture("tf_12cmd")),
-            ("init", lazy_fixture("tf_13cmd")),
-            ("plan", lazy_fixture("tf_13cmd")),
-            ("apply", lazy_fixture("tf_13cmd")),
+            (
+                "init",
+                lazy_fixture("tf_12cmd"),
+                ["-input=false", "-no-color", "-plugin-dir"],
+            ),
+            (
+                "plan",
+                lazy_fixture("tf_12cmd"),
+                ["-input=false", "-detailed-exitcode", "-no-color"],
+            ),
+            (
+                "apply",
+                lazy_fixture("tf_12cmd"),
+                ["-input=false", "-no-color", "-auto-approve"],
+            ),
+            (
+                "destroy",
+                lazy_fixture("tf_12cmd"),
+                ["-input=false", "-no-color", "-force"],
+            ),
+            (
+                "init",
+                lazy_fixture("tf_13cmd"),
+                ["-input=false", "-no-color", "-plugin-dir"],
+            ),
+            (
+                "plan",
+                lazy_fixture("tf_13cmd"),
+                ["-input=false", "-detailed-exitcode", "-no-color"],
+            ),
+            (
+                "apply",
+                lazy_fixture("tf_13cmd"),
+                ["-input=false", "-no-color", "-auto-approve"],
+            ),
+            (
+                "destroy",
+                lazy_fixture("tf_13cmd"),
+                ["-input=false", "-no-color", "-force"],
+            ),
+            (
+                "init",
+                lazy_fixture("tf_14cmd"),
+                ["-input=false", "-no-color", "-plugin-dir"],
+            ),
+            (
+                "plan",
+                lazy_fixture("tf_14cmd"),
+                ["-input=false", "-detailed-exitcode", "-no-color"],
+            ),
+            (
+                "apply",
+                lazy_fixture("tf_14cmd"),
+                ["-input=false", "-no-color", "-auto-approve"],
+            ),
+            (
+                "destroy",
+                lazy_fixture("tf_14cmd"),
+                ["-input=false", "-no-color", "-force"],
+            ),
+            (
+                "init",
+                lazy_fixture("tf_15cmd"),
+                ["-input=false", "-no-color", "-plugin-dir"],
+            ),
+            (
+                "plan",
+                lazy_fixture("tf_15cmd"),
+                ["-input=false", "-detailed-exitcode", "-no-color"],
+            ),
+            (
+                "apply",
+                lazy_fixture("tf_15cmd"),
+                ["-input=false", "-no-color", "-auto-approve"],
+            ),
+            (
+                "destroy",
+                lazy_fixture("tf_15cmd"),
+                ["-input=false", "-no-color", "-auto-approve"],
+            ),
         ],
     )
-    def test_run(self, tf_cmd: str, method: callable):
+    def test_run(self, tf_cmd: str, method: callable, args: list):
         with mock.patch(
             "tfworker.commands.terraform.pipe_exec",
             side_effect=mock_pipe_exec,
@@ -92,6 +166,10 @@ class TestTerraformCommand:
                 method,
             )
             mocked.assert_called_once()
+            call_as_string = str(mocked.mock_calls.pop())
+            assert method in call_as_string
+            for arg in args:
+                assert arg in call_as_string
 
     @pytest.mark.parametrize(
         "stdout, major, minor, expected_exception",

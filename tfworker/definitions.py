@@ -15,15 +15,17 @@
 import collections
 import copy
 import json
+from pathlib import Path, PurePath
 from typing import OrderedDict
 
 import click
+import hcl2
 from tfworker import constants as const
 from tfworker.util.copier import CopyFactory
 
 TERRAFORM_TPL = """\
 terraform {{
-{0}{1}
+{0}
 }}
 """
 
@@ -67,6 +69,8 @@ class Definition:
         self._tf_version_major = tf_version_major
         self._limited = limited
 
+        self._target = f"{self._temp_dir}/definitions/{self.tag}".replace("//", "/")
+
     @property
     def body(self):
         return self._body
@@ -79,9 +83,25 @@ class Definition:
     def path(self):
         return self._path
 
+    @property
+    def provider_names(self):
+        """ Extract only the providers used by a definition """
+        result = set(self._providers.keys())
+        if self._tf_version_major >= 13:
+            version_path = PurePath(self._target) / "versions.tf"
+            if Path(version_path).exists():
+                with open(version_path, "r") as reader:
+                    vinfo = hcl2.load(reader)
+                    tf_element = vinfo.get("terraform", [None]).pop()
+                    if tf_element:
+                        rp_element = tf_element.get("required_providers", [None]).pop()
+                        if rp_element:
+                            required_providers = set(rp_element.keys())
+                            result = result.intersection(required_providers)
+        return result
+
     def prep(self, backend):
         """ prepare the definitions for running """
-        target = f"{self._temp_dir}/definitions/{self.tag}".replace("//", "/")
 
         try:
             c = CopyFactory.create(
@@ -99,7 +119,7 @@ class Definition:
         remote_options = dict(self.body.get("remote_path_options", {}))
 
         try:
-            c.copy(destination=target, **remote_options)
+            c.copy(destination=self._target, **remote_options)
         except FileExistsError as e:
             raise ReservedFileError(e)
 
@@ -109,7 +129,7 @@ class Definition:
 
         # Create local vars from remote data sources
         if len(list(self._remote_vars.keys())) > 0:
-            with open(f"{target}/worker-locals.tf", "w+") as tflocals:
+            with open(f"{self._target}/worker-locals.tf", "w+") as tflocals:
                 tflocals.write("locals {\n")
                 for k, v in self._remote_vars.items():
                     tflocals.write(f"  {k} = data.terraform_remote_state.{v}\n")
@@ -117,21 +137,13 @@ class Definition:
 
         # create remote data sources, and required providers
         remotes = list(map(lambda x: x.split(".")[0], self._remote_vars.values()))
-        with open(f"{target}/terraform.tf", "w+") as tffile:
-            tffile.write(f"{self._providers.hcl()}\n\n")
-            required_providers = ""
-            if self._tf_version_major >= 13:
-                required_providers = f"\n\n{self._providers.required_providers()}"
-            tffile.write(
-                TERRAFORM_TPL.format(
-                    f"{backend.hcl(self.tag)}",
-                    required_providers,
-                )
-            )
+        with open(f"{self._target}/terraform.tf", "w+") as tffile:
+            tffile.write(f"{self._providers.hcl(self.provider_names)}\n\n")
+            tffile.write(TERRAFORM_TPL.format(f"{backend.hcl(self.tag)}"))
             tffile.write(backend.data_hcl(remotes))
 
         # Create the variable definitions
-        with open(f"{target}/worker.auto.tfvars", "w+") as varfile:
+        with open(f"{self._target}/worker.auto.tfvars", "w+") as varfile:
             for k, v in self._terraform_vars.items():
                 varfile.write(f"{k} = {self.vars_typer(v)}\n")
 

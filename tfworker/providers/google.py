@@ -18,8 +18,8 @@ from .base import BaseProvider
 class GoogleProvider(BaseProvider):
     tag = "google"
 
-    def __init__(self, body, authenticators, **kwargs):
-        super(GoogleProvider, self).__init__(body)
+    def __init__(self, body, authenticators, tf_version_major, **kwargs):
+        super(GoogleProvider, self).__init__(body, tf_version_major)
 
         self._authenticator = authenticators.get(self.tag)
 
