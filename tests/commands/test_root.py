@@ -45,6 +45,8 @@ class TestMain:
             "region": "us-west-2",
             "domain": "test.domain.com",
         }
+        rootc.add_arg("deployment", "root-deployment")
+        rootc.load_config()
         terraform_config = rootc.config.get("terraform")
         for section in expected_sections:
             assert section in terraform_config.keys()
@@ -53,6 +55,9 @@ class TestMain:
             assert terraform_config["terraform_vars"][k] == v
 
     def test_config_formats(self, yaml_base_rootc, json_base_rootc, hcl_base_rootc):
+        yaml_base_rootc.load_config()
+        json_base_rootc.load_config()
+        hcl_base_rootc.load_config()
         yaml_config = yaml_base_rootc.config
         json_config = json_base_rootc.config
         hcl_config = hcl_base_rootc.config
@@ -64,7 +69,6 @@ class TestMain:
     @pytest.mark.parametrize(
         "var, expected",
         [
-            ("//deployment//", "test-0001"),
             ("//aws-region//}}", "us-west-2"),
             ("//   aws-region //}}", "us-west-2"),
             ("//aws_region//}}", "us-west-2"),
@@ -73,6 +77,8 @@ class TestMain:
         ],
     )
     def test_replace_vars(self, rootc, var, expected):
+        rootc.add_arg("deployment", "root-deployment")
+        rootc.load_config()
         assert replace_vars(var, rootc.args) == expected
 
     @pytest.mark.parametrize(
