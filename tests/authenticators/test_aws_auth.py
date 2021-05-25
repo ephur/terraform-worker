@@ -35,6 +35,7 @@ def state_args(cli_args):
     result = RootCommand.StateArgs()
     for k, v in cli_args.items():
         setattr(result, k, v)
+    setattr(result, "backend_bucket", "alphabet")
     return result
 
 
@@ -42,12 +43,14 @@ def state_args(cli_args):
 def state_args_with_profile_only():
     result = RootCommand.StateArgs()
     setattr(result, "aws_profile", "testing")
+    setattr(result, "backend_bucket", "alphabet")
     return result
 
 
 @pytest.fixture
 def state_args_with_role_arn(state_args, aws_role_arn):
     setattr(state_args, "aws_role_arn", aws_role_arn)
+    setattr(state_args, "backend_bucket", "alphabet")
     return state_args
 
 

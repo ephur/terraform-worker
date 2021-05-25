@@ -2,7 +2,7 @@ terraform {
   providers {
     aws = {
       vars = {
-        region = "// aws_region //"
+        region = "{{ aws_region }}"
         version = "2.63.0"
       }
     }

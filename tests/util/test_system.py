@@ -13,9 +13,11 @@
 # limitations under the License.
 
 from contextlib import contextmanager
+from unittest import mock
 
 import pytest
 from tfworker.util.system import pipe_exec
+from tfworker.util.system import which
 
 
 # context manager to allow testing exceptions in parameterized tests
@@ -62,3 +64,11 @@ class TestUtilSystem:
         assert return_exit_code == exit_code
         assert stdout.encode() in return_stdout.rstrip()
         assert return_stderr.rstrip() in stderr.encode()
+
+    def test_which(self):
+        with mock.patch(
+            "os.path.isfile",
+            side_effect=lambda x: True,
+        ):
+            with mock.patch("os.access", side_effect=lambda x, y: True):
+                assert which("terraform") is not None

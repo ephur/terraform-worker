@@ -75,31 +75,23 @@ def validate_host():
 @click.group()
 @click.option(
     "--aws-access-key-id",
-    required=False,
     envvar="AWS_ACCESS_KEY_ID",
     help="AWS Access key",
-    default=None,
 )
 @click.option(
     "--aws-secret-access-key",
-    required=False,
     envvar="AWS_SECRET_ACCESS_KEY",
     help="AWS access key secret",
-    default=None,
 )
 @click.option(
     "--aws-session-token",
-    required=False,
     envvar="AWS_SESSION_TOKEN",
     help="AWS access key token",
-    default=None,
 )
 @click.option(
     "--aws-role-arn",
     envvar="AWS_ROLE_ARN",
     help="If provided, credentials will be used to assume this role (complete ARN)",
-    default=None,
-    required=False,
 )
 @click.option(
     "--aws-region",
@@ -109,10 +101,8 @@ def validate_host():
 )
 @click.option(
     "--aws-profile",
-    required=False,
     envvar="AWS_PROFILE",
     help="The AWS/Boto3 profile to use",
-    default=None,
 )
 @click.option(
     "--gcp-region",
@@ -122,19 +112,16 @@ def validate_host():
 )
 @click.option(
     "--gcp-creds-path",
-    required=False,
     envvar="GCP_CREDS_PATH",
     help=(
         "Relative path to the credentials JSON file for the service account to be used."
     ),
-    default=None,
     callback=validate_gcp_creds_path,
 )
 @click.option(
     "--gcp-project",
     envvar="GCP_PROJECT",
     help="GCP project name to which work will be applied",
-    default=None,
 )
 @click.option(
     "--config-file",
@@ -156,7 +143,6 @@ def validate_host():
 )
 @click.option(
     "--backend-bucket",
-    default=const.DEFAULT_BACKEND_BUCKET,
     help="Bucket (must exist) where all terraform states are stored",
 )
 @click.option(
@@ -166,7 +152,7 @@ def validate_host():
 )
 @click.option(
     "--backend-region",
-    default=const.DEFAULT_BACKEND_REGION,
+    default=const.DEFAULT_AWS_REGION,
     help="Region where terraform rootc/lock bucket exists",
 )
 @click.option(
@@ -229,12 +215,11 @@ def version():
 )
 @click.option(
     "--show-output/--no-show-output",
-    default=False,
-    help="shot output from terraform commands",
+    default=True,
+    help="show output from terraform commands",
 )
 @click.option(
     "--terraform-bin",
-    default=const.DEFAULT_TERRFORM,
     help="The complate location of the terraform binary",
 )
 @click.option(

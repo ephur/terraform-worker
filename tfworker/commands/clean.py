@@ -18,11 +18,10 @@ from tfworker.commands.base import BaseCommand
 
 
 class CleanCommand(BaseCommand):
-    def __init__(self, rootc, *args, **kwargs):
-        self._config = rootc.config
-        self._deployment = kwargs.get("deployment")
-        self._limit = kwargs.get("limit", ())
+    def __init__(self, rootc, **kwargs):
         super(CleanCommand, self).__init__(rootc, **kwargs)
+        self._deployment = self._resolve_arg("deployment")
+        self._limit = self._resolve_arg("limit")
 
     def exec(self):
         try:

@@ -225,14 +225,56 @@ def tf_cmd(request):
     return request.param
 
 
+@pytest.fixture(scope="function")
+@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
+def rootc_options(s3_client, dynamodb_client, sts_client):
+    result = tfworker.commands.root.RootCommand(
+        args={
+            "aws_region": "us-east-2",
+            "backend": "gcs",
+            "backend_region": "us-west-2",
+            "backend_bucket": "test_bucket",
+            "backend_prefix": "terraform/test-0001",
+            "config_file": os.path.join(
+                os.path.dirname(__file__), "fixtures", "test_config_with_options.yaml"
+            ),
+            "gcp_creds_path": "/home/test/test-creds.json",
+            "gcp_project": "test_project",
+            "gcp_region": "us-west-2b",
+            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+        }
+    )
+    return result
+
+
 @pytest.fixture
 def basec(rootc):
-    return tfworker.commands.base.BaseCommand(rootc, "test-0001", tf_version_major=13)
+    with mock.patch(
+        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        side_effect=lambda x: (13, 3),
+    ):
+        with mock.patch(
+            "tfworker.commands.base.which",
+            side_effect=lambda x: "/usr/local/bin/terraform",
+        ):
+            return tfworker.commands.base.BaseCommand(
+                rootc, "test-0001", tf_version_major=13
+            )
 
 
 @pytest.fixture
 def gbasec(grootc):
-    return tfworker.commands.base.BaseCommand(grootc, "test-0001", tf_version_major=13)
+    with mock.patch(
+        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        side_effect=lambda x: (13, 3),
+    ):
+        with mock.patch(
+            "tfworker.commands.base.which",
+            side_effect=lambda x: "/usr/local/bin/terraform",
+        ):
+            return tfworker.commands.base.BaseCommand(
+                grootc, "test-0001", tf_version_major=13
+            )
 
 
 @pytest.fixture
@@ -242,30 +284,80 @@ def tf_Xcmd(rootc):
 
 @pytest.fixture
 def tf_15cmd(rootc):
-    return tfworker.commands.terraform.TerraformCommand(
-        rootc, deployment="test-0001", tf_version=(15, 0)
-    )
+    with mock.patch(
+        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        side_effect=lambda x: (15, 0),
+    ):
+        with mock.patch(
+            "tfworker.commands.base.which",
+            side_effect=lambda x: "/usr/local/bin/terraform",
+        ):
+            return tfworker.commands.terraform.TerraformCommand(
+                rootc, deployment="test-0001", tf_version=(15, 0)
+            )
 
 
 @pytest.fixture
 def tf_14cmd(rootc):
-    return tfworker.commands.terraform.TerraformCommand(
-        rootc, deployment="test-0001", tf_version=(14, 5)
-    )
+    with mock.patch(
+        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        side_effect=lambda x: (14, 5),
+    ):
+        with mock.patch(
+            "tfworker.commands.base.which",
+            side_effect=lambda x: "/usr/local/bin/terraform",
+        ):
+            return tfworker.commands.terraform.TerraformCommand(
+                rootc, deployment="test-0001", tf_version=(14, 5)
+            )
 
 
 @pytest.fixture
 def tf_13cmd(rootc):
-    return tfworker.commands.terraform.TerraformCommand(
-        rootc, deployment="test-0001", tf_version=(13, 5)
-    )
+    with mock.patch(
+        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        side_effect=lambda x: (13, 5),
+    ):
+        with mock.patch(
+            "tfworker.commands.base.which",
+            side_effect=lambda x: "/usr/local/bin/terraform",
+        ):
+            return tfworker.commands.terraform.TerraformCommand(
+                rootc, deployment="test-0001", tf_version=(13, 5)
+            )
 
 
 @pytest.fixture
 def tf_12cmd(rootc):
-    return tfworker.commands.terraform.TerraformCommand(
-        rootc, deployment="test-0001", tf_version=(12, 27)
-    )
+    with mock.patch(
+        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        side_effect=lambda x: (12, 27),
+    ):
+        with mock.patch(
+            "tfworker.commands.base.which",
+            side_effect=lambda x: "/usr/local/bin/terraform",
+        ):
+            return tfworker.commands.terraform.TerraformCommand(
+                rootc, deployment="test-0001", tf_version=(12, 27)
+            )
+
+
+@pytest.fixture
+def tf_13cmd_options(rootc_options):
+    with mock.patch(
+        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        side_effect=lambda x: (13, 5),
+    ):
+        with mock.patch(
+            "tfworker.commands.base.which",
+            side_effect=lambda x: "/usr/local/bin/terraform",
+        ):
+            return tfworker.commands.terraform.TerraformCommand(
+                rootc_options,
+                deployment="test-0001-options",
+                tf_version=(13, 5),
+                b64_encode=False,
+            )
 
 
 @pytest.fixture

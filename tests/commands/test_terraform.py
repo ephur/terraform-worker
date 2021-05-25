@@ -21,7 +21,7 @@ from unittest import mock
 
 import pytest
 from pytest_lazyfixture import lazy_fixture
-from tfworker.commands.terraform import TerraformCommand
+from tfworker.commands.terraform import BaseCommand
 
 
 # context manager to allow testing exceptions in parameterized tests
@@ -183,13 +183,24 @@ class TestTerraformCommand:
         self, stdout: str, major: int, minor: int, expected_exception: callable
     ):
         with mock.patch(
-            "tfworker.commands.terraform.pipe_exec",
+            "tfworker.commands.base.pipe_exec",
             side_effect=mock_tf_version,
         ) as mocked:
             with expected_exception:
-                (actual_major, actual_minor) = TerraformCommand.get_terraform_version(
-                    stdout
-                )
+                (actual_major, actual_minor) = BaseCommand.get_terraform_version(stdout)
                 assert actual_major == major
                 assert actual_minor == minor
                 mocked.assert_called_once()
+
+    def test_worker_options(self, tf_13cmd_options):
+        # Verify that the options from the CLI override the options from the config
+        assert tf_13cmd_options._rootc.worker_options_odict.get("backend") == "s3"
+        assert tf_13cmd_options.backend.tag == "gcs"
+
+        # Verify that None options are overriden by the config
+        assert tf_13cmd_options._rootc.worker_options_odict.get("b64_encode") is True
+        assert tf_13cmd_options._args_dict.get("b64_encode") is False
+
+        # The fixture causes which to return /usr/local/bin/terraform.  However, since the
+        # path is specified in the worker_options, assert the value fromt he config.
+        assert tf_13cmd_options._terraform_bin == "/home/test/bin/terraform"

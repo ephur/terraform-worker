@@ -74,6 +74,47 @@ Pre-processing with Jinja allows for the use of conditional blocks. Conditional 
             homedir: {{ env.HOME }}
 
 .. index::
+   single: worker options
+
+.. _worker-options:
+
+Stipulating options in the configuration file
+---------------------------------------------
+
+In addition to using command line options, worker configuration can be specified using a ``worker_options`` section in
+the worker configuration.
+
+.. code-block:: yaml
+
+    terraform:
+      worker_options:
+        backend: s3
+        backend_prefix: tfstate
+        terraform_bin: /home/user/bin/terraform
+
+      providers:
+      ...
+
+**terraform-worker** requires a configuration file.  By default, it will looks for a file named "worker.yaml" in the
+current working directory.  Together with the ``worker_options`` listed above, it's possible to specify all options 
+either in the environment or in the configuration file and simply call the worker command by itself.
+
+.. code-block:: bash
+
+    % env | grep AWS
+    AWS_PROFILE=a-great-profile
+
+    % head ./worker.yaml
+    terraform:
+      worker_options:
+        backend: s3
+        backend_prefix: tfstate
+        terraform_bin: /home/user/bin/terraform
+
+    # The following command does not pass apply, so tf operations are only planned.
+    % worker terraform my-deploy --no-clean
+
+.. index::
    single: provider configurations
 
 .. _provider-configurations:

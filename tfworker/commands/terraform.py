@@ -38,33 +38,19 @@ class TerraformError(Exception):
 
 class TerraformCommand(BaseCommand):
     def __init__(self, rootc, **kwargs):
-        self._destroy = kwargs.get("destroy")
-        self._tf_apply = kwargs.get("tf_apply")
+        super(TerraformCommand, self).__init__(rootc, **kwargs)
+
+        self._destroy = self._resolve_arg("destroy")
+        self._tf_apply = self._resolve_arg("tf_apply")
         if self._tf_apply and self._destroy:
             click.secho("can not apply and destroy at the same time", fg="red")
             raise SystemExit(1)
 
-        self._b64_encode = kwargs.get("b64_encode")
-        self._deployment = kwargs.get("deployment")
-        self._force = kwargs.get("force")
-        self._show_output = kwargs.get("show_output")
-        self._terraform_bin = kwargs.get("terraform_bin")
-        self._terraform_modules_dir = kwargs.get("terraform_modules_dir")
-        self._plan_for = "destroy" if kwargs.get("destroy") else "apply"
-        (self._tf_version_major, self._tf_version_minor) = kwargs.get(
-            "tf_version", (None, None)
-        )
-        if self._tf_version_major is None or self._tf_version_minor is None:
-            (
-                self._tf_version_major,
-                self._tf_version_minor,
-            ) = self.get_terraform_version(self._terraform_bin)
-        super(TerraformCommand, self).__init__(
-            rootc,
-            plan_for=self._plan_for,
-            tf_version_major=self._tf_version_major,
-            **kwargs,
-        )
+        self._b64_encode = self._resolve_arg("b64_encode")
+        self._deployment = self._resolve_arg("deployment")
+        self._force = self._resolve_arg("force")
+        self._show_output = self._resolve_arg("show_output")
+        self._terraform_modules_dir = self._resolve_arg("terraform_modules_dir")
 
     @property
     def plan_for(self):
@@ -461,21 +447,3 @@ class TerraformCommand(BaseCommand):
             )
         json_output = json.loads(stdout)
         return json.dumps(json_output, indent=None, separators=(",", ":"))
-
-    @staticmethod
-    def get_terraform_version(terraform_bin):
-        (return_code, stdout, stderr) = pipe_exec(f"{terraform_bin} version")
-        if return_code != 0:
-            click.secho(f"unable to get terraform version\n{stderr}", fg="red")
-            raise SystemExit(1)
-        version = stdout.decode("UTF-8").split("\n")[0]
-        version_search = re.search(r".* v\d+\.(\d+)\.(\d+)", version)
-        if version_search:
-            click.secho(
-                f"Terraform Version Result: {version}, using major:{version_search.group(1)}, minor:{version_search.group(2)}",
-                fg="yellow",
-            )
-            return (int(version_search.group(1)), int(version_search.group(2)))
-        else:
-            click.secho(f"unable to get terraform version\n{stderr}", fg="red")
-            raise SystemExit(1)
