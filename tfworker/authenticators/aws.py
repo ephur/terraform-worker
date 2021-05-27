@@ -42,6 +42,7 @@ class AWSAuthenticator(BaseAuthenticator):
         self.role_arn = self._resolve_arg("aws_role_arn")
         self.secret_access_key = self._resolve_arg("aws_secret_access_key")
         self.session_token = self._resolve_arg("aws_session_token")
+        self.external_id = self._resolve_arg("aws_external_id")
 
         self.deployment = kwargs.get("deployment")
 
@@ -78,7 +79,7 @@ class AWSAuthenticator(BaseAuthenticator):
                     )
             else:
                 (self.__session, creds) = AWSAuthenticator.get_assumed_role_session(
-                    self._session, self.role_arn
+                    self._session, self.role_arn, external_id=self.external_id
                 )
                 self.access_key_id = creds["AccessKeyId"]
                 self.secret_access_key = creds["SecretAccessKey"]
@@ -136,13 +137,18 @@ class AWSAuthenticator(BaseAuthenticator):
 
     @staticmethod
     def get_assumed_role_session(
-        session, role_arn, session_name="AssumedRoleSession1", duration=3600
+        session, role_arn, session_name="AssumedRoleSession1", duration=3600, external_id=""
     ):
         """ get_assumed_role_session returns a boto3 session updated with assumed role credentials """
         sts_client = session.client("sts")
-        role_creds = sts_client.assume_role(
-            RoleArn=role_arn, RoleSessionName=session_name, DurationSeconds=duration
-        )["Credentials"]
+        assume_args = {
+            "RoleArn": role_arn,
+            "RoleSessionName": session_name,
+            "DurationSeconds": duration,
+        }
+        if external_id:
+            assume_args['ExternalId'] = external_id
+        role_creds = sts_client.assume_role(**assume_args)["Credentials"]
 
         new_session = boto3.Session(
             aws_access_key_id=role_creds["AccessKeyId"],

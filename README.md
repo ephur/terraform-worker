@@ -71,6 +71,12 @@ terraform:
  % worker terraform my-deploy
 ```
 
+## Assuming a Role
+
+The first step in assuming a role is to create the role to be assumed as documented in [Creating a role to delegate permissions to an IAM user ](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user.html) and then granting permissions to assume the role as documented in [Granting a user permissions to switch roles ](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_permissions-to-switch.html).
+
+To have the worker assume a role once the role and permissions are configured the `--aws-role-arn` and `--aws-external-id` flags need to be provided to the worker along with the credentials for the trusted account.  Since neither the role ARN nor the ExternalId are secret, this allows running under another set of credentials without providing any additional secrets.
+
 ## Development
 
 ```sh

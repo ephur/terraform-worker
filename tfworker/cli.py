@@ -94,6 +94,11 @@ def validate_host():
     help="If provided, credentials will be used to assume this role (complete ARN)",
 )
 @click.option(
+    "--aws-external-id",
+    envvar="AWS_EXTERNAL_ID",
+    help="If provided, will be used to assume the role specified by --aws-role-arn",
+)
+@click.option(
     "--aws-region",
     envvar="AWS_DEFAULT_REGION",
     default=const.DEFAULT_AWS_REGION,
