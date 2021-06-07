@@ -79,8 +79,7 @@ Next, run the following from a \*nix shell session.
 
 .. note::
    Be sure to replace ``<YOUR_AWS_PROFILE>``, ``<YOUR_BACKEND_BUCKET>``, and ``<YOUR_AWS_REGION>`` with the
-   the appropriate values. Currently **terraform-worker** does not create the bucket.  It will need to be
-   created separately.
+   the appropriate values.
 
 Once the operation is complete, the console should contain text similar to the following:
 

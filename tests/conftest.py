@@ -248,7 +248,7 @@ def rootc_options(s3_client, dynamodb_client, sts_client):
 
 
 @pytest.fixture
-def basec(rootc):
+def basec(rootc, s3_client):
     with mock.patch(
         "tfworker.commands.base.BaseCommand.get_terraform_version",
         side_effect=lambda x: (13, 3),
@@ -272,9 +272,12 @@ def gbasec(grootc):
             "tfworker.commands.base.which",
             side_effect=lambda x: "/usr/local/bin/terraform",
         ):
-            return tfworker.commands.base.BaseCommand(
-                grootc, "test-0001", tf_version_major=13
-            )
+            with mock.patch(
+                "tfworker.backends.gcs.storage.Client.from_service_account_json"
+            ):
+                return tfworker.commands.base.BaseCommand(
+                    grootc, "test-0001", tf_version_major=13
+                )
 
 
 @pytest.fixture
@@ -352,12 +355,15 @@ def tf_13cmd_options(rootc_options):
             "tfworker.commands.base.which",
             side_effect=lambda x: "/usr/local/bin/terraform",
         ):
-            return tfworker.commands.terraform.TerraformCommand(
-                rootc_options,
-                deployment="test-0001-options",
-                tf_version=(13, 5),
-                b64_encode=False,
-            )
+            with mock.patch(
+                "tfworker.backends.gcs.storage.Client.from_service_account_json"
+            ):
+                return tfworker.commands.terraform.TerraformCommand(
+                    rootc_options,
+                    deployment="test-0001-options",
+                    tf_version=(13, 5),
+                    b64_encode=False,
+                )
 
 
 @pytest.fixture

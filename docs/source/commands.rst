@@ -122,21 +122,6 @@ the current operation.  Acceptable values are: ``gcs`` or ``s3``.
 .. index::
    triple: worker; options; --backend
 
-\\-\\-backend-bucket
-++++++++++++++++++++
-
-The **\\-\\-backend-bucket** option specifies the name of the backend bucket that should
-be used to house the terraform state files.  
-
-.. warning::
-
-   **terraform-worker** does not create the backend bucket. Creation of this file is
-   a prerequistie for running **terraform-worker** with with either a ``gcs`` or
-   ``s3`` backend.
-
-.. index::
-   triple: worker; options; --backend-bucket
-
 .. _backend-prefix:
 
 \\-\\-backend-prefix

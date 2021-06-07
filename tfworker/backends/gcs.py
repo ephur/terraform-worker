@@ -17,6 +17,7 @@ import json
 import click
 from google.api_core import page_iterator
 from google.cloud import storage
+from google.cloud.exceptions import Conflict
 
 from .base import BackendError, BaseBackend, validate_backend_empty
 
@@ -37,6 +38,20 @@ class GCSBackend(BaseBackend):
             self._gcs_prefix = self._authenticator.prefix
             if not self._gcs_prefix.endswith("/"):
                 self._gcs_prefix = f"{self._gcs_prefix}/"
+
+            if self._authenticator.creds_path:
+                self._storage_client = storage.Client.from_service_account_json(
+                    self._authenticator.creds_path
+                )
+            else:
+                self._storage_client = storage.Client(
+                    project=self._authenticator.project
+                )
+
+            try:
+                self._storage_client.create_bucket(self._gcs_bucket)
+            except Conflict:
+                pass
 
     def _clean_deployment_limit(self, limit: tuple) -> None:
         """ only clean items within limit """
@@ -122,16 +137,6 @@ class GCSBackend(BaseBackend):
         """
         if self._gcs_prefix is None or self._gcs_bucket is None:
             raise BackendError("clean attempted without proper authenticator setup")
-
-        if not hasattr(self, "_storage_client"):
-            if self._authenticator.creds_path:
-                self._storage_client = storage.Client.from_service_account_json(
-                    self._authenticator.creds_path
-                )
-            else:
-                self._storage_client = storage.Client(
-                    project=self._authenticator.project
-                )
 
         # clean entire deployment
         if not limit:
