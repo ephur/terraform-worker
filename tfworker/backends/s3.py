@@ -76,10 +76,7 @@ class S3Backend(BaseBackend):
                     "in the profile.",
                     fg="red",
                 )
-            elif (
-                "BucketAlreadyExists" not in err_str
-                and "BucketAlreadyOwnedByYou" not in err_str
-            ):
+            elif "BucketAlreadyOwnedByYou" not in err_str:
                 raise err
 
         # Block public access
