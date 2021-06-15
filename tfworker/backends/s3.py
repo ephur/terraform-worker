@@ -58,49 +58,57 @@ class S3Backend(BaseBackend):
             )
             self._create_table(locking_table_name)
 
-        # Initialize s3 client and create bucket if necessary. Op should create if
-        # not exists
+        # Initialize s3 client and create bucket if necessary.
         self._s3_client = self._authenticator.backend_session.client("s3")
         try:
-            self._s3_client.create_bucket(
-                Bucket=self._authenticator.bucket,
-                CreateBucketConfiguration={
-                    "LocationConstraint": self._authenticator.region
-                },
-                ACL="private",
-            )
+            self._s3_client.head_bucket(Bucket=self._authenticator.bucket)
         except botocore.exceptions.ClientError as err:
             err_str = str(err)
-            if "InvalidLocationConstraint" in err_str:
-                click.secho(
-                    "InvalidLocationConstraint raised when trying to create a bucket. "
-                    "Verify the AWS Region passed to the worker matches the AWS region "
-                    "in the profile.",
-                    fg="red",
-                )
-            elif "BucketAlreadyExists" in err_str:
-                # Ignore when testing
-                if "PYTEST_CURRENT_TEST" not in os.environ:
-                    click.secho(err_str, fg="red")
-                    sys.exit(4)
-            elif "BucketAlreadyOwnedByYou" not in err_str:
+            if 'Not Found' not in err_str:
                 raise err
+            if self._authenticator.create_backend_bucket:
+                try:
+                    self._s3_client.create_bucket(
+                        Bucket=self._authenticator.bucket,
+                        CreateBucketConfiguration={
+                            "LocationConstraint": self._authenticator.region
+                        },
+                        ACL="private",
+                    )
+                except botocore.exceptions.ClientError as err:
+                    err_str = str(err)
+                    if "InvalidLocationConstraint" in err_str:
+                        click.secho(
+                            "InvalidLocationConstraint raised when trying to create a bucket. "
+                            "Verify the AWS Region passed to the worker matches the AWS region "
+                            "in the profile.",
+                            fg="red",
+                        )
+                    elif "BucketAlreadyExists" in err_str:
+                        # Ignore when testing
+                        if "PYTEST_CURRENT_TEST" not in os.environ:
+                            click.secho(err_str, fg="red")
+                            sys.exit(4)
+                    elif "BucketAlreadyOwnedByYou" not in err_str:
+                        raise err
 
-        # Block public access
-        self._s3_client.put_public_access_block(
-            Bucket=self._authenticator.bucket,
-            PublicAccessBlockConfiguration={
-                "BlockPublicAcls": True,
-                "IgnorePublicAcls": True,
-                "BlockPublicPolicy": True,
-                "RestrictPublicBuckets": True,
-            },
-        )
+                # Block public access
+                self._s3_client.put_public_access_block(
+                    Bucket=self._authenticator.bucket,
+                    PublicAccessBlockConfiguration={
+                        "BlockPublicAcls": True,
+                        "IgnorePublicAcls": True,
+                        "BlockPublicPolicy": True,
+                        "RestrictPublicBuckets": True,
+                    },
+                )
 
-        # Enable versioning on the bucket
-        s3_resource = self._authenticator.backend_session.resource("s3")
-        versioning = s3_resource.BucketVersioning(self._authenticator.bucket)
-        versioning.enable()
+                # Enable versioning on the bucket
+                s3_resource = self._authenticator.backend_session.resource("s3")
+                versioning = s3_resource.BucketVersioning(self._authenticator.bucket)
+                versioning.enable()
+            else:
+                raise BackendError("Backend bucket not found and --no-create-backend-bucket specified.")
 
     def _check_table_exists(self, name: str) -> bool:
         """ check if a supplied dynamodb table exists """
