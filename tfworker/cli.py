@@ -161,6 +161,11 @@ def validate_host():
     help="Region where terraform rootc/lock bucket exists",
 )
 @click.option(
+    "--create-backend-bucket/--no-create-backend-bucket",
+    default=True,
+    help="Create the backend bucket if it does not exist"
+)
+@click.option(
     "--config-var",
     multiple=True,
     default=[],
