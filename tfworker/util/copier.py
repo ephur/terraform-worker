@@ -143,9 +143,9 @@ class GitCopier(Copier):
         git_args = ""
         reset_repo = False
 
-       sub_path = ""
+        sub_path = ""
 
-       if "sub_path" in kwargs:
+        if "sub_path" in kwargs:
             sub_path = kwargs["sub_path"].strip("/")
 
         if "branch" in kwargs:
