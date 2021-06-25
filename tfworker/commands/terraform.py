@@ -320,6 +320,7 @@ class TerraformCommand(BaseCommand):
             "\n": "",
         }
         local_env = env.copy()
+        local_env["TF_PATH"] = terraform_path
         hook_dir = f"{working_dir}/hooks"
         hook_script = None
 
