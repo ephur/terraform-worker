@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import os
+import re
 import shutil
 from typing import Tuple
 from unittest import mock
@@ -78,7 +79,7 @@ def mock_pipe_exec_type_match(cmd: str) -> Tuple[int, str, str]:
 
 def mock_pipe_exec_clone(cmd: str, cwd: str) -> Tuple[int, str, str]:
     """ a mock function to copy files and imitate a git clone """
-    tokens = cmd.split(" ")
+    tokens = re.split(r'\s+', cmd)
     assert os.path.isdir(tokens[2])
     shutil.copytree(tokens[2], cwd, dirs_exist_ok=True)
     return (0, "", "")
@@ -218,7 +219,7 @@ class TestGitCopier:
             """ test a succeeding condition, extra options passed """
             spath = f"{request.config.rootdir}/tests/fixtures/definitions"
             c = GitCopier(source=spath, destination=dpath, conflicts=[])
-            c.copy(branch="foo", sub_path="test_a")
+            c.copy(branch="foo", sub_path="test_a", git_cmd="git", git_args="", reset_repo=True)
             assert (
                 mocked.call_args.args[0]
                 == f"git clone {spath} --branch foo --single-branch ./"

@@ -139,19 +139,29 @@ class GitCopier(Copier):
         """ copy clones a remote git repo, and puts the requested files into the destination """
         dest = self.get_destination(**kwargs)
         branch = "master"
+        git_cmd = "git"
+        git_args = ""
+        reset_repo = False
+
+        sub_path = ""
+
+        if "sub_path" in kwargs:
+            sub_path = kwargs["sub_path"].strip("/")
 
         if "branch" in kwargs:
             branch = kwargs["branch"]
-        if "sub_path" in kwargs:
-            sub_path = kwargs["sub_path"].strip("/")
-        else:
-            sub_path = ""
+        if "git_cmd" in kwargs:
+            git_cmd = kwargs['git_cmd']
+        if "git_args" in kwargs:
+            git_args = kwargs['git_args']
+        if "reset_repo" in kwargs:
+            reset_repo = kwargs['reset_repo']
 
         self.make_temp()
         temp_path = f"{self._temp_dir}/{sub_path}"
 
         pipe_exec(
-            f"git clone {self._source} --branch {branch} --single-branch ./",
+            re.sub(r'\s+', ' ', f"{git_cmd} {git_args} clone {self._source} --branch {branch} --single-branch ./"),
             cwd=self._temp_dir,
         )
 
@@ -160,6 +170,9 @@ class GitCopier(Copier):
         except FileExistsError as e:
             self.clean_temp()
             raise e
+
+        if reset_repo:
+            self.repo_clean(f"{temp_path}")
 
         shutil.copytree(temp_path, dest, dirs_exist_ok=True)
         self.clean_temp()
@@ -186,6 +199,15 @@ class GitCopier(Copier):
             shutil.rmtree(self._temp_dir, ignore_errors=True)
             del self._temp_dir
 
+    @staticmethod
+    def repo_clean(p: str) -> None:
+        """ repo_clean removes git and github files from a clone before doing the copy """
+        for f in ['.git', '.github']:
+            try:
+                shutil.rmtree(f"{p}/{f}")
+            except FileNotFoundError:
+                pass
+
 
 @CopyFactory.register("fs")
 class FileSystemCopier(Copier):
@@ -199,7 +221,7 @@ class FileSystemCopier(Copier):
     def local_path(self):
         """ local_path returns a complete local file system path """
         if not hasattr(self, "_local_path"):
-            self._local_path = self.make_local_path(self.source, self._root_path)
+            self._local_path = self.make_local_path(self.source, self.root_path)
         return self._local_path
 
     @staticmethod

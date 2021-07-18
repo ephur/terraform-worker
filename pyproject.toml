@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "terraform-worker"
-version = "0.10.5"
+version = "0.10.7"
 description = "An orchestration tool for Terraform"
 authors = ["Richard Maynard <richard.maynard@objectrocket.com>"]
 packages = [
