@@ -57,7 +57,9 @@ class GCSBackend(BaseBackend):
                     except Conflict:
                         pass
                 else:
-                    raise BackendError("Backend bucket not found and --no-create-backend-bucket specified.")
+                    raise BackendError(
+                        "Backend bucket not found and --no-create-backend-bucket specified."
+                    )
 
     def _clean_deployment_limit(self, limit: tuple) -> None:
         """ only clean items within limit """

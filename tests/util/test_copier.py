@@ -20,8 +20,7 @@ from unittest import mock
 from unittest.mock import patch
 
 import pytest
-from tfworker.util.copier import (Copier, CopyFactory, FileSystemCopier,
-                                  GitCopier)
+from tfworker.util.copier import Copier, CopyFactory, FileSystemCopier, GitCopier
 
 C_CONFLICTS = ["test.txt", "foo", "test.tf"]
 C_SOURCE = "test_source"
@@ -74,14 +73,14 @@ def mock_pipe_exec_type_match(cmd: str) -> Tuple[int, str, str]:
         if tokens[2] == "validremote":
             return (0, "", "")
     if tokens[0] == "/opt/bin/git":
-        return(0, "", "")
+        return (0, "", "")
     else:
         raise NotImplementedError("bad use of mock")
 
 
 def mock_pipe_exec_clone(cmd: str, cwd: str) -> Tuple[int, str, str]:
     """ a mock function to copy files and imitate a git clone """
-    tokens = re.split(r'\s+', cmd)
+    tokens = re.split(r"\s+", cmd)
     assert os.path.isdir(tokens[2])
     shutil.copytree(tokens[2], cwd, dirs_exist_ok=True)
     return (0, "", "")
@@ -221,7 +220,13 @@ class TestGitCopier:
             """ test a succeeding condition, extra options passed """
             spath = f"{request.config.rootdir}/tests/fixtures/definitions"
             c = GitCopier(source=spath, destination=dpath, conflicts=[])
-            c.copy(branch="foo", sub_path="test_a", git_cmd="git", git_args="", reset_repo=True)
+            c.copy(
+                branch="foo",
+                sub_path="test_a",
+                git_cmd="git",
+                git_args="",
+                reset_repo=True,
+            )
             assert (
                 mocked.call_args.args[0]
                 == f"git clone {spath} --branch foo --single-branch ./"
@@ -241,7 +246,9 @@ class TestGitCopier:
             assert result is False
             mocked.assert_called_with("git  ls-remote filenotfounderror")
 
-            result = GitCopier.type_match("string_inspect", git_cmd="/opt/bin/git", git_args="--bar")
+            result = GitCopier.type_match(
+                "string_inspect", git_cmd="/opt/bin/git", git_args="--bar"
+            )
             assert result is True
             mocked.assert_called_with("/opt/bin/git --bar ls-remote string_inspect")
 

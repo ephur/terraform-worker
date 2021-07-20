@@ -13,12 +13,12 @@
 # limitations under the License.
 
 from unittest.mock import patch
-import pytest
 
+import pytest
+from botocore.credentials import Credentials
 from moto import mock_sts
 from tfworker.authenticators.aws import AWSAuthenticator
 from tfworker.commands.root import RootCommand
-from botocore.credentials import Credentials
 
 
 @pytest.fixture

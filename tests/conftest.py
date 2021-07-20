@@ -117,7 +117,7 @@ def grootc():
             "gcp_project": "test_project",
             "gcp_region": "us-west-2b",
             "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-            "create_backend_bucket": True
+            "create_backend_bucket": True,
         }
     )
     return result
@@ -138,7 +138,7 @@ def grootc_no_create_backend_bucket():
             "gcp_project": "test_project",
             "gcp_region": "us-west-2b",
             "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-            "create_backend_bucket": False
+            "create_backend_bucket": False,
         }
     )
     return result
@@ -163,7 +163,7 @@ def rootc(s3_client, dynamodb_client, sts_client, create_backend_bucket=True):
             "gcp_project": "test_project",
             "gcp_region": "us-west-2b",
             "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-            "create_backend_bucket": create_backend_bucket
+            "create_backend_bucket": create_backend_bucket,
         }
     )
     return result
@@ -188,7 +188,7 @@ def rootc_no_create_backend_bucket(s3_client, dynamodb_client, sts_client):
             "gcp_project": "test_project",
             "gcp_region": "us-west-2b",
             "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-            "create_backend_bucket": False
+            "create_backend_bucket": False,
         }
     )
     return result

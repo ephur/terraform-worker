@@ -64,7 +64,7 @@ class S3Backend(BaseBackend):
             self._s3_client.head_bucket(Bucket=self._authenticator.bucket)
         except botocore.exceptions.ClientError as err:
             err_str = str(err)
-            if 'Not Found' not in err_str:
+            if "Not Found" not in err_str:
                 raise err
             if self._authenticator.create_backend_bucket:
                 try:
@@ -108,7 +108,9 @@ class S3Backend(BaseBackend):
                 versioning = s3_resource.BucketVersioning(self._authenticator.bucket)
                 versioning.enable()
             else:
-                raise BackendError("Backend bucket not found and --no-create-backend-bucket specified.")
+                raise BackendError(
+                    "Backend bucket not found and --no-create-backend-bucket specified."
+                )
 
     def _check_table_exists(self, name: str) -> bool:
         """ check if a supplied dynamodb table exists """
