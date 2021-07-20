@@ -65,7 +65,7 @@ def copier():
 
 def mock_pipe_exec_type_match(cmd: str) -> Tuple[int, str, str]:
     """ a mock function to return specific results based on supplied command """
-    tokens = cmd.split(" ")
+    tokens = " ".join(cmd.split()).split(" ")
     if tokens[1] == "ls-remote":
         if tokens[2] == "permissionerror":
             raise PermissionError
@@ -73,6 +73,8 @@ def mock_pipe_exec_type_match(cmd: str) -> Tuple[int, str, str]:
             raise FileNotFoundError
         if tokens[2] == "validremote":
             return (0, "", "")
+    if tokens[0] == "/opt/bin/git":
+        return(0, "", "")
     else:
         raise NotImplementedError("bad use of mock")
 
@@ -233,11 +235,15 @@ class TestGitCopier:
         ) as mocked:
             result = GitCopier.type_match("permissionerror")
             assert result is False
-            mocked.assert_called_with("git ls-remote permissionerror")
+            mocked.assert_called_with("git  ls-remote permissionerror")
 
             result = GitCopier.type_match("filenotfounderror")
             assert result is False
-            mocked.assert_called_with("git ls-remote filenotfounderror")
+            mocked.assert_called_with("git  ls-remote filenotfounderror")
+
+            result = GitCopier.type_match("string_inspect", git_cmd="/opt/bin/git", git_args="--bar")
+            assert result is True
+            mocked.assert_called_with("/opt/bin/git --bar ls-remote string_inspect")
 
     def test_make_and_clean_temp(self):
         """ tests making the temporary directory for git clones """
