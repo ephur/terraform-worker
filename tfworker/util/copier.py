@@ -151,17 +151,21 @@ class GitCopier(Copier):
         if "branch" in kwargs:
             branch = kwargs["branch"]
         if "git_cmd" in kwargs:
-            git_cmd = kwargs['git_cmd']
+            git_cmd = kwargs["git_cmd"]
         if "git_args" in kwargs:
-            git_args = kwargs['git_args']
+            git_args = kwargs["git_args"]
         if "reset_repo" in kwargs:
-            reset_repo = kwargs['reset_repo']
+            reset_repo = kwargs["reset_repo"]
 
         self.make_temp()
         temp_path = f"{self._temp_dir}/{sub_path}"
 
         pipe_exec(
-            re.sub(r'\s+', ' ', f"{git_cmd} {git_args} clone {self._source} --branch {branch} --single-branch ./"),
+            re.sub(
+                r"\s+",
+                " ",
+                f"{git_cmd} {git_args} clone {self._source} --branch {branch} --single-branch ./",
+            ),
             cwd=self._temp_dir,
         )
 
@@ -180,8 +184,16 @@ class GitCopier(Copier):
     @staticmethod
     def type_match(source: str, **kwargs) -> bool:
         """ type matches uses git to see if the source is a valid git remote """
+        git_cmd = "git"
+        git_args = ""
+
+        if "git_cmd" in kwargs:
+            git_cmd = kwargs["git_cmd"]
+        if "git_args" in kwargs:
+            git_args = kwargs["git_args"]
+
         try:
-            (return_code, _, _) = pipe_exec(f"git ls-remote {source}")
+            (return_code, _, _) = pipe_exec(f"{git_cmd} {git_args} ls-remote {source}")
         except (PermissionError, FileNotFoundError):
             return False
         if return_code == 0:
@@ -202,7 +214,7 @@ class GitCopier(Copier):
     @staticmethod
     def repo_clean(p: str) -> None:
         """ repo_clean removes git and github files from a clone before doing the copy """
-        for f in ['.git', '.github']:
+        for f in [".git", ".github"]:
             try:
                 shutil.rmtree(f"{p}/{f}")
             except FileNotFoundError:
