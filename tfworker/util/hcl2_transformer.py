@@ -5,18 +5,18 @@ Based on https://github.com/amplify-education/python-hcl2/blob/86c12442dd6ea5410
 import re
 import sys
 from collections import OrderedDict
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
-from lark import Transformer, Discard
+from lark import Discard, Transformer
 
-
-HEREDOC_PATTERN = re.compile(r'<<([a-zA-Z][a-zA-Z0-9._-]+)\n((.|\n)*?)\n\s*\1', re.S)
-HEREDOC_TRIM_PATTERN = re.compile(r'<<-([a-zA-Z][a-zA-Z0-9._-]+)\n((.|\n)*?)\n\s*\1', re.S)
+HEREDOC_PATTERN = re.compile(r"<<([a-zA-Z][a-zA-Z0-9._-]+)\n((.|\n)*?)\n\s*\1", re.S)
+HEREDOC_TRIM_PATTERN = re.compile(
+    r"<<-([a-zA-Z][a-zA-Z0-9._-]+)\n((.|\n)*?)\n\s*\1", re.S
+)
 
 
 # pylint: disable=missing-docstring,unused-argument
 class OrderedDictTransformer(Transformer):
-
     def float_lit(self, args: List) -> float:
         return float("".join([str(arg) for arg in args]))
 
@@ -63,9 +63,7 @@ class OrderedDictTransformer(Transformer):
         key = self.strip_quotes(args[0])
         value = self.to_string_dollar(args[1])
 
-        return OrderedDict({
-            key: value
-        })
+        return OrderedDict({key: value})
 
     def object(self, args: List) -> Dict:
         args = self.strip_new_line_tokens(args)
@@ -76,7 +74,7 @@ class OrderedDictTransformer(Transformer):
 
     def function_call(self, args: List) -> str:
         args = self.strip_new_line_tokens(args)
-        args_str = ''
+        args_str = ""
         if len(args) > 1:
             args_str = ",".join([str(arg) for arg in args[1]])
         return "%s(%s)" % (str(args[0]), args_str)
@@ -115,9 +113,7 @@ class OrderedDictTransformer(Transformer):
             key = key[1:-1]
         value = self.to_string_dollar(args[1])
 
-        return OrderedDict({
-            key: value
-        })
+        return OrderedDict({key: value})
 
     def conditional(self, args: List) -> str:
         args = self.strip_new_line_tokens(args)
@@ -179,18 +175,18 @@ class OrderedDictTransformer(Transformer):
             raise RuntimeError("Invalid Heredoc token: %s" % args[0])
 
         text = match.group(2)
-        lines = text.split('\n')
+        lines = text.split("\n")
 
         # calculate the min number of leading spaces in each line
         min_spaces = sys.maxsize
         for line in lines:
-            leading_spaces = len(line) - len(line.lstrip(' '))
+            leading_spaces = len(line) - len(line.lstrip(" "))
             min_spaces = min(min_spaces, leading_spaces)
 
         # trim off that number of leading spaces from each line
         lines = [line[min_spaces:] for line in lines]
 
-        return '"%s"' % '\n'.join(lines)
+        return '"%s"' % "\n".join(lines)
 
     def new_line_or_comment(self, args: List) -> Discard:
         return Discard()
@@ -198,7 +194,7 @@ class OrderedDictTransformer(Transformer):
     def for_tuple_expr(self, args: List) -> str:
         args = self.strip_new_line_tokens(args)
         for_expr = " ".join([str(arg) for arg in args[1:-1]])
-        return '[%s]' % for_expr
+        return "[%s]" % for_expr
 
     def for_intro(self, args: List) -> str:
         args = self.strip_new_line_tokens(args)
@@ -211,7 +207,7 @@ class OrderedDictTransformer(Transformer):
     def for_object_expr(self, args: List) -> str:
         args = self.strip_new_line_tokens(args)
         for_expr = " ".join([str(arg) for arg in args[1:-1]])
-        return '{%s}' % for_expr
+        return "{%s}" % for_expr
 
     def strip_new_line_tokens(self, args: List) -> List:
         """
@@ -225,7 +221,7 @@ class OrderedDictTransformer(Transformer):
         if isinstance(value, str):
             if value.startswith('"') and value.endswith('"'):
                 return str(value)[1:-1]
-            return '${%s}' % value
+            return "${%s}" % value
         return value
 
     def strip_quotes(self, value: Any) -> Any:

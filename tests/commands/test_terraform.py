@@ -20,8 +20,9 @@ from typing import Tuple
 from unittest import mock
 
 import pytest
-from pytest_lazyfixture import lazy_fixture
 import tfworker
+from google.cloud.exceptions import NotFound
+from pytest_lazyfixture import lazy_fixture
 from tfworker.backends.base import BackendError
 from tfworker.commands.terraform import BaseCommand
 from google.cloud.exceptions import NotFound
@@ -238,5 +239,7 @@ class TestTerraformCommand:
                         instance = ClientMock.return_value
                         instance.get_bucket.side_effect = NotFound("bucket not found")
                         return tfworker.commands.base.BaseCommand(
-                            grootc_no_create_backend_bucket, "test-0001", tf_version_major=13
+                            grootc_no_create_backend_bucket,
+                            "test-0001",
+                            tf_version_major=13,
                         )

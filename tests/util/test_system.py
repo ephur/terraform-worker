@@ -16,8 +16,7 @@ from contextlib import contextmanager
 from unittest import mock
 
 import pytest
-from tfworker.util.system import pipe_exec
-from tfworker.util.system import which
+from tfworker.util.system import pipe_exec, which
 
 
 # context manager to allow testing exceptions in parameterized tests

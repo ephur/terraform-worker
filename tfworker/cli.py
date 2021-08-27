@@ -163,7 +163,7 @@ def validate_host():
 @click.option(
     "--create-backend-bucket/--no-create-backend-bucket",
     default=True,
-    help="Create the backend bucket if it does not exist"
+    help="Create the backend bucket if it does not exist",
 )
 @click.option(
     "--config-var",
