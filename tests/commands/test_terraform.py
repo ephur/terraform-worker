@@ -20,7 +20,10 @@ from typing import Tuple
 from unittest import mock
 
 import pytest
+import tfworker
+from google.cloud.exceptions import NotFound
 from pytest_lazyfixture import lazy_fixture
+from tfworker.backends.base import BackendError
 from tfworker.commands.terraform import BaseCommand
 
 
@@ -204,3 +207,38 @@ class TestTerraformCommand:
         # The fixture causes which to return /usr/local/bin/terraform.  However, since the
         # path is specified in the worker_options, assert the value fromt he config.
         assert tf_13cmd_options._terraform_bin == "/home/test/bin/terraform"
+
+    def test_no_create_backend_bucket_fails_s3(self, rootc_no_create_backend_bucket):
+        with pytest.raises(BackendError):
+            with mock.patch(
+                "tfworker.commands.base.BaseCommand.get_terraform_version",
+                side_effect=lambda x: (13, 3),
+            ):
+                with mock.patch(
+                    "tfworker.commands.base.which",
+                    side_effect=lambda x: "/usr/local/bin/terraform",
+                ):
+                    return tfworker.commands.base.BaseCommand(
+                        rootc_no_create_backend_bucket, "test-0001", tf_version_major=13
+                    )
+
+    def test_no_create_backend_bucket_fails_gcs(self, grootc_no_create_backend_bucket):
+        with pytest.raises(BackendError):
+            with mock.patch(
+                "tfworker.commands.base.BaseCommand.get_terraform_version",
+                side_effect=lambda x: (13, 3),
+            ):
+                with mock.patch(
+                    "tfworker.commands.base.which",
+                    side_effect=lambda x: "/usr/local/bin/terraform",
+                ):
+                    with mock.patch(
+                        "tfworker.backends.gcs.storage.Client.from_service_account_json"
+                    ) as ClientMock:
+                        instance = ClientMock.return_value
+                        instance.get_bucket.side_effect = NotFound("bucket not found")
+                        return tfworker.commands.base.BaseCommand(
+                            grootc_no_create_backend_bucket,
+                            "test-0001",
+                            tf_version_major=13,
+                        )

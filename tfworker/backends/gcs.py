@@ -17,7 +17,7 @@ import json
 import click
 from google.api_core import page_iterator
 from google.cloud import storage
-from google.cloud.exceptions import Conflict
+from google.cloud.exceptions import Conflict, NotFound
 
 from .base import BackendError, BaseBackend, validate_backend_empty
 
@@ -49,9 +49,17 @@ class GCSBackend(BaseBackend):
                 )
 
             try:
-                self._storage_client.create_bucket(self._gcs_bucket)
-            except Conflict:
-                pass
+                self._storage_client.get_bucket(self._gcs_bucket)
+            except NotFound:
+                if self._authenticator.create_backend_bucket:
+                    try:
+                        self._storage_client.create_bucket(self._gcs_bucket)
+                    except Conflict:
+                        pass
+                else:
+                    raise BackendError(
+                        "Backend bucket not found and --no-create-backend-bucket specified."
+                    )
 
     def _clean_deployment_limit(self, limit: tuple) -> None:
         """ only clean items within limit """
