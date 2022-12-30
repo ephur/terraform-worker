@@ -6,7 +6,7 @@ terraform:
         version: "2.63.0"
     'null':
       vars:
-        version: "~> 2.1.2"
+        version: "~> 3.2.1"
     random:
       vars:
         version: "~> 2.3.0"
