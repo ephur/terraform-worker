@@ -25,6 +25,7 @@ from google.cloud.exceptions import NotFound
 from pytest_lazyfixture import lazy_fixture
 from tfworker.backends.base import BackendError
 from tfworker.commands.terraform import BaseCommand
+from google.cloud.exceptions import NotFound
 
 
 # context manager to allow testing exceptions in parameterized tests
@@ -208,7 +209,6 @@ class TestTerraformCommand:
         # path is specified in the worker_options, assert the value fromt he config.
         assert tf_13cmd_options._terraform_bin == "/home/test/bin/terraform"
 
-    # @TODO: remember what exactly this is testing, comment and fix with new boto exceptions
     # def test_no_create_backend_bucket_fails_s3(self, rootc_no_create_backend_bucket):
     #     with pytest.raises(BackendError):
     #         with mock.patch(
@@ -220,7 +220,7 @@ class TestTerraformCommand:
     #                 side_effect=lambda x: "/usr/local/bin/terraform",
     #             ):
     #                 return tfworker.commands.base.BaseCommand(
-    #                     rootc_no_create_backend_bucket, "test-0010", tf_version_major=13
+    #                     rootc_no_create_backend_bucket, "test-0001", tf_version_major=13
     #                 )
 
     def test_no_create_backend_bucket_fails_gcs(self, grootc_no_create_backend_bucket):
