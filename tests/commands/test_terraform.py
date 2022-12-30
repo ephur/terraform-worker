@@ -20,12 +20,12 @@ from typing import Tuple
 from unittest import mock
 
 import pytest
-import tfworker
 from google.cloud.exceptions import NotFound
 from pytest_lazyfixture import lazy_fixture
+
+import tfworker
 from tfworker.backends.base import BackendError
 from tfworker.commands.terraform import BaseCommand
-from google.cloud.exceptions import NotFound
 
 
 # context manager to allow testing exceptions in parameterized tests

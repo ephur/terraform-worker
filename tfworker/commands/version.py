@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from pkg_resources import DistributionNotFound, get_distribution
+
 from tfworker.commands.base import BaseCommand
 
 

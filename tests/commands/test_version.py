@@ -15,6 +15,7 @@
 from unittest import mock
 
 from pkg_resources import DistributionNotFound
+
 from tfworker.commands.version import VersionCommand
 
 

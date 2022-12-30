@@ -16,8 +16,9 @@ import copy
 from unittest import mock
 
 import pytest
-import tfworker.commands.root
 from deepdiff import DeepDiff
+
+import tfworker.commands.root
 from tfworker.commands.root import get_platform, replace_vars
 
 

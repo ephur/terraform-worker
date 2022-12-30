@@ -15,6 +15,7 @@
 import shlex
 
 import boto3
+
 from tfworker import constants as const
 
 from .base import BaseAuthenticator

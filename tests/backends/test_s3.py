@@ -15,6 +15,7 @@ import random
 import string
 
 import pytest
+
 from tfworker.backends.base import BackendError
 
 STATE_BUCKET = "test_bucket"

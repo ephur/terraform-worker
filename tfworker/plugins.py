@@ -22,6 +22,7 @@ import zipfile
 
 import click
 from tenacity import retry, stop_after_attempt, wait_chain, wait_fixed
+
 from tfworker.commands.root import get_platform
 
 

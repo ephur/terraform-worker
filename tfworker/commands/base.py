@@ -16,6 +16,7 @@ import re
 from collections import OrderedDict
 
 import click
+
 from tfworker.authenticators import AuthenticatorsCollection
 from tfworker.backends import select_backend
 from tfworker.definitions import DefinitionsCollection
