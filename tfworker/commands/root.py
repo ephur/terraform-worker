@@ -266,4 +266,9 @@ def get_platform():
     if machine == "x86_64":
         machine = "amd64"
 
+    # some 64 bit arm extensions will report aarch64, this is functionaly
+    # equivalent to arm64 which is recognized and the pattern used by the TF
+    # community
+    if machine == "aarch64":
+        machine = "arm64"
     return (opsys, machine)
