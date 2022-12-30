@@ -138,15 +138,7 @@ def grootc_no_create_backend_bucket():
             "gcp_project": "test_project",
             "gcp_region": "us-west-2b",
             "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-<<<<<<< HEAD
-<<<<<<< HEAD
-            "create_backend_bucket": False
-=======
             "create_backend_bucket": False,
->>>>>>> 68aeaaa (Repo sync up (#51))
-=======
-            "create_backend_bucket": False,
->>>>>>> master
         }
     )
     return result
