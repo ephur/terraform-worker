@@ -70,11 +70,11 @@ class TestPlugins:
     @pytest.mark.depends(on="get_url")
     def test_plugin_download(self, rootc):
         plugins = tfworker.plugins.PluginsCollection(
-            {"null": {"version": "2.1.2"}}, rootc.temp_dir, 12
+            {"null": {"version": "3.2.1"}}, rootc.temp_dir, 12
         )
         plugins.download()
         files = glob.glob(
-            f"{rootc.temp_dir}/terraform-plugins/terraform-provider-null_v2.1.2*"
+            f"{rootc.temp_dir}/terraform-plugins/terraform-provider-null_v3.2.1*"
         )
         assert len(files) > 0
         for afile in files:
