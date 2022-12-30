@@ -1,4 +1,5 @@
-FROM python:3.9-slim-buster
+FROM python:3.10.9-slim-bullseye
+
 
 COPY . /usr/src/tfworker
 WORKDIR /usr/src/tfworker
@@ -8,7 +9,7 @@ RUN apt update 2>/dev/null && \
     apt install -y --no-install-recommends \
         wget \
         unzip && 2>/dev/null \
-    wget --quiet --output-document terraform.zip https://releases.hashicorp.com/terraform/0.12.29/terraform_0.12.29_linux_amd64.zip && \
+    wget --quiet --output-document terraform.zip https://releases.hashicorp.com/terraform/0.13.7/terraform_0.13.7_linux_amd64.zip && \
     unzip terraform.zip && \
     rm terraform.zip && \
     mv terraform /usr/local/bin && \
