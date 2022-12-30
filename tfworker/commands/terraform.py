@@ -20,6 +20,7 @@ import re
 import shutil
 
 import click
+
 from tfworker.commands.base import BaseCommand
 from tfworker.util.system import pipe_exec
 

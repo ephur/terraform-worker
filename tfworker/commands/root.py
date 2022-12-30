@@ -23,10 +23,11 @@ from collections import OrderedDict
 
 import click
 import jinja2
-import tfworker.util.hcl2_transformer as hcl2_transformer
 import yaml
 from hcl2.lark_parser import Lark_StandAlone
 from jinja2.runtime import StrictUndefined
+
+import tfworker.util.hcl2_transformer as hcl2_transformer
 
 
 class RootCommand:

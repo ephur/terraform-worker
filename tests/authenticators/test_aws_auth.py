@@ -17,6 +17,7 @@ from unittest.mock import patch
 import pytest
 from botocore.credentials import Credentials
 from moto import mock_sts
+
 from tfworker.authenticators.aws import AWSAuthenticator
 from tfworker.commands.root import RootCommand
 

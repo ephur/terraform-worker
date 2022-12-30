@@ -20,12 +20,13 @@ from unittest import mock
 
 import boto3
 import pytest
+from moto import mock_dynamodb2, mock_s3, mock_sts
+from pytest_lazyfixture import lazy_fixture
+
 import tfworker
 import tfworker.commands.base
 import tfworker.commands.root
 import tfworker.providers
-from moto import mock_dynamodb2, mock_s3, mock_sts
-from pytest_lazyfixture import lazy_fixture
 
 
 @pytest.fixture
