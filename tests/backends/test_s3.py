@@ -30,7 +30,12 @@ LOCK_DIGEST = "1234123412341234"
 def state_setup(request, s3_client, dynamodb_client):
     # location constraint is required due to how we create the client with a specific region
     location = {"LocationConstraint": STATE_REGION}
-    s3_client.create_bucket(Bucket=STATE_BUCKET, CreateBucketConfiguration=location)
+    # if the bucket already exists, and is owned by us, continue.
+    try:
+        s3_client.create_bucket(Bucket=STATE_BUCKET, CreateBucketConfiguration=location)
+    except s3_client.exceptions.BucketAlreadyOwnedByYou:
+        # this is ok and expected
+        pass
 
     with open(
         f"{request.config.rootdir}/tests/fixtures/states/empty.tfstate", "rb"

@@ -117,6 +117,28 @@ def grootc():
             "gcp_project": "test_project",
             "gcp_region": "us-west-2b",
             "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+            "create_backend_bucket": True,
+        }
+    )
+    return result
+
+
+@pytest.fixture()
+def grootc_no_create_backend_bucket():
+    result = tfworker.commands.root.RootCommand(
+        args={
+            "backend": "gcs",
+            "backend_region": "us-central1",
+            "backend_bucket": "test_gcp_bucket",
+            "backend_prefix": "terraform/test-0002",
+            "config_file": os.path.join(
+                os.path.dirname(__file__), "fixtures", "gcp_test_config.yaml"
+            ),
+            "gcp_creds_path": "/home/test/test-creds.json",
+            "gcp_project": "test_project",
+            "gcp_region": "us-west-2b",
+            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+            "create_backend_bucket": False,
         }
     )
     return result
@@ -124,7 +146,7 @@ def grootc():
 
 @pytest.fixture(scope="function")
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def rootc(s3_client, dynamodb_client, sts_client):
+def rootc(s3_client, dynamodb_client, sts_client, create_backend_bucket=True):
     result = tfworker.commands.root.RootCommand(
         args={
             "aws_access_key_id": "1234567890",
@@ -141,6 +163,32 @@ def rootc(s3_client, dynamodb_client, sts_client):
             "gcp_project": "test_project",
             "gcp_region": "us-west-2b",
             "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+            "create_backend_bucket": create_backend_bucket,
+        }
+    )
+    return result
+
+
+@pytest.fixture(scope="function")
+@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
+def rootc_no_create_backend_bucket(s3_client, dynamodb_client, sts_client):
+    result = tfworker.commands.root.RootCommand(
+        args={
+            "aws_access_key_id": "1234567890",
+            "aws_secret_access_key": "1234567890",
+            "aws_region": "us-west-2",
+            "backend": "s3",
+            "backend_region": "us-west-2",
+            "backend_bucket": "test_bucket",
+            "backend_prefix": "terraform/test-0001",
+            "config_file": os.path.join(
+                os.path.dirname(__file__), "fixtures", "test_config.yaml"
+            ),
+            "gcp_creds_path": "/home/test/test-creds.json",
+            "gcp_project": "test_project",
+            "gcp_region": "us-west-2b",
+            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+            "create_backend_bucket": False,
         }
     )
     return result

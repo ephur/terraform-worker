@@ -137,7 +137,11 @@ class AWSAuthenticator(BaseAuthenticator):
 
     @staticmethod
     def get_assumed_role_session(
-        session, role_arn, session_name="AssumedRoleSession1", duration=3600, external_id=""
+        session,
+        role_arn,
+        session_name="AssumedRoleSession1",
+        duration=3600,
+        external_id="",
     ):
         """ get_assumed_role_session returns a boto3 session updated with assumed role credentials """
         sts_client = session.client("sts")
@@ -147,7 +151,7 @@ class AWSAuthenticator(BaseAuthenticator):
             "DurationSeconds": duration,
         }
         if external_id:
-            assume_args['ExternalId'] = external_id
+            assume_args["ExternalId"] = external_id
         role_creds = sts_client.assume_role(**assume_args)["Credentials"]
 
         new_session = boto3.Session(
