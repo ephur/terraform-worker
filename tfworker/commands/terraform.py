@@ -188,6 +188,7 @@ class TerraformCommand(BaseCommand):
                     definition,
                     self._plan_for,
                     debug=self._show_output,
+                    plan_file = str(plan_file)
                 )
             except TerraformError:
                 click.secho(
@@ -195,12 +196,18 @@ class TerraformCommand(BaseCommand):
                     f" {definition.tag}, exiting",
                     fg="red",
                 )
+                if plan_file is not None:
+                    # plan file yeilded an error and has been consumed
+                    plan_file.unlink()
                 raise SystemExit(2)
             else:
                 click.secho(
                     f"terraform {self._plan_for} complete for {definition.tag}",
                     fg="green",
                 )
+                if plan_file is not None:
+                    # plan file succeeded and has been consumed
+                    plan_file.unlink()
 
     def _run(self, definition, command, debug=False, plan_action="init", plan_file=None):
         """Run terraform."""
