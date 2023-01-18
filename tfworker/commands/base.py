@@ -1,4 +1,4 @@
-# Copyright 2020 Richard Maynard (richard.maynard@gmail.com)
+# Copyright 2023 Richard Maynard (richard.maynard@gmail.com)
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -86,7 +86,11 @@ class BaseCommand:
         )
         plugins_odict = OrderedDict()
         for provider in rootc.providers_odict:
-            raw_version = rootc.providers_odict[provider]["vars"]["version"]
+            try:
+                raw_version = rootc.providers_odict[provider]["requirements"]["version"]
+            except KeyError:
+                click.secho("providers must have a version constraint specified", fg="red")
+                raise SystemExit()
             version = raw_version.split(" ")[-1]
             vals = {"version": version}
             base_url = rootc.providers_odict[provider].get("baseURL")
@@ -152,7 +156,8 @@ class BaseCommand:
             click.secho(f"unable to get terraform version\n{stderr}", fg="red")
             raise SystemExit(1)
         version = stdout.decode("UTF-8").split("\n")[0]
-        version_search = re.search(r".* v\d+\.(\d+)\.(\d+)", version)
+        click.secho(f"{version}")
+        version_search = re.search(r".*\s+v(\d+)\.(\d+)\.(\d+)", version)
         if version_search:
             click.secho(
                 f"Terraform Version Result: {version}, using major:{version_search.group(1)}, minor:{version_search.group(2)}",

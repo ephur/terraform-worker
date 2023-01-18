@@ -43,12 +43,13 @@ class TerraformCommand(BaseCommand):
 
         self._destroy = self._resolve_arg("destroy")
         self._tf_apply = self._resolve_arg("tf_apply")
+        self._plan_file_path = self._resolve_arg("plan_file_path")
         if self._tf_apply and self._destroy:
             click.secho("can not apply and destroy at the same time", fg="red")
             raise SystemExit(1)
 
         self._b64_encode = self._resolve_arg("b64_encode")
-        self._deployment = self._resolve_arg("deployment")
+        self._deployment = kwargs["deployment"]
         self._force = self._resolve_arg("force")
         self._show_output = self._resolve_arg("show_output")
         self._terraform_modules_dir = self._resolve_arg("terraform_modules_dir")
@@ -64,9 +65,11 @@ class TerraformCommand(BaseCommand):
     def prep_modules(self):
         """Puts the modules sub directories into place."""
 
+        click.secho(f"DEBUG: terraform_modules_dir: {self._terraform_modules_dir}", fg="red")
         if self._terraform_modules_dir:
             mod_source = self._terraform_modules_dir
             mod_path = pathlib.Path(mod_source)
+            click.secho(f"DEBUG: mod_path: {mod_path}", fg="red", bold=True)
             if not mod_path.exists():
                 click.secho(
                     f'The specified terraform-modules directory "{mod_source}" does not exists',
@@ -76,6 +79,7 @@ class TerraformCommand(BaseCommand):
         else:
             mod_source = f"{self._repository_path}/terraform-modules".replace("//", "/")
             mod_path = pathlib.Path(mod_source)
+            click.secho(f"DEBUG: mod_path: {mod_path}", fg="red", bold=True)
             if not mod_path.exists():
                 click.secho(
                     "The terraform-modules directory does not exist.  Skipping.",
@@ -94,6 +98,9 @@ class TerraformCommand(BaseCommand):
         )
 
     def exec(self):
+        """ exec handles running the terraform chain """
+        skip_plan = False
+
         try:
             def_iter = self.definitions.limited()
         except ValueError as e:
@@ -102,6 +109,7 @@ class TerraformCommand(BaseCommand):
 
         for definition in def_iter:
             execute = False
+            plan_file = None
             # copy definition files / templates etc.
             click.secho(f"preparing definition: {definition.tag}", fg="green")
             definition.prep(
@@ -114,32 +122,51 @@ class TerraformCommand(BaseCommand):
                 click.secho("error running terraform init", fg="red")
                 raise SystemExit(1)
 
+            # validate the path and resolve the plan file name
+            if self._plan_file_path:
+                plan_path = pathlib.Path.absolute(pathlib.Path(self._plan_file_path))
+                if not (plan_path.exists() and plan_path.is_dir()):
+                    click.secho(f"plan path \"{plan_path}\" is not suitable, it is not an existing directory")
+                    raise SystemExit()
+                plan_file = pathlib.Path(f"{plan_path}/{self._deployment}_{definition.tag}.tfplan")
+                click.secho(f"using plan file:{plan_file}", fg="yellow")
+
+            # check if a plan file for the given deployment/definition exists, if so
+            # do not plan again
             click.secho(
                 f"planning definition for {self._plan_for}: {definition.tag}",
                 fg="green",
             )
 
-            # run terraform plan
-            try:
-                self._run(
-                    definition,
-                    "plan",
-                    debug=self._show_output,
-                    plan_action=self._plan_for,
-                )
-            except PlanChange:
-                # on destroy, terraform ALWAYS indicates a plan change, at least as of
-                # version 0.12.x, unsure why
-                click.secho(
-                    f"plan changes for {self._plan_for} {definition.tag}", fg="red"
-                )
-                execute = True
-            except TerraformError:
-                click.secho(
-                    f"error planning terraform definition: {definition.tag}!",
-                    fg="red",
-                )
-                raise SystemExit(2)
+            if plan_file is not None:
+                # if plan file is set, check if it exists, if it does do not plan again
+                if plan_file.exists():
+                    click.secho(f"plan file {plan_file} exists, not planning again")
+                    execute = True
+                    skip_plan = True
+
+            if skip_plan is False:
+                # run terraform plan
+                try:
+                    self._run(
+                        definition,
+                        "plan",
+                        debug=self._show_output,
+                        plan_action=self._plan_for,
+                        plan_file=str(plan_file)
+                    )
+                except PlanChange:
+                    # on destroy, terraform ALWAYS indicates a plan change
+                    click.secho(
+                        f"plan changes for {self._plan_for} {definition.tag}", fg="red"
+                    )
+                    execute = True
+                except TerraformError:
+                    click.secho(
+                        f"error planning terraform definition: {definition.tag}!",
+                        fg="red",
+                    )
+                    raise SystemExit(2)
 
             if not execute:
                 click.secho(f"no plan changes for {definition.tag}", fg="yellow")
@@ -175,7 +202,7 @@ class TerraformCommand(BaseCommand):
                     fg="green",
                 )
 
-    def _run(self, definition, command, debug=False, plan_action="init"):
+    def _run(self, definition, command, debug=False, plan_action="init", plan_file=None):
         """Run terraform."""
         if self._tf_version_major >= 12:
             params = {
@@ -196,6 +223,10 @@ class TerraformCommand(BaseCommand):
 
         if plan_action == "destroy":
             params["plan"] += " -destroy"
+
+        if plan_file is not None:
+            params["plan"] += f" -out {plan_file}"
+            params["apply"] += f" {plan_file}"
 
         env = os.environ.copy()
         for auth in self._authenticators:
