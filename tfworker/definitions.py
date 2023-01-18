@@ -27,6 +27,7 @@ from tfworker.util.copier import CopyFactory
 TERRAFORM_TPL = """\
 terraform {{
 {0}
+{1}
 }}
 """
 
@@ -85,17 +86,16 @@ class Definition:
     def provider_names(self):
         """ Extract only the providers used by a definition """
         result = set(self._providers.keys())
-        if self._tf_version_major >= 13:
-            version_path = PurePath(self._target) / "versions.tf"
-            if Path(version_path).exists():
-                with open(version_path, "r") as reader:
-                    vinfo = hcl2.load(reader)
-                    tf_element = vinfo.get("terraform", [None]).pop()
-                    if tf_element:
-                        rp_element = tf_element.get("required_providers", [None]).pop()
-                        if rp_element:
-                            required_providers = set(rp_element.keys())
-                            result = result.intersection(required_providers)
+        version_path = PurePath(self._target) / "versions.tf"
+        if Path(version_path).exists():
+            with open(version_path, "r") as reader:
+                vinfo = hcl2.load(reader)
+                tf_element = vinfo.get("terraform", [None]).pop()
+                if tf_element:
+                    rp_element = tf_element.get("required_providers", [None]).pop()
+                    if rp_element:
+                        required_providers = set(rp_element.keys())
+                        result = result.intersection(required_providers)
         return result
 
     def prep(self, backend):
@@ -131,9 +131,9 @@ class Definition:
 
         # create remote data sources, and required providers
         remotes = list(map(lambda x: x.split(".")[0], self._remote_vars.values()))
-        with open(f"{self._target}/terraform.tf", "w+") as tffile:
+        with open(f"{self._target}/worker_terraform.tf", "w+") as tffile:
             tffile.write(f"{self._providers.hcl(self.provider_names)}\n\n")
-            tffile.write(TERRAFORM_TPL.format(f"{backend.hcl(self.tag)}"))
+            tffile.write(TERRAFORM_TPL.format(f"{backend.hcl(self.tag)}",""))
             tffile.write(backend.data_hcl(remotes))
 
         # Create the variable definitions

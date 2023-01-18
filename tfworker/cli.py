@@ -208,6 +208,11 @@ def version():
     help="clean up the temporary directory created by the worker after execution",
 )
 @click.option(
+    "--plan-file-path",
+    default=None,
+    help="path to plan files, with plan it will save to this location, apply will read from it",
+)
+@click.option(
     "--apply/--no-apply",
     "tf_apply",
     default=False,
