@@ -113,7 +113,7 @@ class TerraformCommand(BaseCommand):
             # copy definition files / templates etc.
             click.secho(f"preparing definition: {definition.tag}", fg="green")
             definition.prep(
-                self._backend,
+                self._backend
             )
             # run terraform init
             try:
