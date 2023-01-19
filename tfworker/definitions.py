@@ -14,13 +14,13 @@
 
 import collections
 import copy
-import jinja2
 import json
 from pathlib import Path, PurePath
 from typing import OrderedDict
 
 import click
 import hcl2
+import jinja2
 
 from tfworker import constants as const
 from tfworker.util.copier import CopyFactory
@@ -51,7 +51,7 @@ class Definition:
         temp_dir,
         tf_version_major,
         limited=False,
-        template_callback=None
+        template_callback=None,
     ):
         self.tag = definition
         self._body = body
@@ -141,7 +141,7 @@ class Definition:
         remotes = list(map(lambda x: x.split(".")[0], self._remote_vars.values()))
         with open(f"{self._target}/worker_terraform.tf", "w+") as tffile:
             tffile.write(f"{self._providers.hcl(self.provider_names)}\n\n")
-            tffile.write(TERRAFORM_TPL.format(f"{backend.hcl(self.tag)}",""))
+            tffile.write(TERRAFORM_TPL.format(f"{backend.hcl(self.tag)}", ""))
             tffile.write(backend.data_hcl(remotes))
 
         # Create the variable definitions
@@ -232,7 +232,7 @@ class DefinitionsCollection(collections.abc.Mapping):
                 temp_dir,
                 tf_version_major,
                 True if limit and definition in limit else False,
-                template_callback=self.render_templates
+                template_callback=self.render_templates,
             )
 
     def __len__(self):
@@ -279,23 +279,37 @@ class DefinitionsCollection(collections.abc.Mapping):
 
         jinja_env = jinja2.Environment(
             undefined=jinja2.StrictUndefined,
-            loader=jinja2.FileSystemLoader(template_path))
-        jinja_env.globals=self._root_args.template_items(return_as_dict=True, get_env=True)
+            loader=jinja2.FileSystemLoader(template_path),
+        )
+        jinja_env.globals = self._root_args.template_items(
+            return_as_dict=True, get_env=True
+        )
 
         for template_file in jinja_env.list_templates(filter_func=filter_templates):
-            template_target = f"{template_path}/{'.'.join(template_file.split('.')[:-1])}"
+            template_target = (
+                f"{template_path}/{'.'.join(template_file.split('.')[:-1])}"
+            )
 
             try:
                 with open(template_target, "x") as f:
                     try:
                         f.writelines(jinja_env.get_template(template_file).generate())
-                        click.secho(f"rendered {template_file} into {template_target}", fg="yellow")
+                        click.secho(
+                            f"rendered {template_file} into {template_target}",
+                            fg="yellow",
+                        )
                     except jinja2.exceptions.UndefinedError as e:
-                        click.secho(f"file contains invalid template substitutions: {e}", fg="red")
+                        click.secho(
+                            f"file contains invalid template substitutions: {e}",
+                            fg="red",
+                        )
                         raise SystemExit()
 
             except FileExistsError():
-                click.secho(f"ERROR: {template_target} already exists! Make sure there's not a .tf and .tf.j2 of this file",fg="red")
+                click.secho(
+                    f"ERROR: {template_target} already exists! Make sure there's not a .tf and .tf.j2 of this file",
+                    fg="red",
+                )
                 raise SystemExit()
 
     @property

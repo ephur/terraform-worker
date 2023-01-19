@@ -65,7 +65,9 @@ class TerraformCommand(BaseCommand):
     def prep_modules(self):
         """Puts the modules sub directories into place."""
 
-        click.secho(f"DEBUG: terraform_modules_dir: {self._terraform_modules_dir}", fg="red")
+        click.secho(
+            f"DEBUG: terraform_modules_dir: {self._terraform_modules_dir}", fg="red"
+        )
         if self._terraform_modules_dir:
             mod_source = self._terraform_modules_dir
             mod_path = pathlib.Path(mod_source)
@@ -112,9 +114,7 @@ class TerraformCommand(BaseCommand):
             plan_file = None
             # copy definition files / templates etc.
             click.secho(f"preparing definition: {definition.tag}", fg="green")
-            definition.prep(
-                self._backend
-            )
+            definition.prep(self._backend)
             # run terraform init
             try:
                 self._run(definition, "init", debug=self._show_output)
@@ -126,9 +126,13 @@ class TerraformCommand(BaseCommand):
             if self._plan_file_path:
                 plan_path = pathlib.Path.absolute(pathlib.Path(self._plan_file_path))
                 if not (plan_path.exists() and plan_path.is_dir()):
-                    click.secho(f"plan path \"{plan_path}\" is not suitable, it is not an existing directory")
+                    click.secho(
+                        f'plan path "{plan_path}" is not suitable, it is not an existing directory'
+                    )
                     raise SystemExit()
-                plan_file = pathlib.Path(f"{plan_path}/{self._deployment}_{definition.tag}.tfplan")
+                plan_file = pathlib.Path(
+                    f"{plan_path}/{self._deployment}_{definition.tag}.tfplan"
+                )
                 click.secho(f"using plan file:{plan_file}", fg="yellow")
 
             # check if a plan file for the given deployment/definition exists, if so
@@ -153,7 +157,7 @@ class TerraformCommand(BaseCommand):
                         "plan",
                         debug=self._show_output,
                         plan_action=self._plan_for,
-                        plan_file=str(plan_file)
+                        plan_file=str(plan_file),
                     )
                 except PlanChange:
                     # on destroy, terraform ALWAYS indicates a plan change
@@ -188,7 +192,7 @@ class TerraformCommand(BaseCommand):
                     definition,
                     self._plan_for,
                     debug=self._show_output,
-                    plan_file = str(plan_file)
+                    plan_file=str(plan_file),
                 )
             except TerraformError:
                 click.secho(
@@ -209,7 +213,9 @@ class TerraformCommand(BaseCommand):
                     # plan file succeeded and has been consumed
                     plan_file.unlink()
 
-    def _run(self, definition, command, debug=False, plan_action="init", plan_file=None):
+    def _run(
+        self, definition, command, debug=False, plan_action="init", plan_file=None
+    ):
         """Run terraform."""
         if self._tf_version_major >= 12:
             params = {
