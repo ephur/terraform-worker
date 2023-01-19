@@ -178,8 +178,8 @@ class TestTerraformCommand:
     @pytest.mark.parametrize(
         "stdout, major, minor, expected_exception",
         [
-            ("Terraform v0.12.29", 12, 29, does_not_raise()),
-            ("Terraform v0.13.5", 13, 5, does_not_raise()),
+            ("Terraform v0.12.29", 0, 12, does_not_raise()),
+            ("Terraform v1.3.5", 1, 3, does_not_raise()),
             ("TF 14", "", "", pytest.raises(SystemExit)),
         ],
     )

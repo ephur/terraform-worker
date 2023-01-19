@@ -1,18 +1,20 @@
 terraform {
   providers {
     aws = {
+      requirements = {
+        version = "2.63.0"
+      }
       vars = {
         region = "{{ aws_region }}"
-        version = "2.63.0"
       }
     }
     null = {
-      vars = {
+      requirements = {
         version = "~> 3.2.1"
       }
     }
     random = {
-      vars = {
+      requirements = {
         version = "~> 2.3.0"
       }
     }
