@@ -20,6 +20,7 @@ from typing import OrderedDict
 
 import click
 import hcl2
+import jinja2
 
 from tfworker import constants as const
 from tfworker.util.copier import CopyFactory
@@ -50,6 +51,7 @@ class Definition:
         temp_dir,
         tf_version_major,
         limited=False,
+        template_callback=None,
     ):
         self.tag = definition
         self._body = body
@@ -69,6 +71,7 @@ class Definition:
         self._limited = limited
 
         self._target = f"{self._temp_dir}/definitions/{self.tag}".replace("//", "/")
+        self._template_callback = template_callback
 
     @property
     def body(self):
@@ -101,6 +104,7 @@ class Definition:
     def prep(self, backend):
         """ prepare the definitions for running """
 
+        # prep the definitions
         try:
             c = CopyFactory.create(
                 self.path,
@@ -121,6 +125,10 @@ class Definition:
         except FileExistsError as e:
             raise ReservedFileError(e)
 
+        # render the templates
+        if self._template_callback is not None:
+            self._template_callback(self._target)
+
         # Create local vars from remote data sources
         if len(list(self._remote_vars.keys())) > 0:
             with open(f"{self._target}/worker-locals.tf", "w+") as tflocals:
@@ -133,7 +141,7 @@ class Definition:
         remotes = list(map(lambda x: x.split(".")[0], self._remote_vars.values()))
         with open(f"{self._target}/worker_terraform.tf", "w+") as tffile:
             tffile.write(f"{self._providers.hcl(self.provider_names)}\n\n")
-            tffile.write(TERRAFORM_TPL.format(f"{backend.hcl(self.tag)}",""))
+            tffile.write(TERRAFORM_TPL.format(f"{backend.hcl(self.tag)}", ""))
             tffile.write(backend.data_hcl(remotes))
 
         # Create the variable definitions
@@ -209,6 +217,8 @@ class DefinitionsCollection(collections.abc.Mapping):
         self._definitions = collections.OrderedDict()
         self._limit = True if len(limit) > 0 else False
         self._limit_size = len(limit)
+        self._root_args = rootc.args
+
         for definition, body in definitions.items():
             self._definitions[definition] = Definition(
                 definition,
@@ -222,6 +232,7 @@ class DefinitionsCollection(collections.abc.Mapping):
                 temp_dir,
                 tf_version_major,
                 True if limit and definition in limit else False,
+                template_callback=self.render_templates,
             )
 
     def __len__(self):
@@ -258,6 +269,48 @@ class DefinitionsCollection(collections.abc.Mapping):
             raise ValueError("not all definitions match --limit")
         else:
             return iter(filter(lambda d: d.limited, self.iter(honor_destroy=True)))
+
+    def render_templates(self, template_path):
+        """ render all the .tf.j2 files in a path, and rename them to .tf """
+
+        def filter_templates(filename):
+            """ a small function to filter the list of files down to only j2 templates """
+            return filename.endswith(".tf.j2")
+
+        jinja_env = jinja2.Environment(
+            undefined=jinja2.StrictUndefined,
+            loader=jinja2.FileSystemLoader(template_path),
+        )
+        jinja_env.globals = self._root_args.template_items(
+            return_as_dict=True, get_env=True
+        )
+
+        for template_file in jinja_env.list_templates(filter_func=filter_templates):
+            template_target = (
+                f"{template_path}/{'.'.join(template_file.split('.')[:-1])}"
+            )
+
+            try:
+                with open(template_target, "x") as f:
+                    try:
+                        f.writelines(jinja_env.get_template(template_file).generate())
+                        click.secho(
+                            f"rendered {template_file} into {template_target}",
+                            fg="yellow",
+                        )
+                    except jinja2.exceptions.UndefinedError as e:
+                        click.secho(
+                            f"file contains invalid template substitutions: {e}",
+                            fg="red",
+                        )
+                        raise SystemExit()
+
+            except FileExistsError():
+                click.secho(
+                    f"ERROR: {template_target} already exists! Make sure there's not a .tf and .tf.j2 of this file",
+                    fg="red",
+                )
+                raise SystemExit()
 
     @property
     def body(self):

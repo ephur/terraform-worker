@@ -47,7 +47,7 @@ def validate_gcp_creds_path(ctx, path, value):
 def validate_host():
     """Ensure that the script is being run on a supported platform."""
     supported_opsys = ["darwin", "linux"]
-    supported_machine = ["amd64","arm64"]
+    supported_machine = ["amd64", "arm64"]
 
     opsys, machine = get_platform()
 

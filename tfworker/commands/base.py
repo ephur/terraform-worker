@@ -89,7 +89,9 @@ class BaseCommand:
             try:
                 raw_version = rootc.providers_odict[provider]["requirements"]["version"]
             except KeyError:
-                click.secho("providers must have a version constraint specified", fg="red")
+                click.secho(
+                    "providers must have a version constraint specified", fg="red"
+                )
                 raise SystemExit()
             version = raw_version.split(" ")[-1]
             vals = {"version": version}
