@@ -1,27 +1,31 @@
 terraform:
   providers:
     aws:
-      vars:
+      requirements:
         version: "2.63"
+      vars:
         region: {{ gcp_region }}
 
     google:
-      vars:
+      requirements:
         version: "~> 3.39"
+      vars:
         region: {{ gcp_region }}
 
     google_beta:
+      requirements:
+        version: "~> 3.39"
       vars:
-        version: 3.38.0
         region: {{ gcp_region }}
 
     'null':
-      vars:
+      requirements:
         version: 3.2.1
 
     vault:
-      vars:
+      requirements:
         version: 3.38.0
+      vars:
         region: {{ gcp_region }}
 
   terraform_vars:

@@ -69,7 +69,6 @@ class TerraformCommand(BaseCommand):
         if self._terraform_modules_dir:
             mod_source = self._terraform_modules_dir
             mod_path = pathlib.Path(mod_source)
-            click.secho(f"DEBUG: mod_path: {mod_path}", fg="red", bold=True)
             if not mod_path.exists():
                 click.secho(
                     f'The specified terraform-modules directory "{mod_source}" does not exists',
@@ -79,7 +78,6 @@ class TerraformCommand(BaseCommand):
         else:
             mod_source = f"{self._repository_path}/terraform-modules".replace("//", "/")
             mod_path = pathlib.Path(mod_source)
-            click.secho(f"DEBUG: mod_path: {mod_path}", fg="red", bold=True)
             if not mod_path.exists():
                 click.secho(
                     "The terraform-modules directory does not exist.  Skipping.",
