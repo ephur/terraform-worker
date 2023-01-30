@@ -17,6 +17,7 @@
 import os
 import struct
 import sys
+from pathlib import Path
 
 import click
 
@@ -71,6 +72,22 @@ def validate_host():
         raise SystemExit(2)
 
     return True
+
+
+def validate_working_dir(fpath):
+    # if fpath is none, then a custom working directory was not defined, so this validates
+    if fpath is None:
+        return
+    with Path(fpath) as wpath:
+        if not wpath.exists():
+            click.secho(f"Working path {fpath} does not exist!", fg="red")
+            raise SystemExit(1)
+        if not wpath.is_dir():
+            click.secho(f"Working path {fpath} is not a directory!", fg="red")
+            raise SystemExit(1)
+        if any(wpath.iterdir()):
+            click.secho(f"Working path {fpath} must be empty!", fg="red")
+            raise SystemExit(1)
 
 
 @click.group()
@@ -172,10 +189,21 @@ def validate_host():
     default=[],
     help='key=value to be supplied as jinja variables in config_file under "var" dictionary, can be specified multiple times',
 )
+@click.option(
+    "--working-dir",
+    default=None,
+    help="Specify the path to use instead of a temporary directory, must exist, be empty, and be writeable, --clean applies to this directory as well",
+)
+@click.option(
+    "--clean/--no-clean",
+    default=None,
+    help="clean up the temporary directory created by the worker after execution",
+)
 @click.pass_context
 def cli(context, **kwargs):
     """CLI for the worker utility."""
     validate_host()
+    validate_working_dir(kwargs.get("working_dir", None))
     config_file = kwargs["config_file"]
     try:
         context.obj = RootCommand(args=kwargs)
@@ -202,11 +230,6 @@ def version():
 
 
 @cli.command()
-@click.option(
-    "--clean/--no-clean",
-    default=True,
-    help="clean up the temporary directory created by the worker after execution",
-)
 @click.option(
     "--plan-file-path",
     default=None,

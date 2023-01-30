@@ -31,10 +31,22 @@ import tfworker.util.hcl2_transformer as hcl2_transformer
 
 
 class RootCommand:
-    def __init__(self, args={}, clean=True):
+    def __init__(self, args={}):
         """Setup state with args that are passed."""
-        self.clean = clean
-        self.temp_dir = tempfile.mkdtemp()
+        self.working_dir = args.get("working_dir", None)
+
+        # the default behavior of --clean/--no-clean varies depending on if working-dir is passed
+        defaultClean = False if (self.working_dir is not None) else True
+        if args.get("clean", None) is None:
+            self.clean = defaultClean
+        else:
+            self.clean = args.get("clean")
+
+        if self.working_dir is not None:
+            self.temp_dir = pathlib.Path(self.working_dir).resolve()
+        else:
+            self.temp_dir = tempfile.mkdtemp()
+
         self.args = self.StateArgs()
         self.config_file = args.get("config_file")
 
@@ -44,10 +56,16 @@ class RootCommand:
 
     def __del__(self):
         """Cleanup the temporary directory after execution."""
+
         if self.clean:
+            # the affect of remove_top being true is removing the top level directory, for a temporary
+            # directory this is desirable however when a working-dir is specified it's likely a volume
+            # mount in a container, so empty the files if clean is desired but do not remove the top level
+            remove_top = True if self.working_dir is None else False
+
             try:
-                shutil.rmtree(self.temp_dir)
-            except Exception:
+                rm_tree(self.temp_dir, inner=remove_top)
+            except FileNotFoundError:
                 pass
 
     def add_args(self, args):
@@ -272,3 +290,18 @@ def get_platform():
     if machine == "aarch64":
         machine = "arm64"
     return (opsys, machine)
+
+
+def rm_tree(base_path, inner=False):
+    """
+    rm_tree recursively removes all files and directories
+    """
+    parent = pathlib.Path(base_path)
+
+    for child in parent.glob("*"):
+        if child.is_file() or child.is_symlink():
+            child.unlink()
+        else:
+            rm_tree(child, inner=True)
+    if inner:
+        parent.rmdir()
