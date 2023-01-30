@@ -65,7 +65,9 @@ class TestDefinitions:
         with open(basec.temp_dir + "/definitions/test/test.tf", "r") as reader:
             assert EXPECTED_TEST_BLOCK in reader.read()
         assert os.path.isfile(basec.temp_dir + "/definitions/test/worker_terraform.tf")
-        with open(basec.temp_dir + "/definitions/test/worker_terraform.tf", "r") as reader:
+        with open(
+            basec.temp_dir + "/definitions/test/worker_terraform.tf", "r"
+        ) as reader:
             tf_data = reader.read()
             assert expected_tf_block in tf_data
             for ep in expected_providers:

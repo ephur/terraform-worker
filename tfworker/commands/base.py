@@ -67,8 +67,6 @@ class BaseCommand:
             rootc.args, deployment=deployment, **kwargs
         )
 
-        rootc.clean = kwargs.get("clean", True)
-
         self._providers = ProvidersCollection(
             rootc.providers_odict, self._authenticators, self._tf_version_major
         )
@@ -158,7 +156,6 @@ class BaseCommand:
             click.secho(f"unable to get terraform version\n{stderr}", fg="red")
             raise SystemExit(1)
         version = stdout.decode("UTF-8").split("\n")[0]
-        click.secho(f"{version}")
         version_search = re.search(r".*\s+v(\d+)\.(\d+)\.(\d+)", version)
         if version_search:
             click.secho(
