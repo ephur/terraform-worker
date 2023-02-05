@@ -65,9 +65,6 @@ class TerraformCommand(BaseCommand):
     def prep_modules(self):
         """Puts the modules sub directories into place."""
 
-        click.secho(
-            f"DEBUG: terraform_modules_dir: {self._terraform_modules_dir}", fg="red"
-        )
         if self._terraform_modules_dir:
             mod_source = self._terraform_modules_dir
             mod_path = pathlib.Path(mod_source)
