@@ -43,6 +43,7 @@ class TerraformCommand(BaseCommand):
 
         self._destroy = self._resolve_arg("destroy")
         self._tf_apply = self._resolve_arg("tf_apply")
+        self._tf_plan = self._resolve_arg("tf_plan")
         self._plan_file_path = self._resolve_arg("plan_file_path")
         if self._tf_apply and self._destroy:
             click.secho("can not apply and destroy at the same time", fg="red")
@@ -144,7 +145,7 @@ class TerraformCommand(BaseCommand):
                     execute = True
                     skip_plan = True
 
-            if skip_plan is False:
+            if skip_plan is False and self._tf_plan:
                 # run terraform plan
                 try:
                     self._run(
@@ -167,8 +168,8 @@ class TerraformCommand(BaseCommand):
                     )
                     raise SystemExit(2)
 
-            if not execute:
-                click.secho(f"no plan changes for {definition.tag}", fg="yellow")
+                if not execute:
+                    click.secho(f"no plan changes for {definition.tag}", fg="yellow")
 
             if self._force and (self._tf_apply or self._destroy):
                 execute = True
