@@ -242,6 +242,12 @@ def version():
     help="apply the terraform configuration",
 )
 @click.option(
+    "--plan/--no-plan",
+    "tf_plan",
+    default=True,
+    help="toggle running a plan, plan will still be skipped if using a saved plan file with apply",
+)
+@click.option(
     "--force/--no-force",
     "force",
     default=False,
