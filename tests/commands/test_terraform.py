@@ -96,7 +96,7 @@ class TestTerraformCommand:
             (
                 "destroy",
                 lazy_fixture("tf_12cmd"),
-                ["-input=false", "-no-color", "-force"],
+                ["-input=false", "-no-color", "-auto-approve"],
             ),
             (
                 "init",
@@ -116,7 +116,7 @@ class TestTerraformCommand:
             (
                 "destroy",
                 lazy_fixture("tf_13cmd"),
-                ["-input=false", "-no-color", "-force"],
+                ["-input=false", "-no-color", "-auto-approve"],
             ),
             (
                 "init",
@@ -136,7 +136,7 @@ class TestTerraformCommand:
             (
                 "destroy",
                 lazy_fixture("tf_14cmd"),
-                ["-input=false", "-no-color", "-force"],
+                ["-input=false", "-no-color", "-auto-approve"],
             ),
             (
                 "init",
