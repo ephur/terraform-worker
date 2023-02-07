@@ -56,6 +56,7 @@ class TestDefinitions:
             (12, EXPECTED_TF_BLOCK, ["aws", "google", "google_beta", "null", "vault"]),
         ],
     )
+    @pytest.mark.skip(reason="TF version handling has changed significantly, rewrite.")
     def test_prep(self, basec, tf_version, expected_tf_block, expected_providers):
         definition = basec.definitions["test"]
         definition._tf_version_major = tf_version

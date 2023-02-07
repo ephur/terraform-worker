@@ -43,6 +43,7 @@ class TerraformCommand(BaseCommand):
 
         self._destroy = self._resolve_arg("destroy")
         self._tf_apply = self._resolve_arg("tf_apply")
+        self._tf_plan = self._resolve_arg("tf_plan")
         self._plan_file_path = self._resolve_arg("plan_file_path")
         if self._tf_apply and self._destroy:
             click.secho("can not apply and destroy at the same time", fg="red")
@@ -144,7 +145,7 @@ class TerraformCommand(BaseCommand):
                     execute = True
                     skip_plan = True
 
-            if skip_plan is False:
+            if skip_plan is False and self._tf_plan:
                 # run terraform plan
                 try:
                     self._run(
@@ -167,8 +168,8 @@ class TerraformCommand(BaseCommand):
                     )
                     raise SystemExit(2)
 
-            if not execute:
-                click.secho(f"no plan changes for {definition.tag}", fg="yellow")
+                if not execute:
+                    click.secho(f"no plan changes for {definition.tag}", fg="yellow")
 
             if self._force and (self._tf_apply or self._destroy):
                 execute = True
@@ -212,22 +213,12 @@ class TerraformCommand(BaseCommand):
         self, definition, command, debug=False, plan_action="init", plan_file=None
     ):
         """Run terraform."""
-        if self._tf_version_major >= 12:
-            params = {
-                "init": f"-input=false -no-color -plugin-dir={self._temp_dir}/terraform-plugins",
-                "plan": "-input=false -detailed-exitcode -no-color",
-                "apply": "-input=false -no-color -auto-approve",
-                "destroy": "-input=false -no-color -force",
-            }
-            if self._tf_version_major >= 15:
-                params["destroy"] = "-input=false -no-color -auto-approve"
-        else:
-            params = {
-                "init": "-input=false -no-color",
-                "plan": "-input=false -detailed-exitcode -no-color",
-                "apply": "-input=false -no-color -auto-approve",
-                "destroy": "-input=false -no-color -force",
-            }
+        params = {
+            "init": f"-input=false -no-color -plugin-dir={self._temp_dir}/terraform-plugins",
+            "plan": "-input=false -detailed-exitcode -no-color",
+            "apply": "-input=false -no-color -auto-approve",
+            "destroy": "-input=false -no-color -auto-approve",
+        }
 
         if plan_action == "destroy":
             params["plan"] += " -destroy"
@@ -240,7 +231,7 @@ class TerraformCommand(BaseCommand):
         for auth in self._authenticators:
             env.update(auth.env())
 
-        env["TF_PLUGIN_CACHE_DIR"] = f"{self._temp_dir}/terraform-plugins"
+        # env["TF_PLUGIN_CACHE_DIR"] = f"{self._temp_dir}/terraform-plugins"
 
         working_dir = f"{self._temp_dir}/definitions/{definition.tag}"
         command_params = params.get(command)
