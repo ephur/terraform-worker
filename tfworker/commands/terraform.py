@@ -213,22 +213,12 @@ class TerraformCommand(BaseCommand):
         self, definition, command, debug=False, plan_action="init", plan_file=None
     ):
         """Run terraform."""
-        if self._tf_version_major >= 12:
-            params = {
-                "init": f"-input=false -no-color -plugin-dir={self._temp_dir}/terraform-plugins",
-                "plan": "-input=false -detailed-exitcode -no-color",
-                "apply": "-input=false -no-color -auto-approve",
-                "destroy": "-input=false -no-color -force",
-            }
-            if self._tf_version_major >= 15:
-                params["destroy"] = "-input=false -no-color -auto-approve"
-        else:
-            params = {
-                "init": "-input=false -no-color",
-                "plan": "-input=false -detailed-exitcode -no-color",
-                "apply": "-input=false -no-color -auto-approve",
-                "destroy": "-input=false -no-color -force",
-            }
+        params = {
+            "init": f"-input=false -no-color -plugin-dir={self._temp_dir}/terraform-plugins",
+            "plan": "-input=false -detailed-exitcode -no-color",
+            "apply": "-input=false -no-color -auto-approve",
+            "destroy": "-input=false -no-color -auto-approve",
+        }
 
         if plan_action == "destroy":
             params["plan"] += " -destroy"
@@ -241,7 +231,7 @@ class TerraformCommand(BaseCommand):
         for auth in self._authenticators:
             env.update(auth.env())
 
-        env["TF_PLUGIN_CACHE_DIR"] = f"{self._temp_dir}/terraform-plugins"
+        # env["TF_PLUGIN_CACHE_DIR"] = f"{self._temp_dir}/terraform-plugins"
 
         working_dir = f"{self._temp_dir}/definitions/{definition.tag}"
         command_params = params.get(command)

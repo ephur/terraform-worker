@@ -71,13 +71,13 @@ class TestPlugins:
     @pytest.mark.depends(on="get_url")
     def test_plugin_download(self, rootc):
         plugins = tfworker.plugins.PluginsCollection(
-            {"null": {"version": "3.2.1"}}, rootc.temp_dir, 12
+            {"null": {"version": "3.2.1"}}, rootc.temp_dir, None, 1
         )
         plugins.download()
         files = glob.glob(
-            f"{rootc.temp_dir}/terraform-plugins/terraform-provider-null_v3.2.1*"
+            f"{rootc.temp_dir}/terraform-plugins/registry.terraform.io/hashicorp/null/*null*3.2.1*.zip"
         )
-        assert len(files) > 0
+        assert len(files) == 1
         for afile in files:
             assert os.path.isfile(afile)
             assert (os.stat(afile).st_mode & 0o777) == 0o755

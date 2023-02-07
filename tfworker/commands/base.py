@@ -48,6 +48,8 @@ class BaseCommand:
         rootc.add_arg("deployment", deployment)
         rootc.load_config()
 
+        self._provider_cache = self._resolve_arg("provider_cache")
+
         (self._tf_version_major, self._tf_version_minor) = self._resolve_arg(
             "tf_version"
         ) or (None, None)
@@ -101,7 +103,7 @@ class BaseCommand:
                 vals["source"] = source
             plugins_odict[str(provider)] = vals
         self._plugins = PluginsCollection(
-            plugins_odict, self._temp_dir, self._tf_version_major
+            plugins_odict, self._temp_dir, self._provider_cache, self._tf_version_major
         )
         self._backend = select_backend(
             self._resolve_arg("backend"),

@@ -31,9 +31,10 @@ class PluginSourceParseException(Exception):
 
 
 class PluginsCollection(collections.abc.Mapping):
-    def __init__(self, body, temp_dir, tf_version_major):
+    def __init__(self, body, temp_dir, cache_dir, tf_version_major):
         self._plugins = body
         self._temp_dir = temp_dir
+        self._cache_dir = cache_dir
         self._tf_version_major = tf_version_major
 
     def __len__(self):
@@ -47,19 +48,9 @@ class PluginsCollection(collections.abc.Mapping):
     def __iter__(self):
         return iter(self._providers.values())
 
-    @retry(
-        wait=wait_chain(
-            wait_fixed(5),
-            wait_fixed(30),
-            wait_fixed(60),
-            wait_fixed(180),
-            wait_fixed(300),
-        ),
-        stop=stop_after_attempt(5),
-    )
     def download(self):
         """
-        Download the required plugins.
+        Download the required plugins; or put them in place from the cache dir
 
         This could be further optimized to not download plugins from hashicorp,
         but rather have them in a local repository or host them in s3, and get
@@ -75,73 +66,37 @@ class PluginsCollection(collections.abc.Mapping):
 
         if not os.path.isdir(plugin_dir):
             os.mkdir(plugin_dir)
+
+        # for each plugin, check if it exists in the cache directory if not download it
+        # if it does exist, put it into the rendered terraform plugin cache
+
         for name, details in self._plugins.items():
             uri = get_url(name, details)
             file_name = uri.split("/")[-1]
+            source = PluginSource(name, details)
+            provider_path = os.path.join(source.host, source.namespace, name)
 
-            click.secho(
-                f"getting plugin: {name} version {details['version']} from {uri}",
-                fg="yellow",
-            )
+            cache_hit = False
+            if self._cache_dir is not None:
+                cache_hit = check_cache(
+                    os.path.join(self._cache_dir, provider_path),
+                    os.path.join(plugin_dir, provider_path),
+                    name,
+                    details["version"],
+                    _platform,
+                )
 
-            with urllib.request.urlopen(uri) as response, open(
-                f"{plugin_dir}/{file_name}", "wb"
-            ) as plug_file:
-                shutil.copyfileobj(response, plug_file)
-            with zipfile.ZipFile(f"{plugin_dir}/{file_name}") as zip_file:
-                zip_file.extractall(f"{plugin_dir}/{_platform}")
-            os.remove(f"{plugin_dir}/{file_name}")
-
-            files = glob.glob(f"{plugin_dir}/{_platform}/terraform-provider*")
-            for afile in files:
-                os.chmod(afile, 0o755)
-                filename = os.path.basename(afile)
-                if self._tf_version_major >= 13:
-                    source = PluginSource(name, details)
-                    host_dir = os.path.join(plugin_dir, source.host)
-                    namespace_dir = os.path.join(host_dir, source.namespace)
-                    provider_dir = os.path.join(namespace_dir, name)
-                    version_dir = os.path.join(provider_dir, details["version"])
-                    platform_dir = os.path.join(version_dir, _platform)
-                    os.makedirs(platform_dir, exist_ok=True)
-                    os.rename(afile, os.path.join(platform_dir, filename))
-                else:
-                    os.rename(afile, f"{plugin_dir}/{filename}")
-
-            click.secho(f"plugin installed to: {plugin_dir}/{_platform}/", fg="yellow")
-
-
-def get_url(name, details):
-    """
-    Determine the URL for the plugin
-
-    get URL returns a fully qualifed URL, including the file name.
-
-    In order to support third party terraform plugins we can not
-    assume the hashicorp repository. It will function as a default,
-    but if baseURL is provided in the plugin settings it will be
-    used instead. The logic to determine the complete remote path
-    will also be here to simplify the logic in the download method.
-    """
-    opsys, machine = get_platform()
-    _platform = f"{opsys}_{machine}"
-
-    try:
-        version = details["version"]
-    except KeyError:
-        raise KeyError(f"version must be specified for plugin {name}")
-
-    # set the file name, allow it to be overridden with key "filename"
-    default_file_name = f"terraform-provider-{name}_{version}_{_platform}.zip"
-    file_name = details.get("filename", default_file_name)
-
-    # set the base url, allow it to be overridden with key "baseURL"
-    default_base_url = (
-        f"https://releases.hashicorp.com/terraform-provider-{name}/{version}"
-    )
-    base_uri = details.get("baseURL", default_base_url).rstrip("/")
-
-    return f"{base_uri}/{file_name}"
+            if cache_hit is False:
+                # the provider cache is not populated, download and put the plugin in place
+                download_from_remote(
+                    uri,
+                    plugin_dir,
+                    self._cache_dir,
+                    provider_path,
+                    file_name,
+                    name,
+                    details,
+                )
 
 
 class PluginSource:
@@ -176,3 +131,108 @@ class PluginSource:
 
     def __repr__(self):
         return json.dumps(self.__dict__)
+
+
+@retry(
+    wait=wait_chain(
+        wait_fixed(2),
+        wait_fixed(5),
+        wait_fixed(10),
+    ),
+    stop=stop_after_attempt(3),
+)
+def download_from_remote(
+    uri, plugin_dir, cache_dir, provider_path, file_name, name, details
+):
+    """
+    download_and_extract_from_remote handles downloading a plugin from the hashicorp
+    provider registry, retries according to the decorator, and optionally places
+    downloaded plugins into a local provider cache
+    """
+    opsys, machine = get_platform()
+    _platform = f"{opsys}_{machine}"
+
+    click.secho(
+        f"downloading plugin: {name} version {details['version']} from {uri}",
+        fg="yellow",
+    )
+
+    # download the remote file
+    with urllib.request.urlopen(uri) as response, open(
+        f"{plugin_dir}/{file_name}", "wb"
+    ) as plug_file:
+        shutil.copyfileobj(response, plug_file)
+
+    # put the file into the working provider directory and cache if necessary
+    files = glob.glob(
+        f"{plugin_dir}/terraform-provider*-{name}_{details['version']}*_{_platform}*"
+    )
+    for afile in files:
+        os.chmod(afile, 0o755)
+        filename = os.path.basename(afile)
+        # handle populating cache
+        if cache_dir is not None:
+            os.makedirs(os.path.join(cache_dir, provider_path), exist_ok=True)
+            shutil.copy(afile, os.path.join(cache_dir, provider_path))
+            click.secho(
+                f"saved plugin to cache: {name} version {details['version']}",
+                fg="yellow",
+            )
+        os.makedirs(os.path.join(plugin_dir, provider_path), exist_ok=True)
+        os.rename(afile, os.path.join(plugin_dir, provider_path, filename))
+        click.secho(f"plugin installed to: {plugin_dir}/{provider_path}/", fg="yellow")
+
+
+def check_cache(cache_path, plugin_path, name, version, platform):
+    """
+    Determine if the required plugin version already exists in the cache
+    """
+    # the cache dir doesn't exist, so there's no cache
+    if not os.path.exists(cache_path):
+        return False
+
+    files = glob.glob(f"{cache_path}/terraform-provider*-{name}_{version}*_{platform}*")
+    for afile in files:
+        os.makedirs(plugin_path, exist_ok=True)
+        shutil.copy(afile, plugin_path)
+        click.secho(
+            f"using cached provider {name}:{version} from {afile}",
+            fg="yellow",
+        )
+        return True
+
+    # if arrived here, the expected provider package didn't exist
+    return False
+
+
+def get_url(name, details):
+    """
+    Determine the URL for the plugin
+
+    get URL returns a fully qualifed URL, including the file name.
+
+    In order to support third party terraform plugins we can not
+    assume the hashicorp repository. It will function as a default,
+    but if baseURL is provided in the plugin settings it will be
+    used instead. The logic to determine the complete remote path
+    will also be here to simplify the logic in the download method.
+    """
+    opsys, machine = get_platform()
+    _platform = f"{opsys}_{machine}"
+
+    try:
+        version = details["version"]
+    except KeyError:
+        raise KeyError(f"version must be specified for plugin {name}")
+
+    # set the file name, allow it to be overridden with key "filename"
+    default_file_name = f"terraform-provider-{name}_{version}_{_platform}.zip"
+    file_name = details.get("filename", default_file_name)
+
+    # set the base url, allow it to be overridden with key "baseURL"
+    default_base_url = (
+        f"https://releases.hashicorp.com/terraform-provider-{name}/{version}"
+    )
+    base_uri = details.get("baseURL", default_base_url).rstrip("/")
+
+    return f"{base_uri}/{file_name}"
