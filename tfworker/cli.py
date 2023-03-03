@@ -23,6 +23,7 @@ import click
 
 from tfworker import constants as const
 from tfworker.commands import CleanCommand, RootCommand, TerraformCommand
+from tfworker.commands.env import EnvCommand
 from tfworker.commands.root import get_platform
 from tfworker.commands.version import VersionCommand
 
@@ -326,6 +327,15 @@ def terraform(rootc, *args, **kwargs):
     tfc.prep_modules()
 
     tfc.exec()
+    sys.exit(0)
+
+
+@cli.command()
+@click.pass_obj
+def env(rootc, *args, **kwargs):
+    # provide environment variables from backend to configure shell environment
+    env = EnvCommand(rootc, *args, **kwargs)
+    env.exec()
     sys.exit(0)
 
 
