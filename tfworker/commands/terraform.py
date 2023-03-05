@@ -133,11 +133,6 @@ class TerraformCommand(BaseCommand):
 
             # check if a plan file for the given deployment/definition exists, if so
             # do not plan again
-            click.secho(
-                f"planning definition for {self._plan_for}: {definition.tag}",
-                fg="green",
-            )
-
             if plan_file is not None:
                 # if plan file is set, check if it exists, if it does do not plan again
                 if plan_file.exists():
@@ -147,6 +142,11 @@ class TerraformCommand(BaseCommand):
 
             if skip_plan is False and self._tf_plan:
                 # run terraform plan
+                click.secho(
+                    f"planning definition for {self._plan_for}: {definition.tag}",
+                    fg="green",
+                )
+
                 try:
                     self._run(
                         definition,

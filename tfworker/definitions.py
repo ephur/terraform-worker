@@ -62,6 +62,9 @@ class Definition:
         self._terraform_vars = self.make_vars(
             body.get("terraform_vars", collections.OrderedDict()), global_terraform_vars
         )
+        self._template_vars = self.make_vars(
+            body.get("template_vars", collections.OrderedDict()), {}
+        )
 
         self._deployment = deployment
         self._repository_path = repository_path
@@ -127,7 +130,7 @@ class Definition:
 
         # render the templates
         if self._template_callback is not None:
-            self._template_callback(self._target)
+            self._template_callback(self._target, template_vars=self._template_vars)
 
         # Create local vars from remote data sources
         if len(list(self._remote_vars.keys())) > 0:
@@ -270,7 +273,7 @@ class DefinitionsCollection(collections.abc.Mapping):
         else:
             return iter(filter(lambda d: d.limited, self.iter(honor_destroy=True)))
 
-    def render_templates(self, template_path):
+    def render_templates(self, template_path, template_vars={}):
         """ render all the .tf.j2 files in a path, and rename them to .tf """
 
         def filter_templates(filename):
@@ -283,7 +286,7 @@ class DefinitionsCollection(collections.abc.Mapping):
         )
         jinja_env.globals = self._root_args.template_items(
             return_as_dict=True, get_env=True
-        )
+        ) | { "var": template_vars }
 
         for template_file in jinja_env.list_templates(filter_func=filter_templates):
             template_target = (
@@ -291,26 +294,28 @@ class DefinitionsCollection(collections.abc.Mapping):
             )
 
             try:
-                with open(template_target, "x") as f:
-                    try:
-                        f.writelines(jinja_env.get_template(template_file).generate())
-                        click.secho(
-                            f"rendered {template_file} into {template_target}",
-                            fg="yellow",
-                        )
-                    except jinja2.exceptions.UndefinedError as e:
-                        click.secho(
-                            f"file contains invalid template substitutions: {e}",
-                            fg="red",
-                        )
-                        raise SystemExit()
-
-            except FileExistsError():
+                f = open(template_target, "x")
+            except FileExistsError:
                 click.secho(
-                    f"ERROR: {template_target} already exists! Make sure there's not a .tf and .tf.j2 of this file",
+                    f"ERROR: {template_target} already exists! Make sure there's not a .tf and .tf.j2 copy of this file",
                     fg="red",
                 )
-                raise SystemExit()
+                raise SystemExit(1)
+
+            try:
+                f.writelines(jinja_env.get_template(template_file).generate())
+                click.secho(
+                    f"rendered {template_file} into {template_target}",
+                    fg="yellow",
+                )
+            except jinja2.exceptions.UndefinedError as e:
+                click.secho(
+                    f"file contains invalid template substitutions: {e}",
+                    fg="red",
+                )
+                raise SystemExit(1)
+            finally:
+                f.close()
 
     @property
     def body(self):
