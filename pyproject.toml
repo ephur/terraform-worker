@@ -60,6 +60,9 @@ deepdiff = "^5.3.0"
 [tool.poetry.scripts]
 worker = 'tfworker.cli:cli'
 
+[tool.poetry.group.dev.dependencies]
+pytest-timeout = "2.1.0"
+
 [tool.pytest.ini_options]
 addopts = "--capture=sys --cov=tfworker --cov-report="
 

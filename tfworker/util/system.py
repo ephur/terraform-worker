@@ -15,14 +15,14 @@ import os
 import shlex
 import subprocess
 
+import click
 
-def pipe_exec(args, stdin=None, cwd=None, env=None):
+def pipe_exec(args, stdin=None, cwd=None, env=None, stream_output=False):
     """
     A function to accept a list of commands and pipe them together.
 
     Takes optional stdin to give to the first item in the pipe chain.
     """
-    count = 0  # int used to manage communication between processes
     commands = []  # listed used to hold all the popen objects
 
     # use the default environment if one is not specified
@@ -42,29 +42,81 @@ def pipe_exec(args, stdin=None, cwd=None, env=None):
     }
     popen_stdin_kwargs = {}
     communicate_kwargs = {}
+
+    if stream_output is True:
+        popen_kwargs["bufsize"] = 1
+        popen_kwargs["universal_newlines"] = True
+
     if stdin is not None:
         popen_stdin_kwargs["stdin"] = subprocess.PIPE
         communicate_kwargs["input"] = stdin.encode()
 
-    # handle the first process
+    if len(args) == 1 and stream_output is True:
+        popen_kwargs["stderr"] = subprocess.STDOUT
+
+    # handle the first command, requires distinct handling
     i = args.pop(0)
     commands.append(
         subprocess.Popen(shlex.split(i), **popen_kwargs, **popen_stdin_kwargs)
     )
 
-    # handle any additional arguments
-    for i in args:
-        popen_kwargs["stdin"] = commands[count].stdout
-        commands.append(subprocess.Popen(shlex.split(i), **popen_kwargs))
-        commands[count].stdout.close()
-        count = count + 1
+    # handle any additional commands
+    # every process now gets stdin as a pipe
+    for i, cmd_str in enumerate(args):
+        lastloop = True if len(args) - 1 == i else False
+        popen_kwargs["stdin"] = commands[-1].stdout
 
-    # communicate with first command, ensure it gets any optional input
-    commands[0].communicate(**communicate_kwargs)
+        if lastloop and stream_output:
+            popen_kwargs["stderr"] = subprocess.STDOUT
 
-    # communicate with final command, which will trigger the entire pipeline
-    stdout, stderr = commands[-1].communicate()
-    returncode = commands[-1].returncode
+        commands.append(subprocess.Popen(shlex.split(args[i]), **popen_kwargs))
+
+        # close stdout on the command before we just added to allow recieving SIGPIPE
+        commands[-2].stdout.close()
+
+    if stream_output is True:
+        # in order to stream the output, stderr and stdout streams must be combined to avoid
+        # any potential blocking, for this reason the execution methods are different
+        stdout = ""
+
+        # if there is more than one command we need to use communicate on the first to send
+        # in stdin and still allowing the pipeline to properly process
+        if len(commands) > 1:
+            # communicate in this instance needs a string type object, not bytes
+            communicate_kwargs["input"] = stdin
+            commands[0].communicate(**communicate_kwargs)
+
+        else:
+            # if it's just a single command we can not use communicate or we will not be able
+            # to stream the output, so write directly to stdin
+            if stdin is not None and len(commands) == 1:
+                commands[0].stdin.write(stdin + "\n")
+                commands[0].stdin.close()
+
+        # for a single command this will be the only command, for a pipeline reading from the
+        # last command will trigger all of the commands, communicating through their pipes
+        for line in iter(commands[-1].stdout.readline, ""):
+            click.secho(line.rstrip())
+            stdout += line
+
+        # for streaming output stderr will be included with stdout, there's no way to make
+        # a distinction, so stderr will always be an empty bytes object
+        stderr = "".encode()
+        stdout = stdout.encode()
+        returncode = commands[-1].poll()
+
+    else:
+        # if stdin is not None:
+        if len(commands) > 1:
+            # in this case communicate_kwargs must only be passed to the first
+            # command in the pipe, and must NOT be passed to any other as the stdout/stdin
+            # is chained between the piped commands
+            commands[0].communicate(**communicate_kwargs)
+            stdout, stderr = commands[-1].communicate()
+            returncode = commands[-1].returncode
+        else:
+            stdout, stderr = commands[0].communicate(**communicate_kwargs)
+            returncode = commands[0].returncode
 
     return (returncode, stdout, stderr)
 

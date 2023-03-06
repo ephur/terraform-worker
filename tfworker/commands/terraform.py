@@ -53,6 +53,9 @@ class TerraformCommand(BaseCommand):
         self._deployment = kwargs["deployment"]
         self._force = self._resolve_arg("force")
         self._show_output = self._resolve_arg("show_output")
+        # streaming doesn't allow for distinction between stderr and stdout, but allows
+        # terraform operations to be viewed before the process is completed
+        self._stream_output = self._resolve_arg("stream_output")
         self._terraform_modules_dir = self._resolve_arg("terraform_modules_dir")
 
     @property
@@ -133,11 +136,6 @@ class TerraformCommand(BaseCommand):
 
             # check if a plan file for the given deployment/definition exists, if so
             # do not plan again
-            click.secho(
-                f"planning definition for {self._plan_for}: {definition.tag}",
-                fg="green",
-            )
-
             if plan_file is not None:
                 # if plan file is set, check if it exists, if it does do not plan again
                 if plan_file.exists():
@@ -147,6 +145,11 @@ class TerraformCommand(BaseCommand):
 
             if skip_plan is False and self._tf_plan:
                 # run terraform plan
+                click.secho(
+                    f"planning definition for {self._plan_for}: {definition.tag}",
+                    fg="green",
+                )
+
                 try:
                     self._run(
                         definition,
@@ -231,8 +234,6 @@ class TerraformCommand(BaseCommand):
         for auth in self._authenticators:
             env.update(auth.env())
 
-        # env["TF_PLUGIN_CACHE_DIR"] = f"{self._temp_dir}/terraform-plugins"
-
         working_dir = f"{self._temp_dir}/definitions/{definition.tag}"
         command_params = params.get(command)
         if not command_params:
@@ -276,13 +277,27 @@ class TerraformCommand(BaseCommand):
             f"{self._terraform_bin} {command} {command_params}",
             cwd=working_dir,
             env=env,
+            stream_output=self._stream_output,
         )
-        if debug:
-            click.secho(f"exit code: {exit_code}", fg="blue")
+        click.secho(f"exit code: {exit_code}", fg="blue")
+
+        if debug and not self._stream_output:
             for line in stdout.decode().splitlines():
                 click.secho(f"stdout: {line}", fg="blue")
             for line in stderr.decode().splitlines():
                 click.secho(f"stderr: {line}", fg="red")
+
+        # If a plan file was saved, write the plan output
+        if plan_file is not None:
+            plan_log = f"{os.path.splitext(plan_file)[0]}.log"
+
+            with open(plan_log, 'w') as pl:
+                pl.write("STDOUT:\n")
+                for line in stdout.decode().splitlines():
+                    pl.write(f"{line}\n")
+                pl.write("\nSTDERR:\n")
+                for line in stderr.decode().splitlines():
+                    pl.write(f"{line}\n")
 
         # special handling of the exit codes for "plan" operations
         if command == "plan":
