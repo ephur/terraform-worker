@@ -1390,6 +1390,21 @@ files = [
 pytest = ">=3.2.5"
 
 [[package]]
+name = "pytest-timeout"
+version = "2.1.0"
+description = "pytest plugin to abort hanging tests"
+category = "dev"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "pytest-timeout-2.1.0.tar.gz", hash = "sha256:c07ca07404c612f8abbe22294b23c368e2e5104b521c1790195561f37e1ac3d9"},
+    {file = "pytest_timeout-2.1.0-py3-none-any.whl", hash = "sha256:f6f50101443ce70ad325ceb4473c4255e9d74e3c7cd0ef827309dfa4c0d975c6"},
+]
+
+[package.dependencies]
+pytest = ">=5.0.0"
+
+[[package]]
 name = "python-dateutil"
 version = "2.8.2"
 description = "Extensions to the standard Python datetime module"
@@ -2020,4 +2035,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "04dfe20cb4f2282a65216b5b1a554f961d807817ca17838c966f8eee14cbc6d1"
+content-hash = "e68049eae1d997f4a8471d1f039e23073e663af1064562ea15aee2a1c5a827e4"

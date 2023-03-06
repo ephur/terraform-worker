@@ -34,7 +34,13 @@ def does_not_raise():
     yield
 
 
-def mock_pipe_exec(args: str, stdin: str = None, cwd: str = None, env: list = None):
+def mock_pipe_exec(
+    args: str,
+    stdin: str = None,
+    cwd: str = None,
+    env: list = None,
+    stream_output: bool = False,
+):
     return (0, "".encode(), "".encode())
 
 

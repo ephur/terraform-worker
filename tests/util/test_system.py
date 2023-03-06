@@ -36,13 +36,18 @@ def mock_tf_version(args: str):
 
 class TestUtilSystem:
     @pytest.mark.parametrize(
-        "commands, exit_code, cwd, stdin, stdout, stderr",
+        "commands, exit_code, cwd, stdin, stdout, stderr, stream_output",
         [
-            ("/usr/bin/env true", 0, None, None, "", ""),
-            ("/usr/bin/env false", 1, None, None, "", ""),
-            ("/bin/echo foo", 0, None, None, "foo", ""),
-            ("/usr/bin/env grep foo", 0, None, "foo", "foo", ""),
-            ("/bin/pwd", 0, "/tmp", None, "/tmp", ""),
+            ("/usr/bin/env true", 0, None, None, "", "", False),
+            ("/usr/bin/env true", 0, None, None, "", "", True),
+            ("/usr/bin/env false", 1, None, None, "", "", False),
+            ("/usr/bin/env false", 1, None, None, "", "", True),
+            ("/bin/echo foo", 0, None, None, "foo", "", False),
+            ("/bin/echo foo", 0, None, None, "foo", "", True),
+            ("/usr/bin/env grep foo", 0, None, "foo", "foo", "", False),
+            ("/usr/bin/env grep foo", 0, None, "foo", "foo", "", True),
+            ("/bin/pwd", 0, "/tmp", None, "/tmp", "", False),
+            ("/bin/pwd", 0, "/tmp", None, "/tmp", "", True),
             (
                 "/bin/cat /yisohwo0AhK8Ah ",
                 1,
@@ -50,15 +55,47 @@ class TestUtilSystem:
                 None,
                 "",
                 "/bin/cat: /yisohwo0AhK8Ah: No such file or directory",
+                False,
             ),
-            (["/bin/echo foo", "/usr/bin/env grep foo"], 0, None, None, "foo", ""),
-            (["/bin/echo foo", "/usr/bin/env grep bar"], 1, None, None, "", ""),
-            (["/bin/cat", "/usr/bin/env grep foo"], 0, None, "foo", "foo", ""),
+            (
+                "/bin/cat /yisohwo0AhK8Ah ",
+                1,
+                None,
+                None,
+                "",
+                "/bin/cat: /yisohwo0AhK8Ah: No such file or directory",
+                True,
+            ),
+            (
+                ["/bin/echo foo", "/usr/bin/env grep foo"],
+                0,
+                None,
+                None,
+                "foo",
+                "",
+                False,
+            ),
+            (
+                ["/bin/echo foo", "/usr/bin/env grep foo"],
+                0,
+                None,
+                None,
+                "foo",
+                "",
+                True,
+            ),
+            (["/bin/echo foo", "/usr/bin/env grep bar"], 1, None, None, "", "", False),
+            (["/bin/echo foo", "/usr/bin/env grep bar"], 1, None, None, "", "", True),
+            (["/bin/cat", "/usr/bin/env grep foo"], 0, None, "foo", "foo", "", False),
+            (["/bin/cat", "/usr/bin/env grep foo"], 0, None, "foo", "foo", "", True),
         ],
     )
-    def test_pipe_exec(self, commands, exit_code, cwd, stdin, stdout, stderr):
+    @pytest.mark.timeout(2)
+    def test_pipe_exec(
+        self, commands, exit_code, cwd, stdin, stdout, stderr, stream_output
+    ):
         (return_exit_code, return_stdout, return_stderr) = pipe_exec(
-            commands, cwd=cwd, stdin=stdin
+            commands, cwd=cwd, stdin=stdin, stream_output=stream_output
         )
 
         assert return_exit_code == exit_code

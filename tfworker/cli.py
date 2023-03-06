@@ -311,6 +311,12 @@ def version():
     default=None,
     help="if provided this directory will be used as a cache for provider plugins",
 )
+@click.option(
+    "--stream-output/--no-stream-output",
+    help="stream the output from terraform command",
+    envvar="WORKER_STREAM_OUTPUT",
+    default=True,
+)
 @click.argument("deployment", envvar="WORKER_DEPLOYMENT", callback=validate_deployment)
 @click.pass_obj
 def terraform(rootc, *args, **kwargs):
