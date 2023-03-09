@@ -139,7 +139,8 @@ class TerraformCommand(BaseCommand):
             if plan_file is not None:
                 # if plan file is set, check if it exists, if it does do not plan again
                 if plan_file.exists():
-                    click.secho(f"plan file {plan_file} exists, not planning again")
+                    if self._tf_plan:
+                        click.secho(f"plan file {plan_file} exists, not planning again")
                     execute = True
                     skip_plan = True
 
@@ -291,7 +292,7 @@ class TerraformCommand(BaseCommand):
         if plan_file is not None:
             plan_log = f"{os.path.splitext(plan_file)[0]}.log"
 
-            with open(plan_log, 'w') as pl:
+            with open(plan_log, "w") as pl:
                 pl.write("STDOUT:\n")
                 for line in stdout.decode().splitlines():
                     pl.write(f"{line}\n")

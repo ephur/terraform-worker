@@ -21,6 +21,7 @@ from typing import OrderedDict
 import click
 import hcl2
 import jinja2
+from mergedeep import merge
 
 from tfworker import constants as const
 from tfworker.util.copier import CopyFactory
@@ -284,9 +285,11 @@ class DefinitionsCollection(collections.abc.Mapping):
             undefined=jinja2.StrictUndefined,
             loader=jinja2.FileSystemLoader(template_path),
         )
-        jinja_env.globals = self._root_args.template_items(
-            return_as_dict=True, get_env=True
-        ) | { "var": template_vars }
+        jinja_env.globals = merge(
+            {},
+            self._root_args.template_items(return_as_dict=True, get_env=True),
+            {"var": template_vars},
+        )
 
         for template_file in jinja_env.list_templates(filter_func=filter_templates):
             template_target = (

@@ -17,6 +17,7 @@ import subprocess
 
 import click
 
+
 def pipe_exec(args, stdin=None, cwd=None, env=None, stream_output=False):
     """
     A function to accept a list of commands and pipe them together.
