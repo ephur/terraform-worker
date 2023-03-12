@@ -71,7 +71,7 @@ class S3Backend(BaseBackend):
                     self._s3_client.create_bucket(
                         Bucket=self._authenticator.bucket,
                         CreateBucketConfiguration={
-                            "LocationConstraint": self._authenticator.region
+                            "LocationConstraint": self._authenticator.backend_region
                         },
                         ACL="private",
                     )

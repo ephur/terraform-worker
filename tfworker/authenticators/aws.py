@@ -36,7 +36,7 @@ class AWSAuthenticator(BaseAuthenticator):
             raise MissingArgumentException("backend_bucket is a required argument")
 
         self.access_key_id = self._resolve_arg("aws_access_key_id")
-        self.backend_region = self._resolve_arg("aws_region")
+        self.backend_region = self._resolve_arg("backend_region")
         self.prefix = self._resolve_arg("backend_prefix")
         self.profile = self._resolve_arg("aws_profile")
         self.region = self._resolve_arg("aws_region")
