@@ -56,6 +56,7 @@ class TerraformCommand(BaseCommand):
         # streaming doesn't allow for distinction between stderr and stdout, but allows
         # terraform operations to be viewed before the process is completed
         self._stream_output = self._resolve_arg("stream_output")
+        self._use_colors = True if self._resolve_arg("color") else False
         self._terraform_modules_dir = self._resolve_arg("terraform_modules_dir")
 
     @property
@@ -217,11 +218,13 @@ class TerraformCommand(BaseCommand):
         self, definition, command, debug=False, plan_action="init", plan_file=None
     ):
         """Run terraform."""
+
+        color_str = "-no-color" if self._use_colors is False else ""
         params = {
-            "init": f"-input=false -no-color -plugin-dir={self._temp_dir}/terraform-plugins",
-            "plan": "-input=false -detailed-exitcode -no-color",
-            "apply": "-input=false -no-color -auto-approve",
-            "destroy": "-input=false -no-color -auto-approve",
+            "init": f"-input=false {color_str} -plugin-dir={self._temp_dir}/terraform-plugins",
+            "plan": f"-input=false -detailed-exitcode {color_str}",
+            "apply": f"-input=false {color_str} -auto-approve",
+            "destroy": f"-input=false {color_str} -auto-approve",
         }
 
         if plan_action == "destroy":
@@ -232,6 +235,12 @@ class TerraformCommand(BaseCommand):
             params["apply"] += f" {plan_file}"
 
         env = os.environ.copy()
+
+        # acknowledge that we are using a plugin cache; and compute the lockfile each run
+        env["TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE"] = "1"
+        # reduce non essential terraform output
+        env["TF_IN_AUTOMATION"] = "1"
+
         for auth in self._authenticators:
             env.update(auth.env())
 
