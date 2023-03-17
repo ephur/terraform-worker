@@ -317,6 +317,12 @@ def version():
     envvar="WORKER_STREAM_OUTPUT",
     default=True,
 )
+@click.option(
+    "--color/--no-color",
+    help="colorize the output from terraform command",
+    envvar="WORKER_COLOR",
+    default=False,
+)
 @click.argument("deployment", envvar="WORKER_DEPLOYMENT", callback=validate_deployment)
 @click.pass_obj
 def terraform(rootc, *args, **kwargs):
