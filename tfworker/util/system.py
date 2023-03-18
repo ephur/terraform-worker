@@ -25,7 +25,6 @@ def pipe_exec(args, stdin=None, cwd=None, env=None, stream_output=False):
     Takes optional stdin to give to the first item in the pipe chain.
     """
     commands = []  # listed used to hold all the popen objects
-
     # use the default environment if one is not specified
     if env is None:
         env = os.environ.copy()
@@ -104,6 +103,7 @@ def pipe_exec(args, stdin=None, cwd=None, env=None, stream_output=False):
         # a distinction, so stderr will always be an empty bytes object
         stderr = "".encode()
         stdout = stdout.encode()
+        commands[-1].wait()
         returncode = commands[-1].poll()
 
     else:
@@ -123,7 +123,7 @@ def pipe_exec(args, stdin=None, cwd=None, env=None, stream_output=False):
 
 
 def which(program):
-    """ From stack overflow """
+    """From stack overflow"""
 
     def is_exe(fpath):
         return os.path.isfile(fpath) and os.access(fpath, os.X_OK)

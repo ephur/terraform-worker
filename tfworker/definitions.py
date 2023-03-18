@@ -91,7 +91,7 @@ class Definition:
 
     @property
     def provider_names(self):
-        """ Extract only the providers used by a definition """
+        """Extract only the providers used by a definition"""
         result = set(self._providers.keys())
         version_path = PurePath(self._target) / "versions.tf"
         if Path(version_path).exists():
@@ -106,7 +106,7 @@ class Definition:
         return result
 
     def prep(self, backend):
-        """ prepare the definitions for running """
+        """prepare the definitions for running"""
 
         # prep the definitions
         try:
@@ -275,10 +275,10 @@ class DefinitionsCollection(collections.abc.Mapping):
             return iter(filter(lambda d: d.limited, self.iter(honor_destroy=True)))
 
     def render_templates(self, template_path, template_vars={}):
-        """ render all the .tf.j2 files in a path, and rename them to .tf """
+        """render all the .tf.j2 files in a path, and rename them to .tf"""
 
         def filter_templates(filename):
-            """ a small function to filter the list of files down to only j2 templates """
+            """a small function to filter the list of files down to only j2 templates"""
             return filename.endswith(".tf.j2")
 
         jinja_env = jinja2.Environment(

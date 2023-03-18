@@ -20,7 +20,7 @@ from unittest import mock
 
 import boto3
 import pytest
-from moto import mock_dynamodb2, mock_s3, mock_sts
+from moto import mock_dynamodb, mock_s3, mock_sts
 from pytest_lazyfixture import lazy_fixture
 
 import tfworker
@@ -76,7 +76,7 @@ def s3_client(aws_credentials):
 
 @pytest.fixture(scope="class")
 def dynamodb_client(aws_credentials):
-    with mock_dynamodb2():
+    with mock_dynamodb():
         yield boto3.client("dynamodb", region_name="us-west-2")
 
 

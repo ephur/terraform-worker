@@ -1,5 +1,5 @@
-terraform {
-  providers {
+terraform = {
+  providers = {
     aws = {
       requirements = {
         version = "2.63.0"
@@ -20,14 +20,16 @@ terraform {
     }
   }
 
-  terraform_vars {
+  terraform_vars = {
     environment = "dev"
 
-    makerenvironment = "Development"
-    makerenvironment = "dev"
+    makerenvironment = [
+      "Development",
+      "dev"
+    ]
     region = "{{ aws_region }}"
   }
-  definitions {
+  definitions = {
     tags = {
       path = "/definitions/aws/misc-tags"
 

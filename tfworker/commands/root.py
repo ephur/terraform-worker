@@ -22,12 +22,10 @@ import tempfile
 from collections import OrderedDict
 
 import click
+import hcl2
 import jinja2
 import yaml
-from hcl2.lark_parser import Lark_StandAlone
 from jinja2.runtime import StrictUndefined
-
-import tfworker.util.hcl2_transformer as hcl2_transformer
 
 
 class RootCommand:
@@ -105,7 +103,7 @@ class RootCommand:
 
             # A little arbitrary, but decorate the top two levels
             # directly on self object
-            self.tf = self.config.get("terraform", OrderedDict())
+            self.tf = self.config.get("terraform", dict())
             self._pullup_keys()
             self._merge_args()
         except jinja2.exceptions.TemplateNotFound as e:
@@ -131,7 +129,7 @@ class RootCommand:
             "worker_options",
         ]:
             if self.tf:
-                setattr(self, f"{k}_odict", self.tf.get(k, OrderedDict()))
+                setattr(self, f"{k}_odict", self.tf.get(k, dict()))
             else:
                 setattr(self, f"{k}_odict", None)
 
@@ -198,76 +196,19 @@ def get_config_var_dict(config_vars):
     return return_vars
 
 
-def replace_hcl_vars(hcl, args):
-    if isinstance(hcl, dict):
-        for key in hcl.keys():
-            hcl[key] = replace_hcl_vars(hcl[key], args)
-    elif isinstance(hcl, list):
-        for i in range(len(hcl)):
-            hcl[i] = replace_hcl_vars(hcl[i], args)
-    elif isinstance(hcl, str):
-        return replace_vars(hcl, args)
-    return hcl
-
-
-def ordered_config_load_hcl(stream, args):
+def ordered_config_load_hcl(stream, args) -> dict:
     """
     Load an hcl config, and replace templated items.
-
-    Derived from:
-    https://stackoverflow.com/questions/5121931/in-python-how-can-you-load-yaml-mappings-as-ordereddicts
     """
-    hcl2_ordered = Lark_StandAlone(
-        transformer=hcl2_transformer.OrderedDictTransformer()
-    )
-    doc = hcl2_ordered.parse(stream + "\n")
-    return replace_hcl_vars(doc, args)
+    return hcl2.loads(stream)
 
 
-def ordered_config_load(
-    stream, args, Loader=yaml.SafeLoader, object_pairs_hook=OrderedDict
-):
+def ordered_config_load(stream, args) -> dict:
     """
-    Load a yaml config, and replace templated items.
-
-    Derived from:
-    https://stackoverflow.com/questions/5121931/in-python-how-can-you-load-yaml-mappings-as-ordereddicts
+    since python 3.7 the yaml loader is deterministic, so we can
+    use the standard yaml loader
     """
-
-    class OrderedLoader(Loader):
-        pass
-
-    def construct_mapping(loader, node):
-        for item in node.value:
-            if isinstance(item, tuple):
-                for oneitem in item:
-                    if isinstance(oneitem, yaml.ScalarNode):
-                        oneitem.value = replace_vars(oneitem.value, args)
-
-        loader.flatten_mapping(node)
-        return object_pairs_hook(loader.construct_pairs(node))
-
-    OrderedLoader.add_constructor(
-        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping
-    )
-    return yaml.load(stream, OrderedLoader)
-
-
-def replace_vars(var, args):
-    """Replace variables with template values."""
-    var_pattern = r"//\s*(\S*)\s*//"
-    match = re.match(var_pattern, var, flags=0)
-    if not match:
-        return var
-    try:
-        var = getattr(args, match.group(1).replace("-", "_"))
-        click.secho(
-            f"DEPRECATION WARNING: the use of //{match.group(1)}// substitution is deprecated and will be removed in a future version, use Jinja2 template style: {{{{ {match.group(1)} }}}}",
-            fg="yellow",
-        )
-    except AttributeError:
-        raise (ValueError(f"substitution not found for {var}"))
-    return var
+    return yaml.load(stream)
 
 
 def get_platform():

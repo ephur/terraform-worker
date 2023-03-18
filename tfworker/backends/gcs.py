@@ -62,7 +62,7 @@ class GCSBackend(BaseBackend):
                     )
 
     def _clean_deployment_limit(self, limit: tuple) -> None:
-        """ only clean items within limit """
+        """only clean items within limit"""
         full_state_list = self._get_state_list()
 
         # first validate all items in limit are present before removing anything

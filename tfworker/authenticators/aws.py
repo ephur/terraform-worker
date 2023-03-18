@@ -30,7 +30,7 @@ class AWSAuthenticator(BaseAuthenticator):
 
     def __init__(self, state_args, **kwargs):
         super(AWSAuthenticator, self).__init__(state_args, **kwargs)
-
+        print(state_args)
         self.bucket = self._resolve_arg("backend_bucket")
         if not self.bucket:
             raise MissingArgumentException("backend_bucket is a required argument")
@@ -144,7 +144,7 @@ class AWSAuthenticator(BaseAuthenticator):
         duration=3600,
         external_id="",
     ):
-        """ get_assumed_role_session returns a boto3 session updated with assumed role credentials """
+        """get_assumed_role_session returns a boto3 session updated with assumed role credentials"""
         sts_client = session.client("sts")
         assume_args = {
             "RoleArn": role_arn,

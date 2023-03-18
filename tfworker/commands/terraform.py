@@ -99,7 +99,7 @@ class TerraformCommand(BaseCommand):
         )
 
     def exec(self):
-        """ exec handles running the terraform chain """
+        """exec handles running the terraform chain"""
         skip_plan = False
 
         try:
