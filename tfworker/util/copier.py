@@ -23,13 +23,13 @@ from tfworker.util.system import pipe_exec
 
 
 class CopyFactory:
-    """ The factory class for creating copiers """
+    """The factory class for creating copiers"""
 
     registry = {}
 
     @classmethod
     def register(cls, name: str) -> Callable:
-        """ Class method to register copiers """
+        """Class method to register copiers"""
 
         def inner_wrapper(wrapped_class: Copier) -> Callable:
             if name in cls.registry:
@@ -41,14 +41,14 @@ class CopyFactory:
 
     @classmethod
     def create(cls, source: str, **kwargs) -> "Copier":
-        """ create returns a copier type that supports handling the provided source """
+        """create returns a copier type that supports handling the provided source"""
         copier_class = cls.registry[cls.get_copier_type(source, **kwargs)]
         copier = copier_class(source, **kwargs)
         return copier
 
     @classmethod
     def get_copier_type(cls, source: str, **kwargs) -> str:
-        """ get_copier_type tries to find a supported copier based on the provided source """
+        """get_copier_type tries to find a supported copier based on the provided source"""
         for copier_type, copier_class in cls.registry.items():
             if copier_class.type_match(source, **kwargs):
                 return copier_type
@@ -56,7 +56,7 @@ class CopyFactory:
 
 
 class Copier(metaclass=ABCMeta):
-    """ The base class for definition copiers """
+    """The base class for definition copiers"""
 
     def __init__(self, source: str, **kwargs):
         self._source = source
@@ -76,17 +76,17 @@ class Copier(metaclass=ABCMeta):
 
     @abstractstaticmethod
     def type_match(source: str, **kwargs) -> bool:  # pragma: no cover
-        """ type_match determins if the source is supported/handled by a copier """
+        """type_match determins if the source is supported/handled by a copier"""
         pass
 
     @abstractmethod
     def copy(self, **kwargs) -> None:  # pragma: no cover
-        """ copy executes the copy from the source, into the working path """
+        """copy executes the copy from the source, into the working path"""
         pass
 
     @property
     def root_path(self):
-        """ root_path returns an optional root path to use for relative file operations """
+        """root_path returns an optional root path to use for relative file operations"""
         if hasattr(self, "_root_path"):
             return self._root_path
         else:
@@ -94,7 +94,7 @@ class Copier(metaclass=ABCMeta):
 
     @property
     def conflicts(self):
-        """ conflicts returns a list of disallowed files """
+        """conflicts returns a list of disallowed files"""
         if hasattr(self, "_conflicts"):
             return self._conflicts
         else:
@@ -102,11 +102,11 @@ class Copier(metaclass=ABCMeta):
 
     @property
     def source(self):
-        """ source contains the source path providede """
+        """source contains the source path providede"""
         return self._source
 
     def get_destination(self, make_dir: bool = True, **kwargs) -> str:
-        """ get_destination returns the destination path, and optionally makes the destinatination directory """
+        """get_destination returns the destination path, and optionally makes the destinatination directory"""
         if not (hasattr(self, "_destination") or "destination" in kwargs.keys()):
             raise ValueError("no destination provided")
         if "destination" in kwargs:
@@ -121,7 +121,7 @@ class Copier(metaclass=ABCMeta):
         return d
 
     def check_conflicts(self, path: str) -> None:
-        """ Checks for files with conflicting names in a path """
+        """Checks for files with conflicting names in a path"""
         conflicting = []
         if self.conflicts:
             check_path = Path(path)
@@ -136,7 +136,7 @@ class Copier(metaclass=ABCMeta):
 @CopyFactory.register("git")
 class GitCopier(Copier):
     def copy(self, **kwargs) -> None:
-        """ copy clones a remote git repo, and puts the requested files into the destination """
+        """copy clones a remote git repo, and puts the requested files into the destination"""
         dest = self.get_destination(**kwargs)
         branch = "master"
         git_cmd = "git"
@@ -183,7 +183,7 @@ class GitCopier(Copier):
 
     @staticmethod
     def type_match(source: str, **kwargs) -> bool:
-        """ type matches uses git to see if the source is a valid git remote """
+        """type matches uses git to see if the source is a valid git remote"""
         git_cmd = "git"
         git_args = ""
 
@@ -206,14 +206,14 @@ class GitCopier(Copier):
         self._temp_dir = tempfile.mkdtemp()
 
     def clean_temp(self) -> None:
-        """ clean_temp removes the temporary path used by this copier """
+        """clean_temp removes the temporary path used by this copier"""
         if hasattr(self, "_temp_dir"):
             shutil.rmtree(self._temp_dir, ignore_errors=True)
             del self._temp_dir
 
     @staticmethod
     def repo_clean(p: str) -> None:
-        """ repo_clean removes git and github files from a clone before doing the copy """
+        """repo_clean removes git and github files from a clone before doing the copy"""
         for f in [".git", ".github"]:
             try:
                 shutil.rmtree(f"{p}/{f}")
@@ -224,14 +224,14 @@ class GitCopier(Copier):
 @CopyFactory.register("fs")
 class FileSystemCopier(Copier):
     def copy(self, **kwargs) -> None:
-        """ copy copies files from a local source on the file system to a destination path """
+        """copy copies files from a local source on the file system to a destination path"""
         dest = self.get_destination(**kwargs)
         self.check_conflicts(self.local_path)
         shutil.copytree(self.local_path, dest, dirs_exist_ok=True)
 
     @property
     def local_path(self):
-        """ local_path returns a complete local file system path """
+        """local_path returns a complete local file system path"""
         if not hasattr(self, "_local_path"):
             self._local_path = self.make_local_path(self.source, self.root_path)
         return self._local_path
@@ -248,7 +248,7 @@ class FileSystemCopier(Copier):
 
     @staticmethod
     def make_local_path(source: str, root_path: str) -> str:
-        """ make_local_path appends together known path objects to provide a local path """
+        """make_local_path appends together known path objects to provide a local path"""
         full_path = f"{root_path}/{source}"
         full_path = re.sub(r"/+", "/", full_path)
         return full_path

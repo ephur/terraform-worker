@@ -65,7 +65,7 @@ def copier():
 
 
 def mock_pipe_exec_type_match(cmd: str) -> Tuple[int, str, str]:
-    """ a mock function to return specific results based on supplied command """
+    """a mock function to return specific results based on supplied command"""
     tokens = " ".join(cmd.split()).split(" ")
     if tokens[1] == "ls-remote":
         if tokens[2] == "permissionerror":
@@ -81,7 +81,7 @@ def mock_pipe_exec_type_match(cmd: str) -> Tuple[int, str, str]:
 
 
 def mock_pipe_exec_clone(cmd: str, cwd: str) -> Tuple[int, str, str]:
-    """ a mock function to copy files and imitate a git clone """
+    """a mock function to copy files and imitate a git clone"""
     tokens = re.split(r"\s+", cmd)
     assert os.path.isdir(tokens[2])
     shutil.copytree(tokens[2], cwd, dirs_exist_ok=True)
@@ -90,10 +90,10 @@ def mock_pipe_exec_clone(cmd: str, cwd: str) -> Tuple[int, str, str]:
 
 @pytest.mark.usefixtures("register_test_copier")
 class TestCopierFactory:
-    """ tests for the copier factory """
+    """tests for the copier factory"""
 
     def test_register(self):
-        """ test that copiers can register themselves """
+        """test that copiers can register themselves"""
         start_len = len(CopyFactory.registry)
 
         @CopyFactory.register("test_copier")
@@ -110,23 +110,23 @@ class TestCopierFactory:
                 pass
 
     def test_get_copier_type(self):
-        """ test that get copier type functions for the test copier """
+        """test that get copier type functions for the test copier"""
         assert CopyFactory.get_copier_type("test") == "testfixture"
 
         with pytest.raises(NotImplementedError):
             CopyFactory.get_copier_type("invalid")
 
     def test_create_copier(self):
-        """ test that the proper object is returned given the test copier source """
+        """test that the proper object is returned given the test copier source"""
         assert type(CopyFactory.create("test")).__name__ == "TestCopierFixture"
 
 
 class TestCopier:
-    """ tests for the base Copier class """
+    """tests for the base Copier class"""
 
     @patch.multiple(Copier, __abstractmethods__=set())
     def test_constructor(self, tmp_path, copier, cwp):
-        """ test that the copiers have expected properties """
+        """test that the copiers have expected properties"""
         assert copier._source == C_SOURCE
         assert not hasattr(copier, "_root_path")
         assert not hasattr(copier, "_destination")
@@ -143,22 +143,22 @@ class TestCopier:
             Copier(source="test_source", conflicts="bad_value")
 
     def test_source(self, copier, cwp):
-        """ test the source property """
+        """test the source property"""
         assert copier.source == C_SOURCE
         assert cwp.source == C_SOURCE
 
     def test_root_path(self, copier, cwp):
-        """ test that root path always returns a string for all copiers """
+        """test that root path always returns a string for all copiers"""
         assert cwp.root_path == C_ROOT_PATH
         assert copier.root_path == ""
 
     def test_conflicts(self, copier, cwp):
-        """ test to ensure conflicts property always returns a list, with contents depending on copier params """
+        """test to ensure conflicts property always returns a list, with contents depending on copier params"""
         assert copier.conflicts == []
         assert cwp.conflicts == C_CONFLICTS
 
     def test_check_conflicts(self, request, copier, cwp):
-        """ test the behavior of checking conflicts """
+        """test the behavior of checking conflicts"""
 
         with pytest.raises(FileExistsError):
             cwp.check_conflicts(
@@ -201,13 +201,13 @@ class TestCopier:
 
 
 class TestGitCopier:
-    """ test the GitCopier copier """
+    """test the GitCopier copier"""
 
     def test_copy(self, request, tmp_path):
         with mock.patch(
             "tfworker.util.copier.pipe_exec", side_effect=mock_pipe_exec_clone
         ) as mocked:
-            """ test a failing condition, conflicting files, no branch so check clone called with master """
+            """test a failing condition, conflicting files, no branch so check clone called with master"""
             dpath = f"{str(tmp_path)}/destination"
             spath = f"{request.config.rootdir}/tests/fixtures/definitions/test_a"
             c = GitCopier(source=spath, destination=dpath, conflicts=C_CONFLICTS)
@@ -236,7 +236,7 @@ class TestGitCopier:
             assert os.path.isfile(f"{dpath}/test.tf")
 
     def test_type_match(self):
-        """ tests to ensure the various git cases return properly """
+        """tests to ensure the various git cases return properly"""
         with mock.patch(
             "tfworker.util.copier.pipe_exec", side_effect=mock_pipe_exec_type_match
         ) as mocked:
@@ -255,7 +255,7 @@ class TestGitCopier:
             mocked.assert_called_with("/opt/bin/git --bar ls-remote string_inspect")
 
     def test_make_and_clean_temp(self):
-        """ tests making the temporary directory for git clones """
+        """tests making the temporary directory for git clones"""
         c = GitCopier("test_source")
 
         c.make_temp()
@@ -270,10 +270,10 @@ class TestGitCopier:
 
 
 class TestFileSystemCopier:
-    """ Test the FileSystem copier """
+    """Test the FileSystem copier"""
 
     def test_copy(self, request, tmp_path):
-        """ tests the file system copy method """
+        """tests the file system copy method"""
         assert not os.path.isfile(f"{str(tmp_path)}/test.tf")
         c = FileSystemCopier(
             source="/tests/fixtures/definitions/test_a",
@@ -284,7 +284,7 @@ class TestFileSystemCopier:
         assert os.path.isfile(f"{str(tmp_path)}/test.tf")
 
     def test_local_path(self):
-        """ tests the local path property """
+        """tests the local path property"""
         c = FileSystemCopier(source=C_SOURCE, root_path=C_ROOT_PATH)
         assert c.local_path == f"{C_ROOT_PATH}/{C_SOURCE}"
 

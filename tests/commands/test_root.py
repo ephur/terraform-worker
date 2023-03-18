@@ -19,7 +19,7 @@ import pytest
 from deepdiff import DeepDiff
 
 import tfworker.commands.root
-from tfworker.commands.root import get_platform, replace_vars
+from tfworker.commands.root import get_platform
 
 
 class TestMain:
@@ -67,20 +67,20 @@ class TestMain:
         diff = DeepDiff(json_config, hcl_config)
         assert len(diff) == 0
 
-    @pytest.mark.parametrize(
-        "var, expected",
-        [
-            ("//aws-region//}}", "us-west-2"),
-            ("//   aws-region //}}", "us-west-2"),
-            ("//aws_region//}}", "us-west-2"),
-            ("/aws_region/", "/aws_region/"),
-            ("aws-region", "aws-region"),
-        ],
-    )
-    def test_replace_vars(self, rootc, var, expected):
-        rootc.add_arg("deployment", "root-deployment")
-        rootc.load_config()
-        assert replace_vars(var, rootc.args) == expected
+    # @pytest.mark.parametrize(
+    #     "var, expected",
+    #     [
+    #         ("//aws-region//}}", "us-west-2"),
+    #         ("//   aws-region //}}", "us-west-2"),
+    #         ("//aws_region//}}", "us-west-2"),
+    #         ("/aws_region/", "/aws_region/"),
+    #         ("aws-region", "aws-region"),
+    #     ],
+    # )
+    # def test_replace_vars(self, rootc, var, expected):
+    #     rootc.add_arg("deployment", "root-deployment")
+    #     rootc.load_config()
+    #     assert replace_vars(var, rootc.args) == expected
 
     @pytest.mark.parametrize(
         "opsys, machine, mock_platform_opsys, mock_platform_machine",

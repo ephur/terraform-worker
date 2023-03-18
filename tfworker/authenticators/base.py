@@ -30,4 +30,4 @@ class BaseAuthenticator:
 
 class UnknownAuthenticator(Exception):
     def __init__(self, provider):
-        super().__init__(f"{provider} is not a known value.")
+        super().__init__(f"{provider} is not a known authenticator.")

@@ -113,7 +113,7 @@ class S3Backend(BaseBackend):
                 )
 
     def _check_table_exists(self, name: str) -> bool:
-        """ check if a supplied dynamodb table exists """
+        """check if a supplied dynamodb table exists"""
         if name in self._ddb_client.list_tables()["TableNames"]:
             return True
         return False

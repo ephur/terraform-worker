@@ -12,6 +12,10 @@ format: init
 	poetry run isort tfworker tests
 
 test: init
+	poetry run pytest -p no:warnings
+	poetry run coverage report --fail-under=70 -m --skip-empty
+
+dep-test: init
 	poetry run pytest
 	poetry run coverage report --fail-under=70 -m --skip-empty
 

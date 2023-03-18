@@ -228,14 +228,14 @@ def cli(context, **kwargs):
 @click.argument("deployment", callback=validate_deployment)
 @click.pass_obj
 def clean(rootc, *args, **kwargs):  # noqa: E501
-    """ clean up terraform state """
+    """clean up terraform state"""
     # clean just items if limit supplied, or everything if no limit
     CleanCommand(rootc, *args, **kwargs).exec()
 
 
 @cli.command()
 def version():
-    """ display program version """
+    """display program version"""
     VersionCommand().exec()
     sys.exit(0)
 
@@ -320,7 +320,7 @@ def version():
 @click.argument("deployment", envvar="WORKER_DEPLOYMENT", callback=validate_deployment)
 @click.pass_obj
 def terraform(rootc, *args, **kwargs):
-    """ execute terraform orchestration """
+    """execute terraform orchestration"""
     tfc = TerraformCommand(rootc, *args, **kwargs)
 
     click.secho(f"building deployment {kwargs.get('deployment')}", fg="green")

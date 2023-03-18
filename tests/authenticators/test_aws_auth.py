@@ -18,8 +18,10 @@ import pytest
 from botocore.credentials import Credentials
 from moto import mock_sts
 
-from tfworker.authenticators.aws import AWSAuthenticator
+from tfworker.authenticators.aws import (AWSAuthenticator,
+                                         MissingArgumentException)
 from tfworker.commands.root import RootCommand
+from tfworker.constants import DEFAULT_BACKEND_PREFIX
 
 
 @pytest.fixture
@@ -28,6 +30,7 @@ def cli_args(aws_access_key_id, aws_secret_access_key):
         "aws_access_key_id": aws_access_key_id,
         "aws_secret_access_key": aws_secret_access_key,
         "aws_default_region": "us-east-1",
+        "backend_prefix": DEFAULT_BACKEND_PREFIX,
     }
 
 
@@ -61,6 +64,11 @@ def aws_credentials_instance(state_args):
 
 
 class TestAWSAuthenticator:
+    def test_with_no_backend_bucket(self):
+        with pytest.raises(MissingArgumentException) as e:
+            AWSAuthenticator(state_args={}, deployment="deployfu")
+            assert "backend_bucket" in str(e.value)
+
     @mock_sts
     def test_with_access_key_pair_creds(
         self, sts_client, state_args, aws_access_key_id, aws_secret_access_key
@@ -101,3 +109,12 @@ class TestAWSAuthenticator:
         assert auth.access_key_id == aws_credentials_instance.access_key
         assert auth.secret_access_key == aws_credentials_instance.secret_key
         assert auth.session_token is None
+
+    @mock_sts
+    def test_with_prefix(self, state_args):
+        auth = AWSAuthenticator(state_args, deployment="deployfu")
+        assert auth.prefix == DEFAULT_BACKEND_PREFIX.format(deployment="deployfu")
+
+        state_args.backend_prefix = "my-prefix"
+        auth = AWSAuthenticator(state_args, deployment="deployfu")
+        assert auth.prefix == "my-prefix"

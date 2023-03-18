@@ -42,7 +42,6 @@ class HelmProvider(BaseProvider):
 
         result.append(f'provider "{self.tag}" {{')
         for k, v in provider_vars.items():
-
             # Handle special case for kubernetes block in helm provider
             if k.lower() == "kubernetes" and isinstance(v, OrderedDict):
                 result.append(f"  {k} {{")
