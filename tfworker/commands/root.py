@@ -208,7 +208,7 @@ def ordered_config_load(stream, args) -> dict:
     since python 3.7 the yaml loader is deterministic, so we can
     use the standard yaml loader
     """
-    return yaml.load(stream)
+    return yaml.load(stream, Loader=yaml.FullLoader)
 
 
 def get_platform():
