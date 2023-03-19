@@ -1,0 +1,13 @@
+terraform:
+  providers:
+    aws:
+      requirements:
+        version: "2.63"
+      vars:
+        region: {{ no_such_thing }}
+
+  definitions:
+    test:
+      path: /definitions/test_a
+    test2:
+      path: /definitions/test_b
