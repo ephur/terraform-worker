@@ -32,7 +32,10 @@ def validate_deployment(ctx, deployment, name):
     """Validate the deployment is no more than 16 characters."""
     if len(name) > 16:
         click.secho("deployment must be less than 16 characters", fg="red")
-        raise SystemExit(2)
+        raise SystemExit(1)
+    if " " in name:
+        click.secho("deployment must not contain spaces", fg="red")
+        raise SystemExit(1)
     return name
 
 
@@ -43,7 +46,7 @@ def validate_gcp_creds_path(ctx, path, value):
         if os.path.isfile(value):
             return value
         click.secho(f"Could not resolve GCP credentials path: {value}", fg="red")
-        raise SystemExit(3)
+        raise SystemExit(1)
 
 
 def validate_host():
@@ -55,22 +58,17 @@ def validate_host():
 
     if opsys not in supported_opsys:
         click.secho(
-            f"this application is currently not known to support {opsys}",
+            f"running on {opsys} is not supported",
             fg="red",
         )
-        raise SystemExit(2)
+        raise SystemExit(1)
 
     if machine not in supported_machine:
         click.secho(
-            f"this application is currently not known to support running on {machine} machines",
+            f"running on {machine} machines is not supported",
             fg="red",
         )
-
-    if struct.calcsize("P") * 8 != 64:
-        click.secho(
-            "this application can only be run on 64 bit hosts, in 64 bit mode", fg="red"
-        )
-        raise SystemExit(2)
+        raise SystemExit(1)
 
     return True
 
@@ -324,7 +322,7 @@ def terraform(rootc, *args, **kwargs):
     tfc = TerraformCommand(rootc, *args, **kwargs)
 
     click.secho(f"building deployment {kwargs.get('deployment')}", fg="green")
-    click.secho(f"using temporary Directory: {tfc.temp_dir}", fg="yellow")
+    click.secho(f"working in directory: {tfc.temp_dir}", fg="yellow")
 
     # common setup required for all definitions
     click.secho("preparing provider plugins", fg="green")

@@ -428,3 +428,8 @@ def definition_odict():
         )
     }
     return collections.OrderedDict(one_def)
+
+
+@pytest.fixture
+def test_config_file():
+    return os.path.join(os.path.dirname(__file__), "fixtures", "test_config.yaml")
