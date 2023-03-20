@@ -14,8 +14,8 @@
 
 import copy
 import os
-from unittest import mock
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 import pytest
 from deepdiff import DeepDiff
@@ -60,7 +60,9 @@ class TestMain:
         # should not be deleted, but contents inside of it should
         tmpdir = TemporaryDirectory()
         assert os.path.exists(tmpdir.name) is True
-        rc = tfworker.commands.root.RootCommand(args={"clean": True, "working_dir": tmpdir.name})
+        rc = tfworker.commands.root.RootCommand(
+            args={"clean": True, "working_dir": tmpdir.name}
+        )
         assert rc.clean is True
         assert str(rc.temp_dir) == tmpdir.name
         with open(file=os.path.join(tmpdir.name, "test"), mode="w") as f:
@@ -99,9 +101,16 @@ class TestMain:
         assert "can not read" in out
 
         # a j2 template with invalid substitutions should raise an error
-        invalidrc = tfworker.commands.root.RootCommand({"config_file": os.path.join(
-                os.path.dirname(__file__), "..", "fixtures", "test_config_invalid_j2.yaml"
-            )})
+        invalidrc = tfworker.commands.root.RootCommand(
+            {
+                "config_file": os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    "fixtures",
+                    "test_config_invalid_j2.yaml",
+                )
+            }
+        )
         with pytest.raises(SystemExit) as e:
             invalidrc.load_config()
         assert e.value.code == 1
@@ -145,7 +154,7 @@ class TestMain:
 
         assert str(rc) == "{'foo': 'bar', 'this': ['that', 'thing'], 'one': 2}"
 
-        for k,v in rc.items():
+        for k, v in rc.items():
             assert k in ["foo", "this", "one"]
             assert v in ["bar", ["that", "thing"], 2]
 
