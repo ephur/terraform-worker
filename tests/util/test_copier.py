@@ -15,6 +15,7 @@
 import os
 import re
 import shutil
+from tempfile import TemporaryDirectory
 from typing import Tuple
 from unittest import mock
 from unittest.mock import patch
@@ -187,6 +188,7 @@ class TestCopier:
     def test_get_destination(self, tmp_path, copier):
         dpath = f"{str(tmp_path)}/destination_test)"
 
+        # test that get destination raises an error if destination is not set
         with pytest.raises(ValueError):
             copier.get_destination()
 
@@ -198,6 +200,26 @@ class TestCopier:
         # test that the destination is created with this optional parameter
         assert copier.get_destination(make_dir=True) == dpath
         assert os.path.isdir(dpath)
+
+    def test_get_destination_path(self, tmp_path, copier):
+        """Ensure the destination path is returned properly when destination is set"""
+        dpath_td = TemporaryDirectory()
+        dpath = dpath_td.name
+
+        # ensure object is in valid state for test
+        with pytest.raises(AttributeError):
+            getattr(copier, "_destination")
+
+        assert copier.get_destination(**{"destination": dpath}) == dpath
+
+        # ensure the directory is returned properly when make_dirs is true, and no errors
+        # are raised when the directory already exists
+        rpath = copier.get_destination(**{"destination": dpath, "make_dir": True})
+        assert rpath == dpath
+        assert os.path.isdir(rpath)
+
+        # remove the temporary directory
+        del dpath_td
 
 
 class TestGitCopier:
@@ -258,12 +280,21 @@ class TestGitCopier:
         """tests making the temporary directory for git clones"""
         c = GitCopier("test_source")
 
+        # ensure that the temp directory is created and attributes are set
         c.make_temp()
         assert hasattr(c, "_temp_dir")
         temp_dir = c._temp_dir
         assert os.path.isdir(temp_dir)
         assert hasattr(c, "_temp_dir")
 
+        # ensure that the function is idempotent
+        c.make_temp()
+        # ensure that the temp directory is the same
+        assert temp_dir == c._temp_dir
+        assert os.path.isdir(c._temp_dir)
+        assert hasattr(c, "_temp_dir")
+
+        # ensure that the temp directory is removed
         c.clean_temp()
         assert not os.path.isdir(temp_dir)
         assert not hasattr(c, "_temp_dir")
@@ -293,7 +324,23 @@ class TestFileSystemCopier:
             source="/tests/fixtures/definitions/test_a",
             root_path=f"{request.config.rootdir}",
         )
+
+        # this should return true because the source is a valid directory
         assert FileSystemCopier.type_match(source) is True
+        # this should return false because the full path to source does not exist inside of root_path
+        assert (
+            FileSystemCopier.type_match(source, **{"root_path": "/some/invalid/path"})
+            is False
+        )
+        # this should return true because the full path to source exists inside of root_path
+        assert (
+            FileSystemCopier.type_match(
+                "/tests/fixtures/definitions/test_a",
+                **{"root_path": f"{request.config.rootdir}"},
+            )
+            is True
+        )
+        # this should return false because the source is not a valid directory
         assert FileSystemCopier.type_match("/some/invalid/path") is False
 
     @pytest.mark.parametrize(

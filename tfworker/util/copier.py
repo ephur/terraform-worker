@@ -203,7 +203,8 @@ class GitCopier(Copier):
     def make_temp(self) -> None:
         if hasattr(self, "_temp_dir"):
             pass
-        self._temp_dir = tempfile.mkdtemp()
+        else:
+            self._temp_dir = tempfile.mkdtemp()
 
     def clean_temp(self) -> None:
         """clean_temp removes the temporary path used by this copier"""
