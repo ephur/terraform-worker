@@ -16,7 +16,6 @@ import collections
 import copy
 import json
 from pathlib import Path, PurePath
-from typing import OrderedDict
 
 import click
 import hcl2
@@ -58,13 +57,13 @@ class Definition:
         self._body = body
         self._path = body.get("path")
         self._remote_vars = self.make_vars(
-            body.get("remote_vars", collections.OrderedDict()), global_remote_vars
+            body.get("remote_vars", dict()), global_remote_vars
         )
         self._terraform_vars = self.make_vars(
-            body.get("terraform_vars", collections.OrderedDict()), global_terraform_vars
+            body.get("terraform_vars", dict()), global_terraform_vars
         )
         self._template_vars = self.make_vars(
-            body.get("template_vars", collections.OrderedDict()), {}
+            body.get("template_vars", dict()), global_template_vars
         )
 
         self._deployment = deployment
@@ -160,7 +159,7 @@ class Definition:
 
     def make_vars(self, local_vars, global_vars):
         """Make a variables dictionary based on default vars, as well as specific vars for an item."""
-        global_vars = global_vars or collections.OrderedDict()
+        global_vars = global_vars or dict()
         item_vars = copy.deepcopy(global_vars)
         for k, v in local_vars.items():
             item_vars[k] = v
@@ -188,7 +187,7 @@ class Definition:
                 return rval
             else:
                 return json.dumps(rval)
-        elif isinstance(v, OrderedDict) or isinstance(v, dict):
+        elif isinstance(v, dict):
             rval = {}
             for k, val in v.items():
                 result = Definition.vars_typer(val, inner=True)
@@ -218,7 +217,7 @@ class DefinitionsCollection(collections.abc.Mapping):
     ):
         self._body = definitions
         self._plan_for = plan_for
-        self._definitions = collections.OrderedDict()
+        self._definitions = dict()
         self._limit = True if len(limit) > 0 else False
         self._limit_size = len(limit)
         self._root_args = rootc.args

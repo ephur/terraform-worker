@@ -19,7 +19,6 @@ import platform
 import re
 import shutil
 import tempfile
-from collections import OrderedDict
 
 import click
 import hcl2

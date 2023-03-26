@@ -418,7 +418,7 @@ def tf_13cmd_options(rootc_options):
 @pytest.fixture
 def definition_odict():
     one_def = {
-        "test": collections.OrderedDict(
+        "test": dict(
             {
                 "path": "/test",
                 "remote_vars": {"a": 1, "b": "two"},
@@ -427,7 +427,7 @@ def definition_odict():
             }
         )
     }
-    return collections.OrderedDict(one_def)
+    return dict(one_def)
 
 
 @pytest.fixture

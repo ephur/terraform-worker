@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import re
-from collections import OrderedDict
 
 import click
 
@@ -40,8 +39,8 @@ class BaseCommand:
         self._definitions = None
         self._backend = None
         self._plugins = None
-        self._terraform_vars = OrderedDict()
-        self._remote_vars = OrderedDict()
+        self._terraform_vars = dict()
+        self._remote_vars = dict()
         self._temp_dir = rootc.temp_dir
         self._repository_path = rootc.args.repository_path
 
@@ -84,7 +83,7 @@ class BaseCommand:
             self._temp_dir,
             self._tf_version_major,
         )
-        plugins_odict = OrderedDict()
+        plugins_odict = dict()
         for provider in rootc.providers_odict:
             try:
                 raw_version = rootc.providers_odict[provider]["requirements"]["version"]

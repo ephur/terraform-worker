@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import OrderedDict
-
 from .base import BaseProvider
 
 
@@ -43,7 +41,7 @@ class HelmProvider(BaseProvider):
         result.append(f'provider "{self.tag}" {{')
         for k, v in provider_vars.items():
             # Handle special case for kubernetes block in helm provider
-            if k.lower() == "kubernetes" and isinstance(v, OrderedDict):
+            if k.lower() == "kubernetes" and isinstance(v, dict):
                 result.append(f"  {k} {{")
                 for ik, iv in v.items():
                     if iv and '"' not in iv:

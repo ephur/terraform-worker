@@ -70,7 +70,7 @@ class TestDefinitions:
             12,
         )
         test_vars = definition.make_vars(
-            definition_odict[name].get("terraform_vars", collections.OrderedDict()),
+            definition_odict[name].get("terraform_vars", dict()),
             base.get("terraform_vars"),
         )
         assert test_vars["c"] == expected
