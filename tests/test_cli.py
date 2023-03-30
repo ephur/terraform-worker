@@ -41,11 +41,11 @@ class TestCLI:
     def test_validate_deployment_invalid_length(self, capfd):
         """ensure deploy over 16 chars fail"""
         with pytest.raises(SystemExit) as e:
-            tfworker.cli.validate_deployment(None, None, "testtesttesttesttest")
+            tfworker.cli.validate_deployment(None, None, "testtesttesttesttesttesttesttesttesttest")
         out, err = capfd.readouterr()
         assert e.type == SystemExit
         assert e.value.code == 1
-        assert "16 characters" in out
+        assert "32 characters" in out
 
     def test_validate_gcp_creds_path(self):
         """ensure valid creds paths are returned"""
