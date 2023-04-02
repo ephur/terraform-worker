@@ -30,7 +30,6 @@ class AWSAuthenticator(BaseAuthenticator):
 
     def __init__(self, state_args, **kwargs):
         super(AWSAuthenticator, self).__init__(state_args, **kwargs)
-        print(state_args)
         self.bucket = self._resolve_arg("backend_bucket")
         if not self.bucket:
             raise MissingArgumentException("backend_bucket is a required argument")

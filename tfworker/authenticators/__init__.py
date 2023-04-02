@@ -23,7 +23,6 @@ ALL = [AWSAuthenticator, GoogleAuthenticator]
 
 class AuthenticatorsCollection(collections.abc.Mapping):
     def __init__(self, state_args, **kwargs):
-        print(state_args)
         self._authenticators = dict(
             [(auth.tag, auth(state_args, **kwargs)) for auth in ALL]
         )
