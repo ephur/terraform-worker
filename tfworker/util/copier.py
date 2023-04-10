@@ -144,7 +144,6 @@ class GitCopier(Copier):
         reset_repo = False
 
         sub_path = ""
-
         if "sub_path" in kwargs:
             sub_path = kwargs["sub_path"].strip("/")
 
@@ -159,7 +158,6 @@ class GitCopier(Copier):
 
         self.make_temp()
         temp_path = f"{self._temp_dir}/{sub_path}"
-
         pipe_exec(
             re.sub(
                 r"\s+",

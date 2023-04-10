@@ -41,7 +41,9 @@ class TestCLI:
     def test_validate_deployment_invalid_length(self, capfd):
         """ensure deploy over 16 chars fail"""
         with pytest.raises(SystemExit) as e:
-            tfworker.cli.validate_deployment(None, None, "testtesttesttesttesttesttesttesttesttest")
+            tfworker.cli.validate_deployment(
+                None, None, "testtesttesttesttesttesttesttesttesttest"
+            )
         out, err = capfd.readouterr()
         assert e.type == SystemExit
         assert e.value.code == 1
