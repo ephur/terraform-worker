@@ -181,6 +181,10 @@ class GitCopier(Copier):
 
     @staticmethod
     def type_match(source: str, **kwargs) -> bool:
+        # if the remote is a local file, then it's not a git repo
+        if os.path.exists(source):
+            return False
+
         """type matches uses git to see if the source is a valid git remote"""
         git_cmd = "git"
         git_args = ""
@@ -192,6 +196,7 @@ class GitCopier(Copier):
 
         try:
             (return_code, _, _) = pipe_exec(f"{git_cmd} {git_args} ls-remote {source}")
+
         except (PermissionError, FileNotFoundError):
             return False
         if return_code == 0:
@@ -231,17 +236,36 @@ class FileSystemCopier(Copier):
     def local_path(self):
         """local_path returns a complete local file system path"""
         if not hasattr(self, "_local_path"):
-            self._local_path = self.make_local_path(self.source, self.root_path)
+            # try with the root path explicitly provided
+            local_path = self.make_local_path(self.source, self.root_path)
+            if os.path.exists(local_path):
+                self._local_path = local_path
+                return self._local_path
+
+            # try without a root path (this is when an absolute path is provided)
+            local_path = self.make_local_path(self.source, "")
+            if os.path.exists(local_path):
+                self._local_path = local_path
+                return self._local_path
+
+        if not hasattr(self, "_local_path"):
+            raise FileNotFoundError(f"unable to find {self.source}")
+
         return self._local_path
 
     @staticmethod
     def type_match(source: str, **kwargs) -> bool:
-        # check if there is a local file matching "source" if so, return true, if not return false
+        # check if the source was provided as an absolute path
+        if os.path.isdir(source) or os.path.isfile(source):
+            return True
+
+        # check if the source is relative to the root path
         if "root_path" in kwargs:
             source = FileSystemCopier.make_local_path(source, kwargs["root_path"])
 
-        if os.path.isdir(source) or os.path.isfile(source):
-            return True
+            if os.path.isdir(source) or os.path.isfile(source):
+                return True
+
         return False
 
     @staticmethod
