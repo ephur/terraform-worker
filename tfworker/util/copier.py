@@ -230,7 +230,8 @@ class FileSystemCopier(Copier):
         """copy copies files from a local source on the file system to a destination path"""
         dest = self.get_destination(**kwargs)
         self.check_conflicts(self.local_path)
-        shutil.copytree(self.local_path, dest, dirs_exist_ok=True)
+        source_path = f"{self.local_path}/{kwargs.get('sub_path', '')}".rstrip("/")
+        shutil.copytree(source_path, dest, dirs_exist_ok=True)
 
     @property
     def local_path(self):
