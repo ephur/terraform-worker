@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2020 Richard Maynard (richard.maynard@gmail.com)
+# Copyright 2020-2023 Richard Maynard (richard.maynard@gmail.com)
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.

@@ -1,4 +1,4 @@
-# Copyright 2020 Richard Maynard (richard.maynard@gmail.com)
+# Copyright 2020-2023 Richard Maynard (richard.maynard@gmail.com)
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,8 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-from typing import OrderedDict
 
 from .base import BaseProvider
 
@@ -43,7 +41,7 @@ class HelmProvider(BaseProvider):
         result.append(f'provider "{self.tag}" {{')
         for k, v in provider_vars.items():
             # Handle special case for kubernetes block in helm provider
-            if k.lower() == "kubernetes" and isinstance(v, OrderedDict):
+            if k.lower() == "kubernetes" and isinstance(v, dict):
                 result.append(f"  {k} {{")
                 for ik, iv in v.items():
                     if iv and '"' not in iv:

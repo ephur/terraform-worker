@@ -1,4 +1,4 @@
-# Copyright 2021 Richard Maynard (richard.maynard@gmail.com)
+# Copyright 2021-2023 Richard Maynard (richard.maynard@gmail.com)
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -206,7 +206,8 @@ class GitCopier(Copier):
     def make_temp(self) -> None:
         if hasattr(self, "_temp_dir"):
             pass
-        self._temp_dir = tempfile.mkdtemp()
+        else:
+            self._temp_dir = tempfile.mkdtemp()
 
     def clean_temp(self) -> None:
         """clean_temp removes the temporary path used by this copier"""
