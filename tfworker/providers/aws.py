@@ -21,4 +21,6 @@ class AWSProvider(BaseProvider):
     def __init__(self, body, authenticators, tf_version_major, **kwargs):
         super(AWSProvider, self).__init__(body, tf_version_major)
         self._authenticator = authenticators.get(self.tag)
+        # need to refresh vars after getting the authenticator as vars
+        # could include authentication information
         self.vars = body.get("vars", {})

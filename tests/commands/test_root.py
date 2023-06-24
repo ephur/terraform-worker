@@ -14,6 +14,7 @@
 
 import copy
 import os
+import platform
 from tempfile import TemporaryDirectory
 from unittest import mock
 
@@ -49,7 +50,10 @@ class TestMain:
         # if working_dir is passed, clean should be false
         rc = tfworker.commands.root.RootCommand(args={"working_dir": "/tmp"})
         assert rc.clean is False
-        assert str(rc.temp_dir) == "/tmp"
+        if platform.system() == "Darwin":
+            assert str(rc.temp_dir) == "/private/tmp"
+        else:
+            assert str(rc.temp_dir) == "/tmp"
 
         # if clean is passed, it should be set to the value passed
         rc = tfworker.commands.root.RootCommand(args={"clean": False})
@@ -64,7 +68,10 @@ class TestMain:
             args={"clean": True, "working_dir": tmpdir.name}
         )
         assert rc.clean is True
-        assert str(rc.temp_dir) == tmpdir.name
+        if platform.system() == "Darwin":
+            assert str(rc.temp_dir) == f"/private{tmpdir.name}"
+        else:
+            assert str(rc.temp_dir) == tmpdir.name
         with open(file=os.path.join(tmpdir.name, "test"), mode="w") as f:
             f.write("test")
         del rc

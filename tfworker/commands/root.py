@@ -122,6 +122,7 @@ class RootCommand:
         for k in [
             "definitions",
             "providers",
+            "handlers",
             "remote_vars",
             "template_vars",
             "terraform_vars",
