@@ -22,7 +22,8 @@ import shutil
 import click
 
 from tfworker.commands.base import BaseCommand
-from tfworker.util.system import pipe_exec
+from tfworker.handlers.exceptions import HandlerError
+from tfworker.util.system import pipe_exec, strip_ansi
 
 
 class HookError(Exception):
@@ -58,6 +59,7 @@ class TerraformCommand(BaseCommand):
         self._stream_output = self._resolve_arg("stream_output")
         self._use_colors = True if self._resolve_arg("color") else False
         self._terraform_modules_dir = self._resolve_arg("terraform_modules_dir")
+        self._terraform_output = dict()
 
     @property
     def plan_for(self):
@@ -166,6 +168,17 @@ class TerraformCommand(BaseCommand):
                         f"plan changes for {self._plan_for} {definition.tag}", fg="red"
                     )
                     execute = True
+                    try:
+                        self._execute_handlers(
+                            action="plan",
+                            deployment=self._deployment,
+                            definition=definition.tag,
+                            text=strip_ansi(self._terraform_output["stdout"].decode()),
+                            planfile=plan_file,
+                        )
+                    except HandlerError as e:
+                        click.secho(f"handler error: {e}", fg="red")
+
                 except TerraformError:
                     click.secho(
                         f"error planning terraform definition: {definition.tag}!",
@@ -290,6 +303,11 @@ class TerraformCommand(BaseCommand):
             stream_output=self._stream_output,
         )
         click.secho(f"exit code: {exit_code}", fg="blue")
+        (
+            self._terraform_output["exit_code"],
+            self._terraform_output["stdout"],
+            self._terraform_output["stderr"],
+        ) = (exit_code, stdout, stderr)
 
         if debug and not self._stream_output:
             for line in stdout.decode().splitlines():

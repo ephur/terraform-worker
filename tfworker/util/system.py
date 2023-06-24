@@ -12,10 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+import re
 import shlex
 import subprocess
 
 import click
+
+
+def strip_ansi(line):
+    """
+    Strips ANSI escape sequences from a string.
+    """
+    ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+    return ansi_escape.sub("", line)
 
 
 def pipe_exec(args, stdin=None, cwd=None, env=None, stream_output=False):

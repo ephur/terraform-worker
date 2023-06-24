@@ -20,6 +20,8 @@ import click
 from tfworker.authenticators import AuthenticatorsCollection
 from tfworker.backends import select_backend
 from tfworker.definitions import DefinitionsCollection
+from tfworker.handlers import HandlersCollection
+from tfworker.handlers.exceptions import HandlerError, UnknownHandler
 from tfworker.plugins import PluginsCollection
 from tfworker.providers import ProvidersCollection
 from tfworker.util.system import pipe_exec, which
@@ -112,6 +114,13 @@ class BaseCommand:
             self._definitions,
         )
 
+        # initialize handlers collection
+        try:
+            self._handlers = HandlersCollection(rootc.handlers_odict)
+        except (UnknownHandler, HandlerError, TypeError) as e:
+            click.secho(e, fg="red")
+            raise SystemExit(1)
+
     @property
     def authenticators(self):
         return self._authenticators
@@ -139,6 +148,12 @@ class BaseCommand:
     @property
     def repository_path(self):
         return self._repository_path
+
+    def _execute_handlers(self, action, **kwargs):
+        """Execute all ready handlers for supported actions"""
+        for h in self._handlers:
+            if action in h.actions and h.is_ready():
+                h.execute(action, **kwargs)
 
     def _resolve_arg(self, name):
         """Resolve argument in order of precedence:

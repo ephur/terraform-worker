@@ -13,8 +13,10 @@
 # limitations under the License.
 
 import os
+import platform
 import re
 import shutil
+import tempfile
 from typing import Tuple
 from unittest import mock
 from unittest.mock import patch
@@ -26,8 +28,10 @@ from tfworker.util.copier import (Copier, CopyFactory, FileSystemCopier,
 
 C_CONFLICTS = ["test.txt", "foo", "test.tf"]
 C_SOURCE = "test_source"
-C_ROOT_PATH = "/tmp/test"
-
+if platform.system() == "Darwin":
+    C_ROOT_PATH = "/private/tmp/test"
+else:
+    C_ROOT_PATH = "/tmp/test/"
 
 @pytest.fixture(scope="session")
 def register_test_copier():
@@ -285,8 +289,25 @@ class TestFileSystemCopier:
 
     def test_local_path(self):
         """tests the local path property"""
-        c = FileSystemCopier(source=C_SOURCE, root_path=C_ROOT_PATH)
-        assert c.local_path == f"{C_ROOT_PATH}/{C_SOURCE}"
+
+        # This is a relative path based on where the worker ran from
+        source = "tests/fixtures/definitions/test_a"
+        c = FileSystemCopier(source=source, root_path=os.getcwd())
+        assert c.local_path == f"{os.getcwd()}/{source}"
+
+        # This tests resolution of an absolute path
+        tmpdir = tempfile.TemporaryDirectory()
+        c = FileSystemCopier(source=tmpdir.name)
+        assert c.local_path == tmpdir.name
+        del tmpdir
+
+        # Ensure file not found error is raised on invalid relative path
+        with pytest.raises(FileNotFoundError):
+            FileSystemCopier(source="some/invalid/path", root_path=os.getcwd()).local_path
+
+        # Ensure file not found error is raised on invalid absolute path
+        with pytest.raises(FileNotFoundError):
+            FileSystemCopier(source="/some/invalid/path").local_path
 
     def test_type_match(self, request):
         source = FileSystemCopier.make_local_path(

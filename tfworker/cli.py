@@ -302,7 +302,12 @@ def version():
         "If this is not set it will be relative to the repository path at ./terraform-modules"
     ),
 )
-@click.option("--limit", help="limit operations to a single definition", multiple=True)
+@click.option(
+    "--limit",
+    help="limit operations to a single definition",
+    envvar="WORKER_LIMIT",
+    multiple=True,
+)
 @click.option(
     "--provider-cache",
     envvar="WORKER_PROVIDER_CACHE",

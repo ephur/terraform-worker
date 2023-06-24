@@ -1,0 +1,22 @@
+class UnknownHandler(Exception):
+    """
+    This is an excpetion that indicates configuration was attempted for a handler that is not supported.
+    """
+
+    def __init__(self, provider):
+        self.provider = provider
+
+    def __str__(self):
+        return f"Unknown handler: {self.provider}"
+
+
+class HandlerError(Exception):
+    """
+    This is an exception that indicates an error occurred while attempting to execute a handler.
+    """
+
+    def __init__(self, message):
+        self.message = message
+
+    def __str__(self):
+        return f"Handler error: {self.message}"
