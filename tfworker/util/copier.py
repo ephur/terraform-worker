@@ -232,6 +232,8 @@ class FileSystemCopier(Copier):
         dest = self.get_destination(**kwargs)
         self.check_conflicts(self.local_path)
         source_path = f"{self.local_path}/{kwargs.get('sub_path', '')}".rstrip("/")
+        if not os.path.exists(source_path):
+            raise FileNotFoundError(f"{kwargs.get('sub_path')} does not exist")
         shutil.copytree(source_path, dest, dirs_exist_ok=True)
 
     @property

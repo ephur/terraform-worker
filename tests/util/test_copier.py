@@ -317,6 +317,15 @@ class TestFileSystemCopier:
         c.copy()
         assert os.path.isfile(f"{str(tmp_path)}/test.tf")
 
+        c = FileSystemCopier(
+            source="/tests/fixtures/definitions/test_a",
+            root_path=f"{request.config.rootdir}",
+            destination=f"{str(tmp_path)}",
+        )
+
+        with pytest.raises(FileNotFoundError):
+            c.copy(sub_path="invalid_path")
+
     def test_local_path(self):
         """tests the local path property"""
 

@@ -125,6 +125,15 @@ class Definition:
 
         try:
             c.copy(destination=self._target, **remote_options)
+        except FileNotFoundError as e:
+            if remote_options.get("sub_path", False):
+                click.secho(
+                    f"could not find sub_path {remote_options['sub_path']} for definition {self.tag}",
+                    fg="red",
+                )
+                raise SystemExit(1)
+            else:
+                raise e
         except FileExistsError as e:
             raise ReservedFileError(e)
 
