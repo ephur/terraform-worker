@@ -1,4 +1,6 @@
 # this file is a test fixture, it's used to test module copy functions
+locals {
+    junk = <<EOF
 phai1Eekei9adieNgahm
 een3ahh2Evuu5oX4ahvay
 Lei2vaekaeyohxah7iyo8e
@@ -10,3 +12,5 @@ phef9aiG3ahw1rohzi0ailoo5Ea
 su6Ju1aewae1Eew7ziwi5ahbahf9
 aengu7Oshaeshiceehee6iup0eevi
 wae9toh7Coothei2WuazagahPaphai
+EOF
+}
