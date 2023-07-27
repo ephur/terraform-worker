@@ -158,7 +158,7 @@ class GitCopier(Copier):
 
         self.make_temp()
         temp_path = f"{self._temp_dir}/{sub_path}"
-        pipe_exec(
+        exitcode, stdout, stderr = pipe_exec(
             re.sub(
                 r"\s+",
                 " ",
@@ -166,6 +166,10 @@ class GitCopier(Copier):
             ),
             cwd=self._temp_dir,
         )
+
+        if exitcode != 0:
+            self.clean_temp()
+            raise RuntimeError(f"unable to clone {self._source}, {stderr.decode('utf-8')}")
 
         try:
             self.check_conflicts(temp_path)

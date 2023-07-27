@@ -136,6 +136,12 @@ class Definition:
                 raise e
         except FileExistsError as e:
             raise ReservedFileError(e)
+        except RuntimeError as e:
+            click.secho(
+                f"could not copy source path {self.path} for definition {self.tag}, error details:\n\n{e}",
+                fg="red",
+            )
+            raise SystemExit(1)
 
         # render the templates
         if self._template_callback is not None:
