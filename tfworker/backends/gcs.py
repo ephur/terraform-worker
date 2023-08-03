@@ -95,6 +95,10 @@ class GCSBackend(BaseBackend):
             else:
                 raise BackendError(f"state file at: {b.name} is not empty")
 
+    def remotes(self) -> list:
+        """ this is unimplemented here """
+        raise NotImplementedError
+
     def _get_state_list(self) -> list:
         """
         _get_state_list returns a list of states inside of the prefix, since this is looking for state/folders only

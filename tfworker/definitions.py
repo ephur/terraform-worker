@@ -52,6 +52,7 @@ class Definition:
         tf_version_major,
         limited=False,
         template_callback=None,
+        use_backend_remotes=False,
     ):
         self.tag = definition
         self._body = body
@@ -75,6 +76,8 @@ class Definition:
 
         self._target = f"{self._temp_dir}/definitions/{self.tag}".replace("//", "/")
         self._template_callback = template_callback
+
+        self._use_backend_remotes = use_backend_remotes
 
     @property
     def body(self):
@@ -156,7 +159,11 @@ class Definition:
                 tflocals.write("}\n\n")
 
         # create remote data sources, and required providers
-        remotes = list(map(lambda x: x.split(".")[0], self._remote_vars.values()))
+        if self._use_backend_remotes:
+            remotes = backend.remotes()
+        else:
+            remotes = list(map(lambda x: x.split(".")[0], self._remote_vars.values()))
+
         with open(f"{self._target}/worker_terraform.tf", "w+") as tffile:
             tffile.write(f"{self._providers.hcl(self.provider_names)}\n\n")
             tffile.write(TERRAFORM_TPL.format(f"{backend.hcl(self.tag)}", ""))
@@ -251,6 +258,7 @@ class DefinitionsCollection(collections.abc.Mapping):
                 tf_version_major,
                 True if limit and definition in limit else False,
                 template_callback=self.render_templates,
+                use_backend_remotes=self._root_args.backend_use_all_remotes
             )
 
     def __len__(self):

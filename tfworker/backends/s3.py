@@ -112,6 +112,23 @@ class S3Backend(BaseBackend):
                     "Backend bucket not found and --no-create-backend-bucket specified."
                 )
 
+        # Generate a list of all files in the bucket, at the desired prefix for the deployment
+        s3_paginator = self._s3_client.get_paginator("list_objects_v2").paginate(
+            Bucket=self._authenticator.bucket,
+            Prefix=self._authenticator.prefix,
+        )
+
+        self._bucket_files = set()
+        for page in s3_paginator:
+            if "Contents" in page:
+                for key in page["Contents"]:
+                    # just append the last part of the prefix to the list
+                    self._bucket_files.add(key["Key"].split("/")[-2])
+
+    def remotes(self) -> list:
+        """ return a list of the remote bucket keys """
+        return list(self._bucket_files)
+
     def _check_table_exists(self, name: str) -> bool:
         """check if a supplied dynamodb table exists"""
         if name in self._ddb_client.list_tables()["TableNames"]:

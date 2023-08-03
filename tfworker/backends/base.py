@@ -36,6 +36,10 @@ class BaseBackend(metaclass=ABCMeta):
     def clean(self, deployment: str, limit: tuple) -> str:
         pass
 
+    @abstractmethod
+    def remotes(self) -> list:
+        pass
+
 
 class Backends:
     s3 = "s3"

@@ -111,6 +111,7 @@ def grootc():
             "backend_region": "us-central1",
             "backend_bucket": "test_gcp_bucket",
             "backend_prefix": "terraform/test-0002",
+            "backend_use_all_remotes": False,
             "config_file": os.path.join(
                 os.path.dirname(__file__), "fixtures", "gcp_test_config.yaml"
             ),
@@ -132,6 +133,7 @@ def grootc_no_create_backend_bucket():
             "backend_region": "us-central1",
             "backend_bucket": "test_gcp_bucket",
             "backend_prefix": "terraform/test-0002",
+            "backend_use_all_remotes": False,
             "config_file": os.path.join(
                 os.path.dirname(__file__), "fixtures", "gcp_test_config.yaml"
             ),
@@ -157,6 +159,7 @@ def rootc(s3_client, dynamodb_client, sts_client, create_backend_bucket=True):
             "backend_region": "us-west-2",
             "backend_bucket": "test_bucket",
             "backend_prefix": "terraform/test-0001",
+            "backend_use_all_remotes": False,
             "config_file": os.path.join(
                 os.path.dirname(__file__), "fixtures", "test_config.yaml"
             ),
@@ -182,6 +185,7 @@ def rootc_no_create_backend_bucket(s3_client, dynamodb_client, sts_client):
             "backend_region": "us-west-2",
             "backend_bucket": "test_bucket",
             "backend_prefix": "terraform/test-0001",
+            "backend_use_all_remotes": False,
             "config_file": os.path.join(
                 os.path.dirname(__file__), "fixtures", "test_config.yaml"
             ),
@@ -207,6 +211,7 @@ def json_base_rootc(s3_client, dynamodb_client, sts_client):
             "backend_region": "us-west-2",
             "backend_bucket": "test_bucket",
             "backend_prefix": "terraform/test-0001",
+            "backend_use_all_remotes": False,
             "config_file": os.path.join(
                 os.path.dirname(__file__), "fixtures", "base_config_test.json"
             ),
@@ -231,6 +236,7 @@ def yaml_base_rootc(s3_client, dynamodb_client, sts_client):
             "backend_region": "us-west-2",
             "backend_bucket": "test_bucket",
             "backend_prefix": "terraform/test-0001",
+            "backend_use_all_remotes": False,
             "config_file": os.path.join(
                 os.path.dirname(__file__), "fixtures", "base_config_test.yaml"
             ),
@@ -255,6 +261,7 @@ def hcl_base_rootc(s3_client, dynamodb_client, sts_client):
             "backend_region": "us-west-2",
             "backend_bucket": "test_bucket",
             "backend_prefix": "terraform/test-0001",
+            "backend_use_all_remotes": False,
             "config_file": os.path.join(
                 os.path.dirname(__file__), "fixtures", "base_config_test.hcl"
             ),
@@ -284,6 +291,7 @@ def rootc_options(s3_client, dynamodb_client, sts_client):
             "backend_region": "us-west-2",
             "backend_bucket": "test_bucket",
             "backend_prefix": "terraform/test-0001",
+            "backend_use_all_remotes": False,
             "config_file": os.path.join(
                 os.path.dirname(__file__), "fixtures", "test_config_with_options.yaml"
             ),

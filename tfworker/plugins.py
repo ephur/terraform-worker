@@ -21,10 +21,9 @@ import urllib
 import zipfile
 
 import click
-from tenacity import retry, stop_after_attempt, wait_chain, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_chain, wait_fixed, RetryError, retry_if_not_exception_message
 
 from tfworker.commands.root import get_platform
-
 
 class PluginSourceParseException(Exception):
     pass
@@ -88,16 +87,19 @@ class PluginsCollection(collections.abc.Mapping):
 
             if cache_hit is False:
                 # the provider cache is not populated, download and put the plugin in place
-                download_from_remote(
-                    uri,
-                    plugin_dir,
-                    self._cache_dir,
-                    provider_path,
-                    file_name,
-                    name,
-                    details,
-                )
-
+                try:
+                    download_from_remote(
+                        uri,
+                        plugin_dir,
+                        self._cache_dir,
+                        provider_path,
+                        file_name,
+                        name,
+                        details,
+                    )
+                except PluginSourceParseException as e:
+                    click.secho(str(e), fg="red")
+                    click.Abort()
 
 class PluginSource:
     """
@@ -140,6 +142,7 @@ class PluginSource:
         wait_fixed(10),
     ),
     stop=stop_after_attempt(3),
+    reraise=True,
 )
 def download_from_remote(
     uri, plugin_dir, cache_dir, provider_path, file_name, name, details
@@ -158,10 +161,15 @@ def download_from_remote(
     )
 
     # download the remote file
-    with urllib.request.urlopen(uri) as response, open(
-        f"{plugin_dir}/{file_name}", "wb"
-    ) as plug_file:
-        shutil.copyfileobj(response, plug_file)
+    try:
+        with urllib.request.urlopen(uri) as response, open(
+            f"{plugin_dir}/{file_name}", "wb"
+        ) as plug_file:
+            shutil.copyfileobj(response, plug_file)
+    except urllib.error.HTTPError as e:
+        raise PluginSourceParseException(
+            f"{e} while downloading plugin: {name}:{details['version']} from {uri}"
+        )
 
     # put the file into the working provider directory and cache if necessary
     files = glob.glob(

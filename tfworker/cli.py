@@ -181,6 +181,12 @@ def validate_working_dir(fpath):
     help="Region where terraform rootc/lock bucket exists",
 )
 @click.option(
+    "--backend-use-all-remotes/--no-backend-use-all-remotes",
+    default=False,
+    envvar="WORKER_BACKEND_USE_ALL_REMOTES",
+    help="Generate remote data sources based on all definition paths present in the backend",
+)
+@click.option(
     "--create-backend-bucket/--no-create-backend-bucket",
     default=True,
     help="Create the backend bucket if it does not exist",
@@ -330,7 +336,13 @@ def version():
 @click.pass_obj
 def terraform(rootc, *args, **kwargs):
     """execute terraform orchestration"""
-    tfc = TerraformCommand(rootc, *args, **kwargs)
+    try:
+        tfc = TerraformCommand(rootc, *args, **kwargs)
+    except FileNotFoundError as e:
+        click.secho(
+            f"terraform binary not found: {e.filename}", fg="red", err=True
+        )
+        raise SystemExit(1)
 
     click.secho(f"building deployment {kwargs.get('deployment')}", fg="green")
     click.secho(f"working in directory: {tfc.temp_dir}", fg="yellow")
