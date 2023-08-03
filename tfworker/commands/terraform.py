@@ -143,7 +143,7 @@ class TerraformCommand(BaseCommand):
                 # if plan file is set, check if it exists, if it does do not plan again
                 if plan_file.exists():
                     if self._tf_plan:
-                        click.secho(f"plan file {plan_file} exists, not planning again")
+                        click.secho(f"plan file {plan_file} exists, not planning again", fg="red")
                     execute = True
                     skip_plan = True
 
