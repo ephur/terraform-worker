@@ -21,9 +21,11 @@ import urllib
 import zipfile
 
 import click
-from tenacity import retry, stop_after_attempt, wait_chain, wait_fixed, RetryError, retry_if_not_exception_message
+from tenacity import (RetryError, retry, retry_if_not_exception_message,
+                      stop_after_attempt, wait_chain, wait_fixed)
 
 from tfworker.commands.root import get_platform
+
 
 class PluginSourceParseException(Exception):
     pass
@@ -100,6 +102,7 @@ class PluginsCollection(collections.abc.Mapping):
                 except PluginSourceParseException as e:
                     click.secho(str(e), fg="red")
                     click.Abort()
+
 
 class PluginSource:
     """

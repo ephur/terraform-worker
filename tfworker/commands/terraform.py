@@ -22,6 +22,7 @@ import shutil
 import click
 
 from tfworker.commands.base import BaseCommand
+from tfworker.definitions import Definition
 from tfworker.handlers.exceptions import HandlerError
 from tfworker.util.system import pipe_exec, strip_ansi
 
@@ -41,14 +42,19 @@ class TerraformError(Exception):
 class TerraformCommand(BaseCommand):
     def __init__(self, rootc, **kwargs):
         super(TerraformCommand, self).__init__(rootc, **kwargs)
-
         self._destroy = self._resolve_arg("destroy")
         self._tf_apply = self._resolve_arg("tf_apply")
         self._tf_plan = self._resolve_arg("tf_plan")
         self._plan_file_path = self._resolve_arg("plan_file_path")
+
         if self._tf_apply and self._destroy:
             click.secho("can not apply and destroy at the same time", fg="red")
             raise SystemExit(1)
+
+        if self._backend_plans and not self._plan_file_path:
+            # create a plan file path in the tmp dir
+            self._plan_file_path = f"{self._temp_dir}/plans"
+            pathlib.Path(self._plan_file_path).mkdir(parents=True, exist_ok=True)
 
         self._b64_encode = self._resolve_arg("b64_encode")
         self._deployment = kwargs["deployment"]
@@ -63,6 +69,7 @@ class TerraformCommand(BaseCommand):
 
     @property
     def plan_for(self):
+        """plan_for will either be apply or destroy, indicating what action is being planned for"""
         return self._plan_for
 
     @property
@@ -101,10 +108,8 @@ class TerraformCommand(BaseCommand):
             ignore=shutil.ignore_patterns("test", ".terraform", "terraform.tfstate*"),
         )
 
-    def exec(self):
-        """exec handles running the terraform chain"""
-        skip_plan = False
-
+    def _prep_and_init(self, def_iter: iter = None) -> None:
+        """_prep_and_init prepares the modules and runs terraform init"""
         try:
             def_iter = self.definitions.limited()
         except ValueError as e:
@@ -112,11 +117,10 @@ class TerraformCommand(BaseCommand):
             raise SystemExit(1)
 
         for definition in def_iter:
-            execute = False
-            plan_file = None
             # copy definition files / templates etc.
             click.secho(f"preparing definition: {definition.tag}", fg="green")
             definition.prep(self._backend)
+
             # run terraform init
             try:
                 self._run(definition, "init", debug=self._show_output)
@@ -124,108 +128,237 @@ class TerraformCommand(BaseCommand):
                 click.secho("error running terraform init", fg="red")
                 raise SystemExit(1)
 
-            # validate the path and resolve the plan file name
-            if self._plan_file_path:
-                plan_path = pathlib.Path.absolute(pathlib.Path(self._plan_file_path))
-                if not (plan_path.exists() and plan_path.is_dir()):
-                    click.secho(
-                        f'plan path "{plan_path}" is not suitable, it is not an existing directory'
-                    )
-                    raise SystemExit()
-                plan_file = pathlib.Path(
-                    f"{plan_path}/{self._deployment}_{definition.tag}.tfplan"
-                )
-                click.secho(f"using plan file:{plan_file}", fg="yellow")
+    def _check_plan(self, definition: Definition) -> (bool, bool):
+        """determines if a plan is needed"""
+        # when no plan path is specified, it's straight forward
+        if self._plan_file_path is None:
+            if self._tf_plan is False:
+                definition._ready_to_apply = True
+                return False
+            else:
+                definition._ready_to_apply = False
+                return True
 
-            # check if a plan file for the given deployment/definition exists, if so
-            # do not plan again
-            if plan_file is not None:
-                # if plan file is set, check if it exists, if it does do not plan again
-                if plan_file.exists():
-                    if self._tf_plan:
-                        click.secho(f"plan file {plan_file} exists, not planning again", fg="red")
-                    execute = True
-                    skip_plan = True
+        # a lot more to consider when a plan path is specified
+        plan_path = pathlib.Path.absolute(pathlib.Path(self._plan_file_path))
+        plan_file = pathlib.Path(
+            f"{plan_path}/{self._deployment}_{definition.tag}.tfplan"
+        )
+        definition.plan_file = plan_file
+        click.secho(f"using plan file:{plan_file}", fg="yellow")
 
-            if skip_plan is False and self._tf_plan:
-                # run terraform plan
+        if not (plan_path.exists() and plan_path.is_dir()):
+            click.secho(
+                f'plan path "{plan_path}" is not suitable, it is not an existing directory'
+            )
+            raise SystemExit()
+
+        # run all the handlers with with action plan and stage check
+        try:
+            self._execute_handlers(
+                action="plan",
+                stage="check",
+                deployment=self._deployment,
+                definition=definition.tag,
+                planfile=plan_file,
+            )
+        except HandlerError as e:
+            click.secho(f"handler error: {e}", fg="red")
+            raise SystemExit(1)
+
+        # if --no-plan is specified, skip planning step regardless of other conditions
+        if self._tf_plan is False:
+            definition._ready_to_apply = True
+            return False
+
+        # planning was requested, check if existing plan is suitable
+        if plan_file.exists():
+            if plan_file.stat().st_size == 0:
                 click.secho(
-                    f"planning definition for {self._plan_for}: {definition.tag}",
+                    f"exiting plan file {plan_file} exists but is empty; planning again",
                     fg="green",
                 )
+                definition._ready_to_apply = False
+                return True
+            click.secho(
+                f"existing plan file {plan_file} is suitable for apply; not planning again; remove plan file to allow planning",
+                fg="green",
+            )
+            definition._ready_to_apply = True
+            return False
 
-                try:
-                    self._run(
-                        definition,
-                        "plan",
-                        debug=self._show_output,
-                        plan_action=self._plan_for,
-                        plan_file=str(plan_file),
-                    )
-                except PlanChange:
-                    # on destroy, terraform ALWAYS indicates a plan change
-                    click.secho(
-                        f"plan changes for {self._plan_for} {definition.tag}", fg="red"
-                    )
-                    execute = True
-                    try:
-                        self._execute_handlers(
-                            action="plan",
-                            deployment=self._deployment,
-                            definition=definition.tag,
-                            text=strip_ansi(self._terraform_output["stdout"].decode()),
-                            planfile=plan_file,
-                        )
-                    except HandlerError as e:
-                        click.secho(f"handler error: {e}", fg="red")
+        # All of the false conditions have been returned, so we need to plan
+        definition._ready_to_apply = False
+        return True
 
-                except TerraformError:
-                    click.secho(
-                        f"error planning terraform definition: {definition.tag}!",
-                        fg="red",
-                    )
-                    raise SystemExit(2)
+    def _exec_plan(self, definition) -> bool:
+        """_exec_plan executes a terraform plan, returns true if a plan has changes"""
+        changes = False
 
-                if not execute:
-                    click.secho(f"no plan changes for {definition.tag}", fg="yellow")
+        # call handlers for pre plan
+        try:
+            self._execute_handlers(
+                action="plan",
+                stage="pre",
+                deployment=self._deployment,
+                definition=definition.tag,
+            )
+        except HandlerError as e:
+            click.secho(f"handler error: {e}", fg="red")
+            raise SystemExit(1)
 
-            if self._force and (self._tf_apply or self._destroy):
-                execute = True
-                click.secho(f"forcing {self._plan_for} due to --force", fg="red")
+        click.secho(
+            f"planning definition for {self._plan_for}: {definition.tag}",
+            fg="green",
+        )
 
-            # there are no plan changes, and no forced execution, so move on
-            if not execute:
-                continue
+        try:
+            self._run(
+                definition,
+                "plan",
+                debug=self._show_output,
+                plan_action=self._plan_for,
+                plan_file=str(definition.plan_file),
+            )
+        except PlanChange:
+            # on destroy, terraform ALWAYS indicates a plan change
+            click.secho(f"plan changes for {self._plan_for} {definition.tag}", fg="red")
+            definition._ready_to_apply = True
+            changes = True
+        except TerraformError:
+            click.secho(
+                f"error planning terraform definition: {definition.tag}!",
+                fg="red",
+            )
+            raise SystemExit(2)
 
-            # no apply/destroy requested, so move on
-            if not self._tf_apply and not self._destroy:
-                continue
+        try:
+            self._execute_handlers(
+                action="plan",
+                stage="post",
+                deployment=self._deployment,
+                definition=definition.tag,
+                text=strip_ansi(self._terraform_output["stdout"].decode()),
+                planfile=definition.plan_file,
+                changes=changes,
+            )
+        except HandlerError as e:
+            click.secho(f"handler error: {e}", fg="red")
 
-            try:
-                self._run(
-                    definition,
-                    self._plan_for,
-                    debug=self._show_output,
-                    plan_file=str(plan_file),
-                )
-            except TerraformError:
+        if not changes:
+            click.secho(f"no plan changes for {definition.tag}", fg="yellow")
+
+        return changes
+
+    def _check_apply_or_destroy(self, changes, definition) -> bool:
+        """_check_apply_or_destroy determines if a terraform execution is needed"""
+        # never apply if --no-apply is used
+        if self._tf_apply is not True:
+            return False
+
+        # if not changes and not force, skip apply
+        if not (changes or definition._ready_to_apply) and not self._force:
+            click.secho("no changes, skipping terraform apply", fg="yellow")
+            return False
+
+        # if the definition plan file exists, and is not empty then apply
+        if self._plan_file_path is not None:
+            if not definition.plan_file.exists():
                 click.secho(
-                    f"error with terraform {self._plan_for} on definition"
-                    f" {definition.tag}, exiting",
+                    f"plan file {definition.plan_file} does not exist, can't apply",
                     fg="red",
                 )
-                if plan_file is not None:
-                    # plan file yeilded an error and has been consumed
-                    plan_file.unlink()
-                raise SystemExit(2)
-            else:
-                click.secho(
-                    f"terraform {self._plan_for} complete for {definition.tag}",
-                    fg="green",
-                )
-                if plan_file is not None:
-                    # plan file succeeded and has been consumed
-                    plan_file.unlink()
+                return False
+
+        # if --force is specified, always apply
+        if self._force:
+            click.secho(
+                f"--force specified, proceeding with apply for {definition.tag} anyway",
+            )
+            return True
+
+        # All of the false conditions have been returned
+        return True
+
+    def _exec_apply_or_destroy(self, definition) -> None:
+        """_exec_apply_or_destroy executes a terraform apply or destroy"""
+        # call handlers for pre apply
+        click.secho(
+            f"DEBUG: executing {self._plan_for} for {definition.tag}", fg="yellow"
+        )
+        try:
+            self._execute_handlers(
+                action=self._plan_for,
+                stage="pre",
+                deployment=self._deployment,
+                definition=definition.tag,
+                planfile=definition.plan_file,
+            )
+        except HandlerError as e:
+            click.secho(f"handler error: {e}", fg="red")
+            raise SystemExit(1)
+
+        # execute terraform apply or destroy
+        tf_error = False
+        try:
+            self._run(
+                definition,
+                self._plan_for,
+                debug=self._show_output,
+                plan_file=definition.plan_file,
+            )
+        except TerraformError:
+            tf_error = True
+
+        # remove the plan file if it exists
+        if definition.plan_file is not None and definition.plan_file.exists():
+            definition.plan_file.unlink()
+
+        # call handlers for post apply/destroy
+        try:
+            self._execute_handlers(
+                action=self._plan_for,
+                stage="post",
+                deployment=self._deployment,
+                definition=definition.tag,
+                planfile=definition.plan_file,
+                error=tf_error,
+            )
+        except HandlerError as e:
+            click.secho(f"handler error: {e}", fg="red")
+            raise SystemExit(1)
+
+        if tf_error is True:
+            click.secho(
+                f"error executing terraform {self._plan_for} for {definition.tag}",
+                fg="red",
+            )
+            raise SystemExit(2)
+        else:
+            click.secho(
+                f"terraform {self._plan_for} complete for {definition.tag}",
+                fg="green",
+            )
+
+    def exec(self):
+        """exec handles running the terraform chain"""
+        try:
+            def_iter = self.definitions.limited()
+        except ValueError as e:
+            click.secho(f"Error with supplied limit: {e}", fg="red")
+            raise SystemExit(1)
+
+        # prepare the modules and run terraform init
+        self._prep_and_init(def_iter)
+
+        for definition in def_iter:
+            changes = None
+            # exec planning step if we should
+            if self._check_plan(definition):
+                changes = self._exec_plan(definition)
+            # exec apply step if we should
+            if self._check_apply_or_destroy(changes, definition):
+                self._exec_apply_or_destroy(definition)
 
     def _run(
         self, definition, command, debug=False, plan_action="init", plan_file=None

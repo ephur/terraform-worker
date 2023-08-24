@@ -209,6 +209,12 @@ def validate_working_dir(fpath):
     envvar="WORKER_CLEAN",
     help="clean up the temporary directory created by the worker after execution",
 )
+@click.option(
+    "--backend-plans/--no-backend-plans",
+    default=False,
+    envvar="WORKER_BACKEND_PLANS",
+    help="store plans in the backend",
+)
 @click.pass_context
 def cli(context, **kwargs):
     """CLI for the worker utility."""
@@ -262,6 +268,7 @@ def version():
     "--plan/--no-plan",
     "tf_plan",
     envvar="WORKER_PLAN",
+    type=bool,
     default=True,
     help="toggle running a plan, plan will still be skipped if using a saved plan file with apply",
 )
@@ -339,9 +346,7 @@ def terraform(rootc, *args, **kwargs):
     try:
         tfc = TerraformCommand(rootc, *args, **kwargs)
     except FileNotFoundError as e:
-        click.secho(
-            f"terraform binary not found: {e.filename}", fg="red", err=True
-        )
+        click.secho(f"terraform binary not found: {e.filename}", fg="red", err=True)
         raise SystemExit(1)
 
     click.secho(f"building deployment {kwargs.get('deployment')}", fg="green")

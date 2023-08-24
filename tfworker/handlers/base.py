@@ -9,10 +9,17 @@ class BaseHandler(metaclass=ABCMeta):
 
     @abstractmethod
     def is_ready(self):  # pragma: no cover
+        """is_ready is called to determine if a handler is ready to be executed"""
         return True
 
     @abstractmethod
-    def execute(self, action, **kwargs):  # pragma: no cover
+    def execute(self, action: str, stage: str, **kwargs) -> None:  # pragma: no cover
+        """
+        execute is called when a handler should trigger, it accepts to parameters
+            action: the action that triggered the handler (one of plan, clean, apply, destroy)
+            stage: the stage of the action (one of pre, post)
+            kwargs: any additional arguments that may be required
+        """
         pass
 
 

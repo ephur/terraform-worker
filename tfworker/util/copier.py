@@ -169,7 +169,9 @@ class GitCopier(Copier):
 
         if exitcode != 0:
             self.clean_temp()
-            raise RuntimeError(f"unable to clone {self._source}, {stderr.decode('utf-8')}")
+            raise RuntimeError(
+                f"unable to clone {self._source}, {stderr.decode('utf-8')}"
+            )
 
         try:
             self.check_conflicts(temp_path)

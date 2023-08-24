@@ -71,7 +71,7 @@ class BitbucketHandler(BaseHandler):
         """
         return self._ready
 
-    def execute(self, action, **kwargs):
+    def execute(self, action, stage, **kwargs):
         """
         execute is a generic method that will execute the specified action with the provided arguments.
         """

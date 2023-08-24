@@ -15,7 +15,7 @@
 import collections
 import copy
 import json
-from pathlib import Path, PurePath
+from pathlib import Path, PosixPath, PurePath, WindowsPath
 
 import click
 import hcl2
@@ -38,6 +38,9 @@ class ReservedFileError(Exception):
 
 
 class Definition:
+    _plan_file = None
+    _ready_to_apply = False
+
     def __init__(
         self,
         definition,
@@ -67,6 +70,7 @@ class Definition:
             body.get("template_vars", dict()), global_template_vars
         )
 
+        self._always_apply = body.get("always_apply", False)
         self._deployment = deployment
         self._repository_path = repository_path
         self._providers = providers
@@ -106,6 +110,16 @@ class Definition:
                         required_providers = set(rp_element.keys())
                         result = result.intersection(required_providers)
         return result
+
+    @property
+    def plan_file(self):
+        return self._plan_file
+
+    @plan_file.setter
+    def plan_file(self, value: Path):
+        if type(value) not in [PosixPath, WindowsPath, Path]:
+            raise TypeError("plan_file must be a Path like object")
+        self._plan_file = value
 
     def prep(self, backend):
         """prepare the definitions for running"""
@@ -258,7 +272,7 @@ class DefinitionsCollection(collections.abc.Mapping):
                 tf_version_major,
                 True if limit and definition in limit else False,
                 template_callback=self.render_templates,
-                use_backend_remotes=self._root_args.backend_use_all_remotes
+                use_backend_remotes=self._root_args.backend_use_all_remotes,
             )
 
     def __len__(self):

@@ -16,22 +16,28 @@ import json
 import os
 import sys
 from contextlib import closing
+from pathlib import Path
+from uuid import uuid4
 
 import boto3
 import botocore
 import click
 
+from ..handlers import BaseHandler, HandlerError
 from .base import BackendError, BaseBackend, validate_backend_empty
 
 
 class S3Backend(BaseBackend):
     tag = "s3"
     auth_tag = "aws"
+    plan_storage = False
 
     def __init__(self, authenticators, definitions, deployment=None):
         self._authenticator = authenticators[self.auth_tag]
         self._definitions = definitions
         self._deployment = "undefined"
+        self._handlers = None
+
         if deployment:
             self._deployment = deployment
 
@@ -112,7 +118,7 @@ class S3Backend(BaseBackend):
                     "Backend bucket not found and --no-create-backend-bucket specified."
                 )
 
-        # Generate a list of all files in the bucket, at the desired prefix for the deployment
+        # Generate a list of all files in the bucket, at the desired prefix for the deployment, used for "--all-remote-states" option and clean
         s3_paginator = self._s3_client.get_paginator("list_objects_v2").paginate(
             Bucket=self._authenticator.bucket,
             Prefix=self._authenticator.prefix,
@@ -124,9 +130,22 @@ class S3Backend(BaseBackend):
                 for key in page["Contents"]:
                     # just append the last part of the prefix to the list
                     self._bucket_files.add(key["Key"].split("/")[-2])
+        try:
+            self._handlers = S3Handler(self._authenticator)
+            self.plan_storage = True
+        except HandlerError as e:
+            click.secho(f"Error initializing S3Handler: {e}")
+            raise SystemExit(1)
+
+    @property
+    def handlers(self) -> dict:
+        """
+        handlers returns a dictionary of handlers for the backend, ensure a singleton
+        """
+        return {self.tag: self._handlers}
 
     def remotes(self) -> list:
-        """ return a list of the remote bucket keys """
+        """return a list of the remote bucket keys"""
         return list(self._bucket_files)
 
     def _check_table_exists(self, name: str) -> bool:
@@ -302,3 +321,171 @@ class S3Backend(BaseBackend):
                     yield content["Key"]
         except TypeError:
             pass
+
+
+class S3Handler(BaseHandler):
+    """The S3Handler class is a handler for the s3 backend"""
+
+    actions = ["plan", "apply"]
+    required_vars = []
+    _is_ready = False
+
+    def __init__(self, authenticator):
+        try:
+            self.execution_functions = {
+                "plan": {
+                    "check": self._check_plan,
+                    "post": self._post_plan,
+                },
+                "apply": {
+                    "pre": self._pre_apply,
+                },
+            }
+
+            self._authenticator = authenticator
+            self._s3_client = self._authenticator.backend_session.client("s3")
+
+        except Exception as e:
+            raise HandlerError(f"Error initializing S3Handler: {e}")
+
+    def is_ready(self):
+        if not self._is_ready:
+            filename = str(uuid4().hex[:6].upper())
+            if self._s3_client.list_objects(
+                Bucket=self._authenticator.bucket,
+                Prefix=f"{self._authenticator.prefix}/{filename}",
+            ).get("Contents"):
+                raise HandlerError(
+                    f"Error initializing S3Handler, remote file already exists: {filename}"
+                )
+            try:
+                self._s3_client.upload_file(
+                    "/dev/null",
+                    self._authenticator.bucket,
+                    f"{self._authenticator.prefix}/{filename}",
+                )
+            except boto3.exceptions.S3UploadFailedError as e:
+                raise HandlerError(
+                    f"Error initializing S3Handler, could not create file: {e}"
+                )
+            try:
+                self._s3_client.delete_object(
+                    Bucket=self._authenticator.bucket,
+                    Key=f"{self._authenticator.prefix}/{filename}",
+                )
+            except boto3.exceptions.S3UploadFailedError as e:
+                raise HandlerError(
+                    f"Error initializing S3Handler, could not delete file: {e}"
+                )
+            self._is_ready = True
+        return self._is_ready
+
+    def execute(self, action, stage, **kwargs):
+        # save a copy of the planfile to the backend state bucket
+        if action in self.execution_functions.keys():
+            if stage in self.execution_functions[action].keys():
+                self.execution_functions[action][stage](**kwargs)
+        return None
+
+    def _check_plan(self, planfile: Path, definition: str, **kwargs):
+        """check_plan runs while the plan is being checked, it should fetch a file from the backend and store it in the local location"""
+        # ensure planfile does not exist or is zero bytes if it does
+        remotefile = f"{self._authenticator.prefix}/{definition}/{planfile.name}"
+        if planfile.exists():
+            if planfile.stat().st_size == 0:
+                planfile.unlink()
+            else:
+                raise HandlerError(f"planfile already exists: {planfile}")
+
+        if self._s3_get_plan(planfile, remotefile):
+            if not planfile.exists():
+                raise HandlerError(f"planfile not found after download: {planfile}")
+            click.secho(
+                f"remote planfile downloaded: s3://{self._authenticator.bucket}/{remotefile} -> {planfile}",
+                fg="yellow",
+            )
+
+    def _post_plan(
+        self, planfile: Path, definition: str, changes: bool = False, **kwargs
+    ):
+        """post_apply runs after the apply is complete, it should upload the planfile to the backend"""
+        logfile = planfile.with_suffix(".log")
+        remotefile = f"{self._authenticator.prefix}/{definition}/{planfile.name}"
+        remotelog = remotefile.replace(".tfplan", ".log")
+        if "text" in kwargs.keys():
+            with open(logfile, "w") as f:
+                f.write(kwargs["text"])
+        if planfile.exists() and changes:
+            if self._s3_put_plan(planfile, remotefile):
+                click.secho(
+                    f"remote planfile uploaded: {planfile} -> s3://{self._authenticator.bucket}/{remotefile}",
+                    fg="yellow",
+                )
+                if self._s3_put_plan(logfile, remotelog):
+                    click.secho(
+                        f"remote logfile uploaded: {logfile} -> s3://{self._authenticator.bucket}/{remotelog}",
+                        fg="yellow",
+                    )
+        return None
+
+    def _pre_apply(self, planfile: Path, definition: str, **kwargs):
+        """_pre_apply runs before the apply is started, it should remove the planfile from the backend"""
+        logfile = planfile.with_suffix(".log")
+        remotefile = f"{self._authenticator.prefix}/{definition}/{planfile.name}"
+        remotelog = remotefile.replace(".tfplan", ".log")
+        if self._s3_delete_plan(remotefile, planfile):
+            click.secho(
+                f"remote planfile removed: s3://{self._authenticator.bucket}/{remotefile}",
+                fg="yellow",
+            )
+        if self._s3_delete_plan(remotelog, logfile):
+            click.secho(
+                f"remote logfile removed: s3://{self._authenticator.bucket}/{remotelog}",
+                fg="yellow",
+            )
+        return None
+
+    def _s3_get_plan(self, planfile: Path, remotefile: str) -> bool:
+        """_get_plan downloads the file from s3"""
+        # fetch the planfile from the backend
+        downloaded = False
+        try:
+            self._s3_client.download_file(
+                self._authenticator.bucket, remotefile, planfile
+            )
+            # make sure the local file exists, and is greater than 0 bytes
+            downloaded = True
+        except botocore.exceptions.ClientError as e:
+            if e.response["Error"]["Code"] == "404":
+                click.secho(f"remote plan {remotefile} not found", fg="yellow")
+                pass
+            else:
+                raise HandlerError(f"Error downloading planfile: {e}")
+        return downloaded
+
+    def _s3_put_plan(self, planfile: Path, remotefile: str) -> bool:
+        """_put_plan uploads the file to s3"""
+        uploaded = False
+        # don't upload empty plans
+        if planfile.stat().st_size == 0:
+            return uploaded
+        try:
+            self._s3_client.upload_file(
+                str(planfile), self._authenticator.bucket, remotefile
+            )
+            uploaded = True
+        except botocore.exceptions.ClientError as e:
+            raise HandlerError(f"Error uploading planfile: {e}")
+        return uploaded
+
+    def _s3_delete_plan(self, remotefile: str, planfile: str) -> bool:
+        """_delete_plan removes a remote plan file"""
+        deleted = False
+        try:
+            self._s3_client.delete_object(
+                Bucket=self._authenticator.bucket, Key=remotefile
+            )
+            deleted = True
+        except botocore.exceptions.ClientError as e:
+            raise HandlerError(f"Error deleting planfile: {e}")
+        return deleted

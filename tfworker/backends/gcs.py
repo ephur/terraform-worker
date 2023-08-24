@@ -16,6 +16,7 @@ import json
 
 import click
 from google.api_core import page_iterator
+from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import storage
 from google.cloud.exceptions import Conflict, NotFound
 
@@ -39,14 +40,17 @@ class GCSBackend(BaseBackend):
             if not self._gcs_prefix.endswith("/"):
                 self._gcs_prefix = f"{self._gcs_prefix}/"
 
-            if self._authenticator.creds_path:
-                self._storage_client = storage.Client.from_service_account_json(
-                    self._authenticator.creds_path
-                )
-            else:
-                self._storage_client = storage.Client(
-                    project=self._authenticator.project
-                )
+            try:
+                if self._authenticator.creds_path:
+                    self._storage_client = storage.Client.from_service_account_json(
+                        self._authenticator.creds_path
+                    )
+                else:
+                    self._storage_client = storage.Client(
+                        project=self._authenticator.project
+                    )
+            except DefaultCredentialsError as e:
+                raise BackendError(f"Unable to authenticate to GCS, error: {str(e)}")
 
             try:
                 self._storage_client.get_bucket(self._gcs_bucket)
@@ -96,7 +100,7 @@ class GCSBackend(BaseBackend):
                 raise BackendError(f"state file at: {b.name} is not empty")
 
     def remotes(self) -> list:
-        """ this is unimplemented here """
+        """this is unimplemented here"""
         raise NotImplementedError
 
     def _get_state_list(self) -> list:

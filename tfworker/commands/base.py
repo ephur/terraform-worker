@@ -17,7 +17,7 @@ import re
 import click
 
 from tfworker.authenticators import AuthenticatorsCollection
-from tfworker.backends import select_backend
+from tfworker.backends import BackendError, select_backend
 from tfworker.definitions import DefinitionsCollection
 from tfworker.handlers import HandlersCollection
 from tfworker.handlers.exceptions import HandlerError, UnknownHandler
@@ -106,12 +106,26 @@ class BaseCommand:
         self._plugins = PluginsCollection(
             plugins_odict, self._temp_dir, self._provider_cache, self._tf_version_major
         )
-        self._backend = select_backend(
-            self._resolve_arg("backend"),
-            deployment,
-            self._authenticators,
-            self._definitions,
-        )
+        try:
+            self._backend = select_backend(
+                self._resolve_arg("backend"),
+                deployment,
+                self._authenticators,
+                self._definitions,
+            )
+        except BackendError as e:
+            click.secho(e, fg="red")
+            raise SystemExit(1)
+
+        # if backend_plans is requested, check if backend supports it
+        self._backend_plans = self._resolve_arg("backend_plans")
+        if self._backend_plans:
+            if not self._backend.plan_storage:
+                click.secho(
+                    f"backend {self._backend.tag} does not support backend_plans",
+                    fg="red",
+                )
+                raise SystemExit(1)
 
         # initialize handlers collection
         try:
@@ -119,6 +133,10 @@ class BaseCommand:
         except (UnknownHandler, HandlerError, TypeError) as e:
             click.secho(e, fg="red")
             raise SystemExit(1)
+
+        # allow a backend to implement handlers as well since they already control the provider session
+        if self._backend.handlers:
+            self._handlers.update(self._backend.handlers)
 
     @property
     def authenticators(self):
@@ -148,18 +166,18 @@ class BaseCommand:
     def repository_path(self):
         return self._repository_path
 
-    def _execute_handlers(self, action, **kwargs):
+    def _execute_handlers(self, action, stage, **kwargs):
         """Execute all ready handlers for supported actions"""
         for h in self._handlers:
             if action in h.actions and h.is_ready():
-                h.execute(action, **kwargs)
+                h.execute(action, stage, **kwargs)
 
     def _resolve_arg(self, name):
         """Resolve argument in order of precedence:
         1) CLI argument
         2) Config file
         """
-        if name in self._args_dict and self._args_dict[name]:
+        if name in self._args_dict and self._args_dict[name] is not None:
             return self._args_dict[name]
         if name in self._rootc.worker_options_odict:
             return self._rootc.worker_options_odict[name]
