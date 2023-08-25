@@ -135,7 +135,7 @@ class BaseCommand:
             raise SystemExit(1)
 
         # allow a backend to implement handlers as well since they already control the provider session
-        if self._backend.handlers:
+        if self._backend.handlers and self._backend_plans:
             self._handlers.update(self._backend.handlers)
 
     @property

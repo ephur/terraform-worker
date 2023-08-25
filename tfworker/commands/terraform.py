@@ -283,9 +283,6 @@ class TerraformCommand(BaseCommand):
     def _exec_apply_or_destroy(self, definition) -> None:
         """_exec_apply_or_destroy executes a terraform apply or destroy"""
         # call handlers for pre apply
-        click.secho(
-            f"DEBUG: executing {self._plan_for} for {definition.tag}", fg="yellow"
-        )
         try:
             self._execute_handlers(
                 action=self._plan_for,

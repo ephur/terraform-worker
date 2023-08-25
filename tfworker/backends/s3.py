@@ -18,6 +18,7 @@ import sys
 from contextlib import closing
 from pathlib import Path
 from uuid import uuid4
+from zipfile import ZipFile
 
 import boto3
 import botocore
@@ -391,6 +392,7 @@ class S3Handler(BaseHandler):
         """check_plan runs while the plan is being checked, it should fetch a file from the backend and store it in the local location"""
         # ensure planfile does not exist or is zero bytes if it does
         remotefile = f"{self._authenticator.prefix}/{definition}/{planfile.name}"
+        statefile = f"{self._authenticator.prefix}/{definition}/terraform.tfstate"
         if planfile.exists():
             if planfile.stat().st_size == 0:
                 planfile.unlink()
@@ -400,10 +402,20 @@ class S3Handler(BaseHandler):
         if self._s3_get_plan(planfile, remotefile):
             if not planfile.exists():
                 raise HandlerError(f"planfile not found after download: {planfile}")
-            click.secho(
-                f"remote planfile downloaded: s3://{self._authenticator.bucket}/{remotefile} -> {planfile}",
-                fg="yellow",
-            )
+            # verify the lineage and serial from the planfile matches the statefile
+            if not self._verify_lineage(planfile, statefile):
+                click.secho(
+                    f"planfile lineage does not match statefile, remote plan is unsuitable and will be removed",
+                    fg="red",
+                )
+                self._s3_delete_plan(remotefile)
+                planfile.unlink()
+            else:
+                click.secho(
+                    f"remote planfile downloaded: s3://{self._authenticator.bucket}/{remotefile} -> {planfile}",
+                    fg="yellow",
+                )
+        return None
 
     def _post_plan(
         self, planfile: Path, definition: str, changes: bool = False, **kwargs
@@ -433,12 +445,12 @@ class S3Handler(BaseHandler):
         logfile = planfile.with_suffix(".log")
         remotefile = f"{self._authenticator.prefix}/{definition}/{planfile.name}"
         remotelog = remotefile.replace(".tfplan", ".log")
-        if self._s3_delete_plan(remotefile, planfile):
+        if self._s3_delete_plan(remotefile):
             click.secho(
                 f"remote planfile removed: s3://{self._authenticator.bucket}/{remotefile}",
                 fg="yellow",
             )
-        if self._s3_delete_plan(remotelog, logfile):
+        if self._s3_delete_plan(remotelog):
             click.secho(
                 f"remote logfile removed: s3://{self._authenticator.bucket}/{remotelog}",
                 fg="yellow",
@@ -478,7 +490,7 @@ class S3Handler(BaseHandler):
             raise HandlerError(f"Error uploading planfile: {e}")
         return uploaded
 
-    def _s3_delete_plan(self, remotefile: str, planfile: str) -> bool:
+    def _s3_delete_plan(self, remotefile: str) -> bool:
         """_delete_plan removes a remote plan file"""
         deleted = False
         try:
@@ -489,3 +501,34 @@ class S3Handler(BaseHandler):
         except botocore.exceptions.ClientError as e:
             raise HandlerError(f"Error deleting planfile: {e}")
         return deleted
+
+    def _verify_lineage(self, planfile: Path, statefile: str) -> bool:
+        # load the statefile as a json object from the backend
+        state = None
+        try:
+            state = json.loads(
+                self._s3_client.get_object(
+                    Bucket=self._authenticator.bucket, Key=statefile
+                )["Body"].read()
+            )
+        except botocore.exceptions.ClientError as e:
+            raise HandlerError(f"Error downloading statefile: {e}")
+
+        # load the planfile as a json object
+        plan = None
+        try:
+            with ZipFile(str(planfile), "r") as zip:
+                with zip.open("tfstate") as f:
+                    plan = json.loads(f.read())
+        except Exception as e:
+            raise HandlerError(f"Error loading planfile: {e}")
+
+        # compare the lineage and serial from the planfile to the statefile
+        if not (state and plan):
+            return False
+        if state["serial"] != plan["serial"]:
+            return False
+        if state["lineage"] != plan["lineage"]:
+            return False
+
+        return True
