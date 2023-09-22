@@ -415,6 +415,7 @@ class TerraformCommand(BaseCommand):
                     self._terraform_bin,
                     debug=debug,
                     b64_encode=self._b64_encode,
+                    extra_vars=definition.template_vars,
                 )
         except HookError as e:
             click.secho(
@@ -487,6 +488,7 @@ class TerraformCommand(BaseCommand):
                     self._terraform_bin,
                     debug=debug,
                     b64_encode=self._b64_encode,
+                    extra_vars=definition.template_vars,
                 )
         except HookError as e:
             click.secho(
@@ -504,6 +506,7 @@ class TerraformCommand(BaseCommand):
         terraform_path,
         debug=False,
         b64_encode=False,
+        extra_vars={},
     ):
         """
         hook_exec executes a hook script.
@@ -586,6 +589,11 @@ class TerraformCommand(BaseCommand):
                 f"{working_dir}/worker.auto.tfvars not found!",
                 fg="red",
             )
+
+        for k, v in extra_vars.items():
+            if b64_encode:
+                v = base64.b64encode(v.encode("utf-8")).decode()
+            local_env[f"TF_EXTRA_{k.upper()}"] = v
 
         # execute the hook
         (exit_code, stdout, stderr) = pipe_exec(

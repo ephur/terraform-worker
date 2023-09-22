@@ -115,6 +115,10 @@ class Definition:
     def plan_file(self):
         return self._plan_file
 
+    @property
+    def template_vars(self):
+        return self._template_vars
+
     @plan_file.setter
     def plan_file(self, value: Path):
         if type(value) not in [PosixPath, WindowsPath, Path]:
