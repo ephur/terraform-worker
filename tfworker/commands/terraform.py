@@ -562,9 +562,7 @@ class TerraformCommand(BaseCommand):
 
                     if state_value is not None:
                         if b64_encode:
-                            state_value = base64.b64encode(
-                                state_value.encode("utf-8")
-                            ).decode()
+                            state_value = base64.b64encode(state_value.encode("utf-8"))
                         local_env[f"TF_REMOTE_{state}_{item}".upper()] = state_value
 
         # populate environment with terraform variables
@@ -581,7 +579,7 @@ class TerraformCommand(BaseCommand):
                         tf_var[1] = tf_var[1].replace(k, v)
 
                     if b64_encode:
-                        tf_var[1] = base64.b64encode(tf_var[1].encode("utf-8")).decode()
+                        tf_var[1] = base64.b64encode(tf_var[1].encode("utf-8"))
 
                     local_env[f"TF_VAR_{tf_var[0].upper()}"] = tf_var[1]
         else:
@@ -592,7 +590,7 @@ class TerraformCommand(BaseCommand):
 
         for k, v in extra_vars.items():
             if b64_encode:
-                v = base64.b64encode(v.encode("utf-8")).decode()
+                v = base64.b64encode(v.encode("utf-8"))
             local_env[f"TF_EXTRA_{k.upper()}"] = v
 
         # execute the hook
