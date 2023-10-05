@@ -88,6 +88,13 @@ def validate_working_dir(fpath):
             click.secho(f"Working path {fpath} must be empty!", fg="red")
             raise SystemExit(1)
 
+class CSVType(click.types.StringParamType):
+    name = 'csv'
+    envvar_list_splitter = ','
+
+    def __repr__(self):
+        return 'CSV'
+
 
 @click.group()
 @click.option(
@@ -234,6 +241,7 @@ def cli(context, **kwargs):
     help="limit operations to a single definition",
     envvar="WORKER_LIMIT",
     multiple=True,
+    type=CSVType(),
 )
 @click.argument("deployment", callback=validate_deployment)
 @click.pass_obj
@@ -320,6 +328,7 @@ def version():
     help="limit operations to a single definition",
     envvar="WORKER_LIMIT",
     multiple=True,
+    type=CSVType(),
 )
 @click.option(
     "--provider-cache",
