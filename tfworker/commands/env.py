@@ -15,9 +15,10 @@
 import click
 
 from tfworker.authenticators import AuthenticatorsCollection
+from tfworker.commands.base import BaseCommand
 
 
-class EnvCommand:
+class EnvCommand(BaseCommand):
     """
     The env command translates the environment configuration that is used for the worker
     into an output that can be `eval`'d by a shell. This will allow one to maintain the
@@ -26,7 +27,13 @@ class EnvCommand:
     """
 
     def __init__(self, rootc, **kwargs):
+        # Initialize the base command
+        self._rootc = rootc
+        self._args_dict = dict(kwargs)
+        self._args_dict.update(self._rootc.args.__dict__)
+
         # parse the configuration
+        rootc.add_arg("deployment", "env")
         rootc.load_config()
 
         # initialize any authenticators

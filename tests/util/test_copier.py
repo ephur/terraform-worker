@@ -33,6 +33,7 @@ if platform.system() == "Darwin":
 else:
     C_ROOT_PATH = "/tmp/test/"
 
+
 @pytest.fixture(scope="session")
 def register_test_copier():
     @CopyFactory.register("testfixture")
@@ -317,6 +318,15 @@ class TestFileSystemCopier:
         c.copy()
         assert os.path.isfile(f"{str(tmp_path)}/test.tf")
 
+        c = FileSystemCopier(
+            source="/tests/fixtures/definitions/test_a",
+            root_path=f"{request.config.rootdir}",
+            destination=f"{str(tmp_path)}",
+        )
+
+        with pytest.raises(FileNotFoundError):
+            c.copy(sub_path="invalid_path")
+
     def test_local_path(self):
         """tests the local path property"""
 
@@ -333,7 +343,9 @@ class TestFileSystemCopier:
 
         # Ensure file not found error is raised on invalid relative path
         with pytest.raises(FileNotFoundError):
-            FileSystemCopier(source="some/invalid/path", root_path=os.getcwd()).local_path
+            FileSystemCopier(
+                source="some/invalid/path", root_path=os.getcwd()
+            ).local_path
 
         # Ensure file not found error is raised on invalid absolute path
         with pytest.raises(FileNotFoundError):
@@ -348,10 +360,7 @@ class TestFileSystemCopier:
         # this should return true because the source is a valid directory
         assert FileSystemCopier.type_match(source) is True
         # this should return false because the full path to source does not exist inside of root_path
-        assert (
-            FileSystemCopier.type_match("/some/invalid/path")
-            is False
-        )
+        assert FileSystemCopier.type_match("/some/invalid/path") is False
         # this should return true because the full path to source exists inside of root_path
         assert (
             FileSystemCopier.type_match(

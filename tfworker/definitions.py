@@ -15,7 +15,7 @@
 import collections
 import copy
 import json
-from pathlib import Path, PurePath
+from pathlib import Path, PosixPath, PurePath, WindowsPath
 
 import click
 import hcl2
@@ -38,6 +38,9 @@ class ReservedFileError(Exception):
 
 
 class Definition:
+    _plan_file = None
+    _ready_to_apply = False
+
     def __init__(
         self,
         definition,
@@ -52,6 +55,7 @@ class Definition:
         tf_version_major,
         limited=False,
         template_callback=None,
+        use_backend_remotes=False,
     ):
         self.tag = definition
         self._body = body
@@ -66,6 +70,7 @@ class Definition:
             body.get("template_vars", dict()), global_template_vars
         )
 
+        self._always_apply = body.get("always_apply", False)
         self._deployment = deployment
         self._repository_path = repository_path
         self._providers = providers
@@ -75,6 +80,8 @@ class Definition:
 
         self._target = f"{self._temp_dir}/definitions/{self.tag}".replace("//", "/")
         self._template_callback = template_callback
+
+        self._use_backend_remotes = use_backend_remotes
 
     @property
     def body(self):
@@ -104,6 +111,20 @@ class Definition:
                         result = result.intersection(required_providers)
         return result
 
+    @property
+    def plan_file(self):
+        return self._plan_file
+
+    @property
+    def template_vars(self):
+        return self._template_vars
+
+    @plan_file.setter
+    def plan_file(self, value: Path):
+        if type(value) not in [PosixPath, WindowsPath, Path]:
+            raise TypeError("plan_file must be a Path like object")
+        self._plan_file = value
+
     def prep(self, backend):
         """prepare the definitions for running"""
 
@@ -125,8 +146,23 @@ class Definition:
 
         try:
             c.copy(destination=self._target, **remote_options)
+        except FileNotFoundError as e:
+            if remote_options.get("sub_path", False):
+                click.secho(
+                    f"could not find sub_path {remote_options['sub_path']} for definition {self.tag}",
+                    fg="red",
+                )
+                raise SystemExit(1)
+            else:
+                raise e
         except FileExistsError as e:
             raise ReservedFileError(e)
+        except RuntimeError as e:
+            click.secho(
+                f"could not copy source path {self.path} for definition {self.tag}, error details:\n\n{e}",
+                fg="red",
+            )
+            raise SystemExit(1)
 
         # render the templates
         if self._template_callback is not None:
@@ -141,7 +177,11 @@ class Definition:
                 tflocals.write("}\n\n")
 
         # create remote data sources, and required providers
-        remotes = list(map(lambda x: x.split(".")[0], self._remote_vars.values()))
+        if self._use_backend_remotes:
+            remotes = backend.remotes()
+        else:
+            remotes = list(map(lambda x: x.split(".")[0], self._remote_vars.values()))
+
         with open(f"{self._target}/worker_terraform.tf", "w+") as tffile:
             tffile.write(f"{self._providers.hcl(self.provider_names)}\n\n")
             tffile.write(TERRAFORM_TPL.format(f"{backend.hcl(self.tag)}", ""))
@@ -236,6 +276,7 @@ class DefinitionsCollection(collections.abc.Mapping):
                 tf_version_major,
                 True if limit and definition in limit else False,
                 template_callback=self.render_templates,
+                use_backend_remotes=self._root_args.backend_use_all_remotes,
             )
 
     def __len__(self):

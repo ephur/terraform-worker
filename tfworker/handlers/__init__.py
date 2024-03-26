@@ -1,5 +1,6 @@
 import collections
 
+from .base import BaseHandler
 from .bitbucket import BitbucketHandler
 from .exceptions import HandlerError, UnknownHandler
 
@@ -33,6 +34,18 @@ class HandlersCollection(collections.abc.Mapping):
 
     def __iter__(self):
         return iter(self._handlers.values())
+
+    def __setitem__(self, key, value):
+        self._handlers[key] = value
+
+    def update(self, handlers_config):
+        """
+        update is used to update the handlers collection with new handlers
+        """
+        for k in handlers_config:
+            if k in self._handlers.keys():
+                raise TypeError(f"Duplicate handler: {k}")
+            self._handlers[k] = handlers_config[k]
 
     def get(self, value):
         try:

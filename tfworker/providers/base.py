@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 class BaseProvider:
     tag = None
 
@@ -79,7 +80,7 @@ class BaseProvider:
         _hcify is a recursive function that takes a string, list or dict
         and turns the results into an HCL compliant string.
         """
-        space = ' '
+        space = " "
         result = []
         if isinstance(s, str):
             tmps = s.replace('"', "").replace("'", "")
@@ -92,12 +93,14 @@ class BaseProvider:
             # check of the value is required to determine how to handle the key
             for k in s.keys():
                 if isinstance(s[k], str):
-                    result.append(f"{space * depth}{k} = \"{s[k]}\"")
+                    result.append(f'{space * depth}{k} = "{s[k]}"')
                 elif isinstance(s[k], list):
                     result.append(f"{space * depth}{k} = [{s[k]}]")
                 elif isinstance(s[k], dict):
                     # decrease depth by 4 to account for extra depth added by hclyifying the key
-                    result.append(f"{space * (depth-4)}{self._hclify(k, depth=depth)} = {{")
+                    result.append(
+                        f"{space * (depth-4)}{self._hclify(k, depth=depth)} = {{"
+                    )
                     result.append(self._hclify(s[k], depth=depth + 2))
                     result.append(f"{space * depth}}}")
                 else:
@@ -106,6 +109,7 @@ class BaseProvider:
             raise TypeError(f"Expected string, list or dict, got {type(s)}")
 
         return "\n".join(result)
+
 
 class UnknownProvider(Exception):
     def __init__(self, provider):

@@ -230,7 +230,7 @@ class TestTerraformCommand:
     #                 )
 
     def test_no_create_backend_bucket_fails_gcs(self, grootc_no_create_backend_bucket):
-        with pytest.raises(BackendError):
+        with pytest.raises(SystemExit):
             with mock.patch(
                 "tfworker.commands.base.BaseCommand.get_terraform_version",
                 side_effect=lambda x: (13, 3),
