@@ -88,12 +88,13 @@ def validate_working_dir(fpath):
             click.secho(f"Working path {fpath} must be empty!", fg="red")
             raise SystemExit(1)
 
+
 class CSVType(click.types.StringParamType):
-    name = 'csv'
-    envvar_list_splitter = ','
+    name = "csv"
+    envvar_list_splitter = ","
 
     def __repr__(self):
-        return 'CSV'
+        return "CSV"
 
 
 @click.group()

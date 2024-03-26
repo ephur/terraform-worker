@@ -26,6 +26,8 @@ from tfworker.definitions import Definition
 from tfworker.handlers.exceptions import HandlerError
 from tfworker.util.system import pipe_exec, strip_ansi
 
+TF_STATE_CACHE_NAME = "worker_state_cache.json"
+
 
 class HookError(Exception):
     pass
@@ -631,8 +633,83 @@ class TerraformCommand(BaseCommand):
     @staticmethod
     def get_state_item(working_dir, env, terraform_bin, state, item):
         """
-        get_state_item returns json encoded output from a terraform remote state
+        The general handler function for getting a state item, it will first
+        try to get the item from another definitions output, but if the other
+        definition is not setup, it will fallback to getting the item from the
+        remote state.
+
+        @param working_dir: The working directory of the terraform definition
+        @param env: The environment variables to pass to the terraform command
+        @param terraform_bin: The path to the terraform binary
+        @param state: The state name to get the item from
+        @param item: The item to get from the state
         """
+        try:
+            return TerraformCommand._get_state_item_from_output(
+                working_dir, env, terraform_bin, state, item
+            )
+        except FileNotFoundError:
+            return TerraformCommand._get_state_item_from_remote(
+                working_dir, env, terraform_bin, state, item
+            )
+
+    @staticmethod
+    def _get_state_item_from_remote(working_dir, env, terraform_bin, state, item):
+        """
+        get_state_item returns json encoded output from a terraform remote state
+
+        @param working_dir: The working directory of the terraform definition
+        @param env: The environment variables to pass to the terraform command
+        @param terraform_bin: The path to the terraform binary
+        @param state: The state name to get the item from
+        @param item: The item to get from the state
+        """
+
+        remote_state = None
+
+        # setup the state cache
+        cache_file = TerraformCommand._get_cache_name(working_dir)
+        TerraformCommand._make_state_cache(working_dir, env, terraform_bin)
+
+        # read the cache
+        with open(cache_file, "r") as f:
+            state_cache = json.load(f)
+
+        # Get the remote state we are looking for, and raise an error if it's not there
+        resources = state_cache["values"]["root_module"]["resources"]
+        for resource in resources:
+            if (
+                resource["type"] == "terraform_remote_state"
+                and resource["name"] == state
+            ):
+                remote_state = resource
+        if remote_state is None:
+            raise HookError(f"Remote state item {state} not found")
+
+        if item in remote_state["values"]["outputs"]:
+            return json.dumps(
+                remote_state["values"]["outputs"][item],
+                indent=None,
+                separators=(",", ":"),
+            )
+
+        raise HookError(f"Remote state item {state}.{item} not found in state cache")
+
+    @staticmethod
+    def _get_state_item_from_output(working_dir, env, terraform_bin, state, item):
+        """
+        Get a single item from the terraform output, this is the preferred
+        mechanism as items will be more guaranteed to be up to date, but it
+        creates problems when the remote state is not setup, like when using
+        --limit
+
+        @param work_dir: The working directory of the terraform definition
+        @param env: The environment variables to pass to the terraform command
+        @param terraform_bin: The path to the terraform binary
+        @param state: The state name to get the item from
+        @param item: The item to get from the state
+        """
+
         base_dir, _ = os.path.split(working_dir)
         try:
             (exit_code, stdout, stderr) = pipe_exec(
@@ -644,7 +721,7 @@ class TerraformCommand(BaseCommand):
             # the remote state is not setup, likely do to use of --limit
             # this is acceptable, and is the responsibility of the hook
             # to ensure it has all values needed for safe execution
-            return None
+            raise
 
         if exit_code != 0:
             raise HookError(
@@ -658,3 +735,64 @@ class TerraformCommand(BaseCommand):
             )
         json_output = json.loads(stdout)
         return json.dumps(json_output, indent=None, separators=(",", ":"))
+
+    @staticmethod
+    def _make_state_cache(
+        working_dir: str, env: dict, terraform_bin: str, refresh: bool = False
+    ):
+        """
+        Using `terraform show -json` make a cache of the state file
+
+        @param working_dir: The working directory of the terraform definition
+        @param env: The environment variables to pass to the terraform command
+        @param terraform_bin: The path to the terraform binary
+        @param refresh: If true, the cache will be refreshed
+        """
+
+        # check if the cache exists
+        state_cache = TerraformCommand._get_cache_name(working_dir)
+        if not refresh and os.path.exists(state_cache):
+            return
+
+        # ensure the state is refreshed; but no changes to resources are made
+        (exit_code, stdout, stderr) = pipe_exec(
+            f"{terraform_bin} apply -auto-approve -refresh-only",
+            cwd=working_dir,
+            env=env,
+        )
+
+        # get the json from terraform to generate the cache
+        (exit_code, stdout, stderr) = pipe_exec(
+            f"{terraform_bin} show -json",
+            cwd=working_dir,
+            env=env,
+        )
+
+        # validate the output, check exit code and ensure output is json
+        if exit_code != 0:
+            raise HookError(f"Error reading terraform state, details: {stderr}")
+        try:
+            json.loads(stdout)
+        except json.JSONDecodeError:
+            raise HookError(
+                f"Error parsing terraform state; output is not in json format"
+            )
+
+        # write the cache to disk
+        try:
+            with open(state_cache, "w") as f:
+                f.write(stdout.decode())
+        except Exception as e:
+            raise HookError(f"Error writing state cache to {state_cache}, details: {e}")
+        return
+
+    @staticmethod
+    def _get_cache_name(working_dir: str) -> str:
+        """
+        Get the cache directory for the state cache
+
+        @param working_dir: The working directory of the terraform definition
+
+        @return: The cache directory path
+        """
+        return f"{working_dir}/{TF_STATE_CACHE_NAME}"
