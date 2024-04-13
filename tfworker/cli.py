@@ -89,6 +89,14 @@ def validate_working_dir(fpath):
             raise SystemExit(1)
 
 
+class CSVType(click.types.StringParamType):
+    name = "csv"
+    envvar_list_splitter = ","
+
+    def __repr__(self):
+        return "CSV"
+
+
 @click.group()
 @click.option(
     "--aws-access-key-id",
@@ -181,6 +189,12 @@ def validate_working_dir(fpath):
     help="Region where terraform rootc/lock bucket exists",
 )
 @click.option(
+    "--backend-use-all-remotes/--no-backend-use-all-remotes",
+    default=False,
+    envvar="WORKER_BACKEND_USE_ALL_REMOTES",
+    help="Generate remote data sources based on all definition paths present in the backend",
+)
+@click.option(
     "--create-backend-bucket/--no-create-backend-bucket",
     default=True,
     help="Create the backend bucket if it does not exist",
@@ -203,6 +217,12 @@ def validate_working_dir(fpath):
     envvar="WORKER_CLEAN",
     help="clean up the temporary directory created by the worker after execution",
 )
+@click.option(
+    "--backend-plans/--no-backend-plans",
+    default=False,
+    envvar="WORKER_BACKEND_PLANS",
+    help="store plans in the backend",
+)
 @click.pass_context
 def cli(context, **kwargs):
     """CLI for the worker utility."""
@@ -222,6 +242,7 @@ def cli(context, **kwargs):
     help="limit operations to a single definition",
     envvar="WORKER_LIMIT",
     multiple=True,
+    type=CSVType(),
 )
 @click.argument("deployment", callback=validate_deployment)
 @click.pass_obj
@@ -256,6 +277,7 @@ def version():
     "--plan/--no-plan",
     "tf_plan",
     envvar="WORKER_PLAN",
+    type=bool,
     default=True,
     help="toggle running a plan, plan will still be skipped if using a saved plan file with apply",
 )
@@ -307,6 +329,7 @@ def version():
     help="limit operations to a single definition",
     envvar="WORKER_LIMIT",
     multiple=True,
+    type=CSVType(),
 )
 @click.option(
     "--provider-cache",
@@ -330,7 +353,11 @@ def version():
 @click.pass_obj
 def terraform(rootc, *args, **kwargs):
     """execute terraform orchestration"""
-    tfc = TerraformCommand(rootc, *args, **kwargs)
+    try:
+        tfc = TerraformCommand(rootc, *args, **kwargs)
+    except FileNotFoundError as e:
+        click.secho(f"terraform binary not found: {e.filename}", fg="red", err=True)
+        raise SystemExit(1)
 
     click.secho(f"building deployment {kwargs.get('deployment')}", fg="green")
     click.secho(f"working in directory: {tfc.temp_dir}", fg="yellow")

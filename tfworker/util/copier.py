@@ -158,7 +158,7 @@ class GitCopier(Copier):
 
         self.make_temp()
         temp_path = f"{self._temp_dir}/{sub_path}"
-        pipe_exec(
+        exitcode, stdout, stderr = pipe_exec(
             re.sub(
                 r"\s+",
                 " ",
@@ -166,6 +166,12 @@ class GitCopier(Copier):
             ),
             cwd=self._temp_dir,
         )
+
+        if exitcode != 0:
+            self.clean_temp()
+            raise RuntimeError(
+                f"unable to clone {self._source}, {stderr.decode('utf-8')}"
+            )
 
         try:
             self.check_conflicts(temp_path)
@@ -232,6 +238,8 @@ class FileSystemCopier(Copier):
         dest = self.get_destination(**kwargs)
         self.check_conflicts(self.local_path)
         source_path = f"{self.local_path}/{kwargs.get('sub_path', '')}".rstrip("/")
+        if not os.path.exists(source_path):
+            raise FileNotFoundError(f"{kwargs.get('sub_path')} does not exist")
         shutil.copytree(source_path, dest, dirs_exist_ok=True)
 
     @property

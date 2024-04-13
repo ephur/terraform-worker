@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from abc import ABCMeta, abstractmethod
+from abc import ABCMeta, abstractmethod, abstractproperty
 
 from tfworker import JSONType
 
@@ -22,6 +22,7 @@ class BackendError(Exception):
 
 
 class BaseBackend(metaclass=ABCMeta):
+    plan_storage = False
     tag = "base"
 
     @abstractmethod
@@ -35,6 +36,14 @@ class BaseBackend(metaclass=ABCMeta):
     @abstractmethod
     def clean(self, deployment: str, limit: tuple) -> str:
         pass
+
+    @abstractmethod
+    def remotes(self) -> list:
+        pass
+
+    @property
+    def handlers(self) -> dict:
+        return {}
 
 
 class Backends:
