@@ -3,6 +3,7 @@ import collections
 from .base import BaseHandler
 from .bitbucket import BitbucketHandler
 from .exceptions import HandlerError, UnknownHandler
+from .trivy import TrivyHandler
 
 
 class HandlersCollection(collections.abc.Mapping):
@@ -21,6 +22,8 @@ class HandlersCollection(collections.abc.Mapping):
                 raise TypeError(f"Duplicate handler: {k}")
             if k == "bitbucket":
                 self._handlers["bitbucket"] = BitbucketHandler(handlers_config[k])
+            elif k == "trivy":
+                self._handlers["trivy"] = TrivyHandler(handlers_config[k])
             else:
                 raise UnknownHandler(provider=k)
 

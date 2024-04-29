@@ -162,11 +162,14 @@ class TerraformCommand(BaseCommand):
                 stage="check",
                 deployment=self._deployment,
                 definition=definition.tag,
+                definition_path=definition.fs_path,
                 planfile=plan_file,
             )
         except HandlerError as e:
+            if e.terminate:
+                click.secho(f"terminating due to fatal handler error {e}", fg="red")
+                raise SystemExit(1)
             click.secho(f"handler error: {e}", fg="red")
-            raise SystemExit(1)
 
         # if --no-plan is specified, skip planning step regardless of other conditions
         if self._tf_plan is False:
@@ -204,10 +207,13 @@ class TerraformCommand(BaseCommand):
                 stage="pre",
                 deployment=self._deployment,
                 definition=definition.tag,
+                definition_path=definition.fs_path,
             )
         except HandlerError as e:
+            if e.terminate:
+                click.secho(f"terminating due to fatal handler error {e}", fg="red")
+                raise SystemExit(1)
             click.secho(f"handler error: {e}", fg="red")
-            raise SystemExit(1)
 
         click.secho(
             f"planning definition for {self._plan_for}: {definition.tag}",
@@ -240,12 +246,16 @@ class TerraformCommand(BaseCommand):
                 stage="post",
                 deployment=self._deployment,
                 definition=definition.tag,
+                definition_path=definition.fs_path,
                 text=strip_ansi(self._terraform_output["stdout"].decode()),
                 planfile=definition.plan_file,
                 changes=changes,
             )
         except HandlerError as e:
-            click.secho(f"handler error: {e}", fg="red")
+            click.secho(f"{e}", fg="red")
+            if e.terminate:
+                click.secho(f"error is fatal, terminating", fg="red")
+                raise SystemExit(1)
 
         if not changes:
             click.secho(f"no plan changes for {definition.tag}", fg="yellow")
@@ -291,11 +301,14 @@ class TerraformCommand(BaseCommand):
                 stage="pre",
                 deployment=self._deployment,
                 definition=definition.tag,
+                definition_path=definition.fs_path,
                 planfile=definition.plan_file,
             )
         except HandlerError as e:
+            if e.terminate:
+                click.secho(f"terminating due to fatal handler error {e}", fg="red")
+                raise SystemExit(1)
             click.secho(f"handler error: {e}", fg="red")
-            raise SystemExit(1)
 
         # execute terraform apply or destroy
         tf_error = False
@@ -320,12 +333,15 @@ class TerraformCommand(BaseCommand):
                 stage="post",
                 deployment=self._deployment,
                 definition=definition.tag,
+                definition_path=definition.fs_path,
                 planfile=definition.plan_file,
                 error=tf_error,
             )
         except HandlerError as e:
+            if e.terminate:
+                click.secho(f"terminating due to fatal handler error {e}", fg="red")
+                raise SystemExit(1)
             click.secho(f"handler error: {e}", fg="red")
-            raise SystemExit(1)
 
         if tf_error is True:
             click.secho(
