@@ -229,11 +229,7 @@ def cli(context, **kwargs):
     validate_host()
     validate_working_dir(kwargs.get("working_dir", None))
     config_file = kwargs["config_file"]
-    try:
-        context.obj = RootCommand(args=kwargs)
-    except FileNotFoundError:
-        click.secho(f"configuration file {config_file} not found", fg="red", err=True)
-        raise SystemExit(1)
+    context.obj = RootCommand(args=kwargs)
 
 
 @cli.command()
