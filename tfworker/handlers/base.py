@@ -7,10 +7,12 @@ class BaseHandler(metaclass=ABCMeta):
     actions = []
     required_vars = []
 
-    @abstractmethod
     def is_ready(self):  # pragma: no cover
         """is_ready is called to determine if a handler is ready to be executed"""
-        return True
+        try:
+            return self._ready
+        except AttributeError:
+            return False
 
     @abstractmethod
     def execute(self, action: str, stage: str, **kwargs) -> None:  # pragma: no cover
@@ -22,22 +24,5 @@ class BaseHandler(metaclass=ABCMeta):
         """
         pass
 
-
-class UnknownHandler(Exception):
-    """This is an excpetion that indicates configuration was attempted for a handler that is not supported."""
-
-    def __init__(self, provider):
-        self.provider = provider
-
     def __str__(self):
-        return f"Unknown handler: {self.provider}"
-
-
-class HandlerError(Exception):
-    """This is an exception that indicates an error occurred while attempting to execute a handler."""
-
-    def __init__(self, message):
-        self.message = message
-
-    def __str__(self):
-        return f"Handler error: {self.message}"
+        return self.__class__.__name__

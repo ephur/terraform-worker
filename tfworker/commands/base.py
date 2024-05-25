@@ -128,6 +128,7 @@ class BaseCommand:
                 raise SystemExit(1)
 
         # initialize handlers collection
+        click.secho("Initializing handlers", fg="green")
         try:
             self._handlers = HandlersCollection(rootc.handlers_odict)
         except (UnknownHandler, HandlerError, TypeError) as e:
@@ -137,6 +138,11 @@ class BaseCommand:
         # allow a backend to implement handlers as well since they already control the provider session
         if self._backend.handlers and self._backend_plans:
             self._handlers.update(self._backend.handlers)
+
+        # list enabled handlers
+        click.secho("Enabled handlers:", fg="green")
+        for h in self._handlers:
+            click.secho(f"  {h}", fg="green")
 
     @property
     def authenticators(self):

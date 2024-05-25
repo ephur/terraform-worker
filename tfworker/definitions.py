@@ -96,6 +96,10 @@ class Definition:
         return self._path
 
     @property
+    def fs_path(self):
+        return Path(f"{self._temp_dir}/definitions/{self.tag}").resolve()
+
+    @property
     def provider_names(self):
         """Extract only the providers used by a definition"""
         result = set(self._providers.keys())
