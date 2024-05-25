@@ -282,10 +282,13 @@ class TestOrderedConfigLoad:
             subkey1a: value2
           - ohnoimalistnow
         """
+        expected_error_out = ""
+        for i, line in enumerate(config.split("\n")):
+            expected_error_out += f"{i+1}: {line}\n"
         with pytest.raises(SystemExit) as e:
             ordered_config_load(config)
         out, err = capfd.readouterr()
         assert e.value.code == 1
         assert "error loading yaml/json" in out
         assert "the configuration that caused the error was" in out
-        assert config in out
+        assert expected_error_out in out

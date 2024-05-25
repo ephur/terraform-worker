@@ -18,8 +18,7 @@ import pytest
 from botocore.credentials import Credentials
 from moto import mock_sts
 
-from tfworker.authenticators.aws import (AWSAuthenticator,
-                                         MissingArgumentException)
+from tfworker.authenticators.aws import AWSAuthenticator, MissingArgumentException
 from tfworker.commands.root import RootCommand
 from tfworker.constants import DEFAULT_BACKEND_PREFIX
 

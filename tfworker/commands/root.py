@@ -259,7 +259,9 @@ def ordered_config_load(config: str) -> dict:
         return yaml.load(config, Loader=yaml.FullLoader)
     except yaml.YAMLError as e:
         click.secho(f"error loading yaml/json: {e}", fg="red")
-        click.secho(f"the configuration that caused the error was\n:{config}", fg="red")
+        click.secho(f"the configuration that caused the error was\n:", fg="red")
+        for i, line in enumerate(config.split("\n")):
+            click.secho(f"{i+1}: {line}", fg="red")
         raise SystemExit(1)
 
 
