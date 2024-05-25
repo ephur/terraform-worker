@@ -25,14 +25,8 @@ def mock_get_distribution(package: str):
 
 class TestVersionCommand:
     def test_exec(self, capsys):
-        VersionCommand().exec()
+        vc = VersionCommand()
+        vc._version = "1.2.3"
+        vc.exec()
         text = capsys.readouterr()
-        assert text.out.startswith("terraform-worker version")
-
-        with mock.patch(
-            "tfworker.commands.version.get_distribution",
-            side_effect=mock_get_distribution,
-        ):
-            VersionCommand().exec()
-            text = capsys.readouterr()
-            assert text.out == "terraform-worker version unknown\n"
+        assert text.out == "terraform-worker version 1.2.3\n"
