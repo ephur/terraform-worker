@@ -21,7 +21,6 @@ from unittest import mock
 import boto3
 import pytest
 from moto import mock_aws
-from pytest_lazyfixture import lazy_fixture
 
 import tfworker
 import tfworker.commands.base
@@ -278,13 +277,6 @@ def hcl_base_rootc(s3_client, dynamodb_client, sts_client):
         }
     )
     return result
-
-
-@pytest.fixture(
-    params=[lazy_fixture("tf_12cmd"), lazy_fixture("tf_13cmd"), lazy_fixture("tf_Xcmd")]
-)
-def tf_cmd(request):
-    return request.param
 
 
 @pytest.fixture(scope="function")

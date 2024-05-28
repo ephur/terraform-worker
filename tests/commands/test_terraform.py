@@ -21,7 +21,6 @@ from unittest import mock
 
 import pytest
 from google.cloud.exceptions import NotFound
-from pytest_lazyfixture import lazy_fixture
 
 import tfworker
 from tfworker.backends.base import BackendError
@@ -49,8 +48,9 @@ def mock_tf_version(args: str) -> Tuple[int, str, str]:
 
 
 class TestTerraformCommand:
-    @pytest.mark.parametrize("tf_cmd", [lazy_fixture("tf_12cmd")])
-    def test_prep_modules(self, tf_cmd, rootc):
+    @pytest.mark.parametrize("tf_cmd", ["tf_12cmd", "tf_13cmd", "tf_14cmd", "tf_15cmd"])
+    def test_prep_modules(self, tf_cmd, rootc, request):
+        tf_cmd = request.getfixturevalue(tf_cmd)
         tf_cmd.prep_modules()
         for test_file in [
             "/terraform-modules/test_a/test.tf",
@@ -60,8 +60,9 @@ class TestTerraformCommand:
             dst = rootc.temp_dir + test_file
             assert filecmp.cmp(src, dst, shallow=False)
 
-    @pytest.mark.parametrize("tf_cmd", [lazy_fixture("tf_12cmd")])
-    def test_terraform_modules_dir(self, tf_cmd, rootc):
+    @pytest.mark.parametrize("tf_cmd", ["tf_12cmd", "tf_13cmd", "tf_14cmd", "tf_15cmd"])
+    def test_terraform_modules_dir(self, tf_cmd, rootc, request):
+        tf_cmd = request.getfixturevalue(tf_cmd)
         with tempfile.TemporaryDirectory() as d:
             test_files = [Path("test_a/test.tf"), Path("test_b/test.tf")]
             for f in test_files:
@@ -86,87 +87,88 @@ class TestTerraformCommand:
         [
             (
                 "init",
-                lazy_fixture("tf_12cmd"),
+                "tf_12cmd",
                 ["-input=false", "-no-color", "-plugin-dir"],
             ),
             (
                 "plan",
-                lazy_fixture("tf_12cmd"),
+                "tf_12cmd",
                 ["-input=false", "-detailed-exitcode", "-no-color"],
             ),
             (
                 "apply",
-                lazy_fixture("tf_12cmd"),
+                "tf_12cmd",
                 ["-input=false", "-no-color", "-auto-approve"],
             ),
             (
                 "destroy",
-                lazy_fixture("tf_12cmd"),
+                "tf_12cmd",
                 ["-input=false", "-no-color", "-auto-approve"],
             ),
             (
                 "init",
-                lazy_fixture("tf_13cmd"),
+                "tf_13cmd",
                 ["-input=false", "-no-color", "-plugin-dir"],
             ),
             (
                 "plan",
-                lazy_fixture("tf_13cmd"),
+                "tf_13cmd",
                 ["-input=false", "-detailed-exitcode", "-no-color"],
             ),
             (
                 "apply",
-                lazy_fixture("tf_13cmd"),
+                "tf_13cmd",
                 ["-input=false", "-no-color", "-auto-approve"],
             ),
             (
                 "destroy",
-                lazy_fixture("tf_13cmd"),
+                "tf_13cmd",
                 ["-input=false", "-no-color", "-auto-approve"],
             ),
             (
                 "init",
-                lazy_fixture("tf_14cmd"),
+                "tf_14cmd",
                 ["-input=false", "-no-color", "-plugin-dir"],
             ),
             (
                 "plan",
-                lazy_fixture("tf_14cmd"),
+                "tf_14cmd",
                 ["-input=false", "-detailed-exitcode", "-no-color"],
             ),
             (
                 "apply",
-                lazy_fixture("tf_14cmd"),
+                "tf_14cmd",
                 ["-input=false", "-no-color", "-auto-approve"],
             ),
             (
                 "destroy",
-                lazy_fixture("tf_14cmd"),
+                "tf_14cmd",
                 ["-input=false", "-no-color", "-auto-approve"],
             ),
             (
                 "init",
-                lazy_fixture("tf_15cmd"),
+                "tf_15cmd",
                 ["-input=false", "-no-color", "-plugin-dir"],
             ),
             (
                 "plan",
-                lazy_fixture("tf_15cmd"),
+                "tf_15cmd",
                 ["-input=false", "-detailed-exitcode", "-no-color"],
             ),
             (
                 "apply",
-                lazy_fixture("tf_15cmd"),
+                "tf_15cmd",
                 ["-input=false", "-no-color", "-auto-approve"],
             ),
             (
                 "destroy",
-                lazy_fixture("tf_15cmd"),
+                "tf_15cmd",
                 ["-input=false", "-no-color", "-auto-approve"],
             ),
         ],
     )
-    def test_run(self, tf_cmd: str, method: callable, args: list):
+    def test_run(self, tf_cmd: str, method: callable, args: list, request):
+        tf_cmd = request.getfixturevalue(tf_cmd)
         with mock.patch(
             "tfworker.commands.terraform.pipe_exec",
             side_effect=mock_pipe_exec,
