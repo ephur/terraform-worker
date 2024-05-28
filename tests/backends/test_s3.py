@@ -11,12 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
 import random
 import string
+from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
+from moto import mock_aws
 
+from tests.conftest import MockAWSAuth
+from tfworker.backends import S3Backend
 from tfworker.backends.base import BackendError
+from tfworker.handlers import HandlerError
 
 STATE_BUCKET = "test_bucket"
 STATE_PREFIX = "terraform"
@@ -25,6 +32,7 @@ STATE_DEPLOYMENT = "test-0001"
 EMPTY_STATE = f"{STATE_PREFIX}/{STATE_DEPLOYMENT}/empty/terraform.tfstate"
 OCCUPIED_STATE = f"{STATE_PREFIX}/{STATE_DEPLOYMENT}/occupied/terraform.tfstate"
 LOCK_DIGEST = "1234123412341234"
+NO_SUCH_BUCKET = "no_such_bucket"
 
 
 @pytest.fixture(scope="class")
@@ -157,6 +165,191 @@ class TestS3BackendAll:
             f"terraform-{STATE_DEPLOYMENT}"
             not in dynamodb_client.list_tables()["TableNames"]
         )
+
+
+class TestS3BackendInit:
+    def setup_method(self, method):
+        self.authenticators = {"aws": MockAWSAuth()}
+        self.definitions = {}
+
+    def test_no_session(self):
+        self.authenticators["aws"]._session = None
+        with pytest.raises(BackendError):
+            result = S3Backend(self.authenticators, self.definitions)
+
+    def test_no_backend_session(self):
+        self.authenticators["aws"]._backend_session = None
+        with pytest.raises(BackendError):
+            result = S3Backend(self.authenticators, self.definitions)
+
+    @patch("tfworker.backends.S3Backend._ensure_locking_table", return_value=None)
+    @patch("tfworker.backends.S3Backend._ensure_backend_bucket", return_value=None)
+    @patch("tfworker.backends.S3Backend._get_bucket_files", return_value={})
+    def test_deployment_undefined(
+        self,
+        mock_get_bucket_files,
+        mock_ensure_backend_bucket,
+        mock_ensure_locking_table,
+    ):
+        # arrange
+        result = S3Backend(self.authenticators, self.definitions)
+        assert result._deployment == "undefined"
+        assert mock_get_bucket_files.called
+        assert mock_ensure_backend_bucket.called
+        assert mock_ensure_locking_table.called
+
+    @patch("tfworker.backends.S3Backend._ensure_locking_table", return_value=None)
+    @patch("tfworker.backends.S3Backend._ensure_backend_bucket", return_value=None)
+    @patch("tfworker.backends.S3Backend._get_bucket_files", return_value={})
+    @patch("tfworker.backends.s3.S3Handler", side_effect=HandlerError("message"))
+    def test_handler_error(
+        self,
+        mock_get_bucket_files,
+        mock_ensure_backend_bucket,
+        mock_ensure_locking_table,
+        mock_handler,
+    ):
+        with pytest.raises(SystemExit):
+            result = S3Backend(self.authenticators, self.definitions)
+
+
+class TestS3BackendEnsureBackendBucket:
+    from botocore.exceptions import ClientError
+
+    @pytest.fixture(autouse=True)
+    def setup_class(self, state_setup):
+        pass
+
+    @patch("tfworker.backends.S3Backend._ensure_locking_table", return_value=None)
+    @patch("tfworker.backends.S3Backend._ensure_backend_bucket", return_value=None)
+    @patch("tfworker.backends.S3Backend._get_bucket_files", return_value={})
+    def setup_method(
+        self,
+        method,
+        mock_get_bucket_files,
+        mock_ensure_backend_bucket,
+        mock_ensure_locking_table,
+    ):
+        with mock_aws():
+            self.authenticators = {"aws": MockAWSAuth()}
+            self.definitions = {}
+            self.backend = S3Backend(self.authenticators, self.definitions)
+            self.backend._authenticator.bucket = STATE_BUCKET
+            self.backend._authenticator.backend_region = STATE_REGION
+
+    def teardown_method(self, method):
+        with mock_aws():
+            try:
+                self.backend._s3_client.delete_bucket(Bucket=NO_SUCH_BUCKET)
+            except Exception:
+                pass
+
+    @mock_aws
+    def test_check_bucket_does_not_exist(self):
+        result = self.backend._check_bucket_exists(NO_SUCH_BUCKET)
+        assert result is False
+
+    @mock_aws
+    def test_check_bucket_exists(self):
+        result = self.backend._check_bucket_exists(STATE_BUCKET)
+        assert result is True
+
+    @mock_aws
+    def test_check_bucket_exists_error(self):
+        self.backend._s3_client = MagicMock()
+        self.backend._s3_client.head_bucket.side_effect = ClientError(
+            {"Error": {"Code": "403", "Message": "Unauthorized"}}, "head_bucket"
+        )
+
+        with pytest.raises(ClientError):
+            result = self.backend._check_bucket_exists(STATE_BUCKET)
+            assert self.backend._s3_client.head_bucket.called
+
+    @mock_aws
+    def test_bucket_not_exist_no_create(self, capfd):
+        self.backend._authenticator.create_backend_bucket = False
+        self.backend._authenticator.bucket = NO_SUCH_BUCKET
+        with pytest.raises(BackendError):
+            result = self.backend._ensure_backend_bucket()
+            assert (
+                "Backend bucket not found and --no-create-backend-bucket specified."
+                in capfd.readouterr().out
+            )
+
+    @mock_aws
+    def test_create_bucket(self):
+        self.backend._authenticator.create_backend_bucket = True
+        self.backend._authenticator.bucket = NO_SUCH_BUCKET
+        assert NO_SUCH_BUCKET not in [
+            x["Name"] for x in self.backend._s3_client.list_buckets()["Buckets"]
+        ]
+        result = self.backend._ensure_backend_bucket()
+        assert result is None
+        assert NO_SUCH_BUCKET in [
+            x["Name"] for x in self.backend._s3_client.list_buckets()["Buckets"]
+        ]
+
+    @mock_aws
+    def test_create_bucket_invalid_location_constraint(self, capsys):
+        self.backend._authenticator.create_backend_bucket = True
+        self.backend._authenticator.bucket = NO_SUCH_BUCKET
+        self.backend._authenticator.backend_region = "us-west-1"
+        # moto doesn't properly raise a location constraint when the session doesn't match the region
+        # so we'll just do it manually
+        assert self.backend._authenticator.backend_session.region_name != "us-west-1"
+        assert self.backend._authenticator.backend_region == "us-west-1"
+        assert NO_SUCH_BUCKET not in [
+            x["Name"] for x in self.backend._s3_client.list_buckets()["Buckets"]
+        ]
+        self.backend._s3_client = MagicMock()
+        self.backend._s3_client.create_bucket.side_effect = ClientError(
+            {
+                "Error": {
+                    "Code": "InvalidLocationConstraint",
+                    "Message": "InvalidLocationConstraint",
+                }
+            },
+            "create_bucket",
+        )
+
+        with pytest.raises(SystemExit):
+            result = self.backend._create_bucket(NO_SUCH_BUCKET)
+            assert "InvalidLocationConstraint" in capsys.readouterr().out
+
+        assert NO_SUCH_BUCKET not in [
+            x["Name"] for x in self.backend._s3_client.list_buckets()["Buckets"]
+        ]
+
+    # This test can not be enabled until several other tests are refactored to not create the bucket needlessly
+    # as the method itself skips this check when being run through a test, the same also applies to "BucketAlreadyOwnedByYou"
+    # @mock_aws
+    # def test_create_bucket_already_exists(self, capsys):
+    #     self.backend._authenticator.create_backend_bucket = True
+    #     self.backend._authenticator.bucket = STATE_BUCKET
+    #     assert STATE_BUCKET in [ x['Name'] for x in self.backend._s3_client.list_buckets()['Buckets'] ]
+
+    #     with pytest.raises(SystemExit):
+    #         result = self.backend._create_bucket(STATE_BUCKET)
+    #         assert f"Bucket {STATE_BUCKET} already exists" in capsys.readouterr().out
+
+    def test_create_bucket_error(self):
+        self.backend._authenticator.create_backend_bucket = True
+        self.backend._authenticator.bucket = NO_SUCH_BUCKET
+        self.backend._s3_client = MagicMock()
+        self.backend._s3_client.create_bucket.side_effect = ClientError(
+            {"Error": {"Code": "403", "Message": "Unauthorized"}}, "create_bucket"
+        )
+
+        with pytest.raises(ClientError):
+            result = self.backend._create_bucket(NO_SUCH_BUCKET)
+            assert self.backend._s3_client.create_bucket.called
+
+
+def test_backend_remotes(basec, state_setup):
+    remotes = basec.backend.remotes()
+    assert len(remotes) == 2
+    assert "empty" in remotes
+    assert "occupied" in remotes
 
 
 def test_backend_clean_all(basec, request, state_setup, dynamodb_client, s3_client):

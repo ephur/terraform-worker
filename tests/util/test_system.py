@@ -17,7 +17,7 @@ from unittest import mock
 
 import pytest
 
-from tfworker.util.system import pipe_exec, which
+from tfworker.util.system import get_version, pipe_exec, strip_ansi, which
 
 
 # context manager to allow testing exceptions in parameterized tests
@@ -32,6 +32,12 @@ def mock_pipe_exec(args, stdin=None, cwd=None, env=None):
 
 def mock_tf_version(args: str):
     return (0, args.encode(), "".encode())
+
+
+def mock_distribution(*args, **kwargs):
+    Class = mock.MagicMock()
+    Class.version = "1.2.3"
+    return Class
 
 
 class TestUtilSystem:
@@ -109,3 +115,41 @@ class TestUtilSystem:
         ):
             with mock.patch("os.access", side_effect=lambda x, y: True):
                 assert which("terraform") is not None
+
+    def test_which_full_path(self):
+        with mock.patch(
+            "os.path.isfile",
+            side_effect=lambda x: True,
+        ):
+            with mock.patch("os.access", side_effect=lambda x, y: True):
+                assert which("/full/path/to/file") is not None
+
+    def test_which_not_found(self):
+        with mock.patch(
+            "os.path.isfile",
+            side_effect=lambda x: False,
+        ):
+            with mock.patch("os.access", side_effect=lambda x, y: False):
+                assert which("terraform") is None
+
+    def test_get_version(self):
+        with mock.patch(
+            "tfworker.util.system.get_distribution",
+            side_effect=mock_distribution,
+        ):
+            assert get_version() == "1.2.3"
+
+    def test_get_version_unknown(self):
+        from pkg_resources import DistributionNotFound
+
+        with mock.patch(
+            "tfworker.util.system.get_distribution",
+            side_effect=DistributionNotFound,
+        ):
+            assert get_version() == "unknown"
+
+    def test_strip_ansi(self):
+        assert strip_ansi("\x1B[31mHello\x1B[0m") == "Hello"
+        assert strip_ansi("\x1B[32mWorld\x1B[0m") == "World"
+        assert strip_ansi("\x1B[33mFoo\x1B[0m") == "Foo"
+        assert strip_ansi("\x1B[34mBar\x1B[0m") == "Bar"

@@ -19,6 +19,8 @@ import platform
 import re
 import shutil
 import tempfile
+from pathlib import Path
+from typing import Union
 
 import click
 import hcl2
@@ -29,7 +31,12 @@ from jinja2.runtime import StrictUndefined
 
 class RootCommand:
     def __init__(self, args={}):
-        """Setup state with args that are passed."""
+        """
+        Initialize the RootCommand with the given arguments.
+
+        Args:
+            args (dict, optional): A dictionary of arguments to initialize the RootCommand with. Defaults to {}.
+        """
         self.working_dir = args.get("working_dir", None)
 
         # the default behavior of --clean/--no-clean varies depending on if working-dir is passed
@@ -52,7 +59,9 @@ class RootCommand:
         self.add_args(args)
 
     def __del__(self):
-        """Cleanup the temporary directory after execution."""
+        """
+        Cleanup the temporary directory after execution.
+        """
 
         if self.clean:
             # the affect of remove_top being true is removing the top level directory, for a temporary
@@ -66,18 +75,60 @@ class RootCommand:
                 pass
 
     def add_args(self, args):
-        """Add a dictionary of args."""
+        """
+        Add a dictionary of args.
+
+        Args:
+            args (dict): A dictionary of arguments to add.
+        """
         for k, v in args.items():
             self.add_arg(k, v)
 
     def add_arg(self, k, v):
-        """Add an argument to the state args."""
+        """
+        Add an argument to the state args.
+
+        Args:
+            k (str): The key of the argument.
+            v (any): The value of the argument.
+        """
         setattr(self.args, k, v)
         return None
 
     def load_config(self):
+        """
+        Load the configuration file.
+        """
         if not self.config_file:
             return
+
+        self._config_file_exists()
+        rendered_config = self._process_template()
+
+        if self.config_file.endswith(".hcl"):
+            self.config = ordered_config_load_hcl(rendered_config)
+        else:
+            self.config = ordered_config_load(rendered_config)
+
+        # Decorate the RootCommand with the config values
+        self.tf = self.config.get("terraform", dict())
+        self._pullup_keys()
+        self._merge_args()
+
+    def _config_file_exists(self):
+        """
+        Check if the configuration file exists.
+        """
+        if not os.path.exists(self.config_file):
+            click.secho(
+                f"configuration file does not exist: {self.config_file}", fg="red"
+            )
+            raise SystemExit(1)
+
+    def _process_template(self) -> str:
+        """
+        Process the Jinja2 template.
+        """
         try:
             template_reader = io.StringIO()
             jinja_env = jinja2.Environment(
@@ -89,26 +140,9 @@ class RootCommand:
             template_config = jinja_env.get_template(
                 pathlib.Path(self.config_file).name
             )
-            # maybe get_env should be optional?
             template_config.stream(
                 **self.args.template_items(return_as_dict=True, get_env=True)
             ).dump(template_reader)
-            if self.config_file.endswith(".hcl"):
-                self.config = ordered_config_load_hcl(
-                    template_reader.getvalue(), self.args
-                )
-            else:
-                self.config = ordered_config_load(template_reader.getvalue(), self.args)
-
-            # A little arbitrary, but decorate the top two levels
-            # directly on self object
-            self.tf = self.config.get("terraform", dict())
-            self._pullup_keys()
-            self._merge_args()
-        except jinja2.exceptions.TemplateNotFound as e:
-            path = pathlib.Path(self.config_file).parents[0]
-            click.secho(f"can not read template file: {path}/{e}", fg="red")
-            raise SystemExit(1)
         except jinja2.exceptions.UndefinedError as e:
             click.secho(
                 f"configuration file contains invalid template substitutions: {e}",
@@ -116,9 +150,12 @@ class RootCommand:
             )
             raise SystemExit(1)
 
+        return template_reader.getvalue()
+
     def _pullup_keys(self):
-        """_pullup_keys is a utility function to place keys from the loaded config file
-        directly on the RootCommand instance."""
+        """
+        A utility function to place keys from the loaded config file directly on the RootCommand instance.
+        """
         for k in [
             "definitions",
             "providers",
@@ -134,11 +171,16 @@ class RootCommand:
                 setattr(self, f"{k}_odict", None)
 
     def _merge_args(self):
+        """
+        Merge the worker options from the config file with the command line arguments.
+        """
         for k, v in self.worker_options_odict.items():
             self.add_arg(k, v)
 
     class StateArgs:
-        """A class to hold arguments in the state for easier access."""
+        """
+        A class to hold arguments in the state for easier access.
+        """
 
         def __iter__(self):
             return iter(self.__dict__)
@@ -183,8 +225,13 @@ class RootCommand:
 
 def get_config_var_dict(config_vars):
     """
-    get_config_var_dict returns a dictionary of of key=value for each item
-    provided as a command line substitution
+    Returns a dictionary of of key=value for each item provided as a command line substitution.
+
+    Args:
+        config_vars (list): A list of command line substitutions.
+
+    Returns:
+        dict: A dictionary of key=value pairs.
     """
     return_vars = dict()
     for cv in config_vars:
@@ -196,25 +243,34 @@ def get_config_var_dict(config_vars):
     return return_vars
 
 
-def ordered_config_load_hcl(stream, args) -> dict:
+def ordered_config_load_hcl(config: str) -> dict:
     """
     Load an hcl config, and replace templated items.
     """
-    return hcl2.loads(stream)
+    return hcl2.loads(config)
 
 
-def ordered_config_load(stream, args) -> dict:
+def ordered_config_load(config: str) -> dict:
     """
     since python 3.7 the yaml loader is deterministic, so we can
     use the standard yaml loader
     """
-    return yaml.load(stream, Loader=yaml.FullLoader)
+    try:
+        return yaml.load(config, Loader=yaml.FullLoader)
+    except yaml.YAMLError as e:
+        click.secho(f"error loading yaml/json: {e}", fg="red")
+        click.secho(f"the configuration that caused the error was\n:", fg="red")
+        for i, line in enumerate(config.split("\n")):
+            click.secho(f"{i+1}: {line}", fg="red")
+        raise SystemExit(1)
 
 
 def get_platform():
     """
-    get_platform will return a formatted operating system / architecture
-    tuple that is consistent with common distribution creation tools
+    Returns a formatted operating system / architecture tuple that is consistent with common distribution creation tools.
+
+    Returns:
+        tuple: A tuple containing the operating system and architecture.
     """
 
     # strip off "2" which only appears on old linux kernels
@@ -233,11 +289,15 @@ def get_platform():
     return (opsys, machine)
 
 
-def rm_tree(base_path, inner=False):
+def rm_tree(base_path: Union[str, Path], inner: bool = False) -> None:
     """
-    rm_tree recursively removes all files and directories
+    Recursively removes all files and directories.
+
+    Args:
+        base_path (Union[str, Path]): The base path to start removing files and directories from.
+        inner (bool, optional): Controls recrusion, if True only the inner files and directories are removed. Defaults to False.
     """
-    parent = pathlib.Path(base_path)
+    parent: Path = Path(base_path)
 
     for child in parent.glob("*"):
         if child.is_file() or child.is_symlink():

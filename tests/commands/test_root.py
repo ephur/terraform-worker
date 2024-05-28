@@ -105,7 +105,7 @@ class TestMain:
             invalidrc.load_config()
         assert e.value.code == 1
         out, err = capfd.readouterr()
-        assert "can not read" in out
+        assert "configuration file does not exist" in out
 
         # a j2 template with invalid substitutions should raise an error
         invalidrc = tfworker.commands.root.RootCommand(
@@ -245,3 +245,50 @@ class TestMain:
                 assert machine == actual_machine
                 mock1.assert_called_once()
                 mock2.assert_called_once()
+
+
+import io
+
+import pytest
+
+from tfworker.commands.root import ordered_config_load
+
+
+class TestOrderedConfigLoad:
+    def test_ordered_config_load(self):
+        config = """
+        key1: value1
+        key2: value2
+        key3:
+          - item1
+          - item2
+        """
+        result = ordered_config_load(config)
+        assert result == {
+            "key1": "value1",
+            "key2": "value2",
+            "key3": ["item1", "item2"],
+        }
+
+    def test_ordered_config_load_invalid(self, capfd):
+        config = """
+        key1: value1
+        key2: value2
+        key3:
+          - item1
+          - item2
+        key4:
+          subkey1: value1
+            subkey1a: value2
+          - ohnoimalistnow
+        """
+        expected_error_out = ""
+        for i, line in enumerate(config.split("\n")):
+            expected_error_out += f"{i+1}: {line}\n"
+        with pytest.raises(SystemExit) as e:
+            ordered_config_load(config)
+        out, err = capfd.readouterr()
+        assert e.value.code == 1
+        assert "error loading yaml/json" in out
+        assert "the configuration that caused the error was" in out
+        assert expected_error_out in out

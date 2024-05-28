@@ -34,103 +34,32 @@ class S3Backend(BaseBackend):
     plan_storage = False
 
     def __init__(self, authenticators, definitions, deployment=None):
-        self._authenticator = authenticators[self.auth_tag]
+        # print the module name for debugging
         self._definitions = definitions
-        self._deployment = "undefined"
-        self._handlers = None
+        self._authenticator = authenticators[self.auth_tag]
+        if not self._authenticator.session:
+            raise BackendError(
+                "AWS session not available",
+                help="Either provide AWS credentials or a profile, see --help for more information.",
+            )
+        if not self._authenticator.backend_session:
+            raise BackendError(
+                "AWS backend session not available",
+                help="Either provide AWS credentials or a profile, see --help for more information.",
+            )
 
-        if deployment:
+        if deployment is None:
+            self._deployment = "undefined"
+        else:
             self._deployment = deployment
 
-        self._ddb_client = boto3.client(
-            "dynamodb",
-            region_name=self._authenticator.backend_region,
-            aws_access_key_id=self._authenticator.access_key_id,
-            aws_secret_access_key=self._authenticator.secret_access_key,
-            aws_session_token=self._authenticator.session_token,
-        )
-
-        locking_table_name = f"terraform-{deployment}"
-
-        # Check locking table for aws backend
-        click.secho(
-            f"Checking backend locking table: {locking_table_name}", fg="yellow"
-        )
-
-        if self._check_table_exists(locking_table_name):
-            click.secho("DynamoDB lock table found, continuing.", fg="yellow")
-        else:
-            click.secho(
-                "DynamoDB lock table not found, creating, please wait...", fg="yellow"
-            )
-            self._create_table(locking_table_name)
-
-        # Initialize s3 client and create bucket if necessary.
+        # Setup AWS clients and ensure backend resources are available
+        self._ddb_client = self._authenticator.backend_session.client("dynamodb")
         self._s3_client = self._authenticator.backend_session.client("s3")
-        try:
-            self._s3_client.head_bucket(Bucket=self._authenticator.bucket)
-        except botocore.exceptions.ClientError as err:
-            err_str = str(err)
-            if "Not Found" not in err_str:
-                raise err
-            if self._authenticator.create_backend_bucket:
-                try:
-                    self._s3_client.create_bucket(
-                        Bucket=self._authenticator.bucket,
-                        CreateBucketConfiguration={
-                            "LocationConstraint": self._authenticator.backend_region
-                        },
-                        ACL="private",
-                    )
-                except botocore.exceptions.ClientError as err:
-                    err_str = str(err)
-                    if "InvalidLocationConstraint" in err_str:
-                        click.secho(
-                            "InvalidLocationConstraint raised when trying to create a bucket. "
-                            "Verify the AWS Region passed to the worker matches the AWS region "
-                            "in the profile.",
-                            fg="red",
-                        )
-                    elif "BucketAlreadyExists" in err_str:
-                        # Ignore when testing
-                        if "PYTEST_CURRENT_TEST" not in os.environ:
-                            click.secho(err_str, fg="red")
-                            sys.exit(4)
-                    elif "BucketAlreadyOwnedByYou" not in err_str:
-                        raise err
+        self._ensure_locking_table()
+        self._ensure_backend_bucket()
+        self._bucket_files = self._get_bucket_files()
 
-                # Block public access
-                self._s3_client.put_public_access_block(
-                    Bucket=self._authenticator.bucket,
-                    PublicAccessBlockConfiguration={
-                        "BlockPublicAcls": True,
-                        "IgnorePublicAcls": True,
-                        "BlockPublicPolicy": True,
-                        "RestrictPublicBuckets": True,
-                    },
-                )
-
-                # Enable versioning on the bucket
-                s3_resource = self._authenticator.backend_session.resource("s3")
-                versioning = s3_resource.BucketVersioning(self._authenticator.bucket)
-                versioning.enable()
-            else:
-                raise BackendError(
-                    "Backend bucket not found and --no-create-backend-bucket specified."
-                )
-
-        # Generate a list of all files in the bucket, at the desired prefix for the deployment, used for "--all-remote-states" option and clean
-        s3_paginator = self._s3_client.get_paginator("list_objects_v2").paginate(
-            Bucket=self._authenticator.bucket,
-            Prefix=self._authenticator.prefix,
-        )
-
-        self._bucket_files = set()
-        for page in s3_paginator:
-            if "Contents" in page:
-                for key in page["Contents"]:
-                    # just append the last part of the prefix to the list
-                    self._bucket_files.add(key["Key"].split("/")[-2])
         try:
             self._handlers = S3Handler(self._authenticator)
             self.plan_storage = True
@@ -148,12 +77,6 @@ class S3Backend(BaseBackend):
     def remotes(self) -> list:
         """return a list of the remote bucket keys"""
         return list(self._bucket_files)
-
-    def _check_table_exists(self, name: str) -> bool:
-        """check if a supplied dynamodb table exists"""
-        if name in self._ddb_client.list_tables()["TableNames"]:
-            return True
-        return False
 
     def _clean_bucket_state(self, definition=None):
         """
@@ -210,6 +133,33 @@ class S3Backend(BaseBackend):
                 fg="yellow",
             )
 
+    def _ensure_locking_table(self) -> None:
+        """
+        _ensure_locking_table checks for the existence of the locking table, and
+        creates it if it doesn't exist
+        """
+        # get dynamodb client from backend session
+        locking_table_name = f"terraform-{self._deployment}"
+
+        # Check locking table for aws backend
+        click.secho(
+            f"Checking backend locking table: {locking_table_name}", fg="yellow"
+        )
+
+        if self._check_table_exists(locking_table_name):
+            click.secho("DynamoDB lock table found, continuing.", fg="yellow")
+        else:
+            click.secho(
+                "DynamoDB lock table not found, creating, please wait...", fg="yellow"
+            )
+            self._create_table(locking_table_name)
+
+    def _check_table_exists(self, name: str) -> bool:
+        """check if a supplied dynamodb table exists"""
+        if name in self._ddb_client.list_tables()["TableNames"]:
+            return True
+        return False
+
     def _create_table(
         self, name: str, read_capacity: int = 1, write_capacity: int = 1
     ) -> None:
@@ -232,6 +182,119 @@ class S3Backend(BaseBackend):
         self._ddb_client.get_waiter("table_exists").wait(
             TableName=name, WaiterConfig={"Delay": 10, "MaxAttempts": 30}
         )
+
+    def _ensure_backend_bucket(self) -> None:
+        """
+        _ensure_backend_bucket checks for the existence of the backend bucket, and
+        creates it if it doesn't exist, along with setting the appropriate bucket
+        permissions
+        """
+        bucket_present = self._check_bucket_exists(self._authenticator.bucket)
+
+        if bucket_present:
+            click.secho(
+                f"Backend bucket: {self._authenticator.bucket} found", fg="yellow"
+            )
+            return
+
+        if not self._authenticator.create_backend_bucket and not bucket_present:
+            raise BackendError(
+                "Backend bucket not found and --no-create-backend-bucket specified."
+            )
+
+        self._create_bucket(self._authenticator.bucket)
+        self._create_bucket_versioning(self._authenticator.bucket)
+        self._create_bucket_public_access_block(self._authenticator.bucket)
+
+    def _create_bucket(self, name: str) -> None:
+        """
+        _create_bucket creates a new s3 bucket
+        """
+        try:
+            click.secho(f"Creating backend bucket: {name}", fg="yellow")
+            self._s3_client.create_bucket(
+                Bucket=name,
+                CreateBucketConfiguration={
+                    "LocationConstraint": self._authenticator.backend_region
+                },
+                ACL="private",
+            )
+        except botocore.exceptions.ClientError as err:
+            err_str = str(err)
+            if "InvalidLocationConstraint" in err_str:
+                click.secho(
+                    "InvalidLocationConstraint raised when trying to create a bucket. "
+                    "Verify the AWS backend region passed to the worker matches the "
+                    "backend AWS region in the profile.",
+                    fg="red",
+                )
+                raise SystemExit(1)
+            elif "BucketAlreadyExists" in err_str:
+                # Ignore when testing
+                if "PYTEST_CURRENT_TEST" not in os.environ:
+                    click.secho(
+                        f"Bucket {name} already exists, this is not expected since a moment ago it did not",
+                        fg="red",
+                    )
+                    raise SystemExit(1)
+            elif "BucketAlreadyOwnedByYou" not in err_str:
+                raise err
+
+    def _create_bucket_versioning(self, name: str) -> None:
+        """
+        _create_bucket_versioning enables versioning on the bucket
+        """
+        click.secho(f"Enabling versioning on bucket: {name}", fg="yellow")
+        self._s3_client.put_bucket_versioning(
+            Bucket=name, VersioningConfiguration={"Status": "Enabled"}
+        )
+
+    def _create_bucket_public_access_block(self, name: str) -> None:
+        """
+        _create_bucket_public_access_block blocks public access to the bucket
+        """
+        click.secho(f"Blocking public access to bucket: {name}", fg="yellow")
+        self._s3_client.put_public_access_block(
+            Bucket=name,
+            PublicAccessBlockConfiguration={
+                "BlockPublicAcls": True,
+                "IgnorePublicAcls": True,
+                "BlockPublicPolicy": True,
+                "RestrictPublicBuckets": True,
+            },
+        )
+
+    def _check_bucket_exists(self, name: str) -> bool:
+        """
+        check if a supplied bucket exists
+        """
+        try:
+            self._s3_client.head_bucket(Bucket=name)
+            return True
+        except botocore.exceptions.ClientError as err:
+            err_str = str(err)
+            if "Not Found" in err_str:
+                return False
+            raise err
+
+    def _get_bucket_files(self) -> set:
+        """
+        _get_bucket_files returns a set of the keys in the bucket
+        """
+        bucket_files = set()
+        s3_paginator = self._s3_client.get_paginator("list_objects_v2").paginate(
+            Bucket=self._authenticator.bucket,
+            Prefix=self._authenticator.prefix,
+        )
+
+        for page in s3_paginator:
+            if "Contents" in page:
+                for key in page["Contents"]:
+                    # just append the last part of the prefix to the list, as they
+                    # are relative to the base path, and deployment name
+                    bucket_files.add(key["Key"].split("/")[-2])
+
+        return bucket_files
 
     def _delete_with_versions(self, key):
         """

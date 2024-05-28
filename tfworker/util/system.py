@@ -17,6 +17,7 @@ import shlex
 import subprocess
 
 import click
+from pkg_resources import DistributionNotFound, get_distribution
 
 
 def strip_ansi(line):
@@ -147,3 +148,14 @@ def which(program):
             if is_exe(exe_file):
                 return exe_file
     return None
+
+
+def get_version() -> str:
+    """
+    Get the version of the current package
+    """
+    try:
+        pkg_info = get_distribution("terraform-worker")
+        return pkg_info.version
+    except DistributionNotFound:
+        return "unknown"

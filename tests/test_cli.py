@@ -161,7 +161,7 @@ class TestCLI:
         assert result.exit_code == 1
         # the expected result is: configuration file {config_file} not found" the
         # exception is being handled in the wrong place
-        assert "not read" in result.output
+        assert "configuration file does not exist" in result.output
 
     @patch("tfworker.cli.CleanCommand", autospec=True)
     def test_cli_clean_command(self, mock_request, test_config_file):

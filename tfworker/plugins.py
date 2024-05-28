@@ -21,8 +21,14 @@ import urllib
 import zipfile
 
 import click
-from tenacity import (RetryError, retry, retry_if_not_exception_message,
-                      stop_after_attempt, wait_chain, wait_fixed)
+from tenacity import (
+    RetryError,
+    retry,
+    retry_if_not_exception_message,
+    stop_after_attempt,
+    wait_chain,
+    wait_fixed,
+)
 
 from tfworker.commands.root import get_platform
 

@@ -23,7 +23,7 @@ from tfworker.handlers import HandlersCollection
 from tfworker.handlers.exceptions import HandlerError, UnknownHandler
 from tfworker.plugins import PluginsCollection
 from tfworker.providers import ProvidersCollection
-from tfworker.util.system import pipe_exec, which
+from tfworker.util.system import get_version, pipe_exec, which
 
 
 class MissingDependencyException(Exception):
@@ -36,7 +36,7 @@ class BaseCommand:
         self._args_dict = dict(kwargs)
         self._args_dict.update(self._rootc.args.__dict__)
 
-        self._version = None
+        self._version = get_version()
         self._providers = None
         self._definitions = None
         self._backend = None
@@ -115,6 +115,7 @@ class BaseCommand:
             )
         except BackendError as e:
             click.secho(e, fg="red")
+            click.secho(e.help, fg="red")
             raise SystemExit(1)
 
         # if backend_plans is requested, check if backend supports it

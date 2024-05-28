@@ -68,6 +68,7 @@ test_get_url_data = [
 
 
 class TestPlugins:
+    @pytest.mark.enable_socket
     @pytest.mark.depends(on="get_url")
     def test_plugin_download(self, rootc):
         plugins = tfworker.plugins.PluginsCollection(

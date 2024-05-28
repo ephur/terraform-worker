@@ -11,19 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-from pkg_resources import DistributionNotFound, get_distribution
-
 from tfworker.commands.base import BaseCommand
+from tfworker.util.system import get_version
 
 
 class VersionCommand(BaseCommand):
     def __init__(self):
-        try:
-            pkg_info = get_distribution("terraform-worker")
-            self._version = pkg_info.version
-        except DistributionNotFound:
-            self._version = "unknown"
+        self._version = get_version()
 
     def exec(self):
         print(f"terraform-worker version {self._version}")

@@ -8,15 +8,15 @@ lint: init
 
 format: init
 	poetry run black tfworker tests
-	@poetry run seed-isort-config || echo "known_third_party setting changed. Please commit pyproject.toml"
+	poetry run seed-isort-config || echo "known_third_party setting changed. Please commit pyproject.toml"
 	poetry run isort tfworker tests
 
 test: init
-	poetry run pytest -p no:warnings
+	poetry run pytest -p no:warnings --disable-socket
 	poetry run coverage report --fail-under=60 -m --skip-empty
 
 dep-test: init
-	poetry run pytest
+	poetry run pytest --disable-socket
 	poetry run coverage report --fail-under=60 -m --skip-empty
 
 clean:

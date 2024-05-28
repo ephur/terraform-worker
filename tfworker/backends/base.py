@@ -18,7 +18,16 @@ from tfworker import JSONType
 
 
 class BackendError(Exception):
-    pass
+    # add custom "help" parameter to the exception
+    def __init__(self, message, help=None):
+        super().__init__(message)
+        self._help = help
+
+    @property
+    def help(self):
+        if self._help is None:
+            return "No help available"
+        return self._help
 
 
 class BaseBackend(metaclass=ABCMeta):
