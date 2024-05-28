@@ -17,7 +17,7 @@ from unittest import mock
 
 import pytest
 
-from tfworker.util.system import pipe_exec, which, get_version, strip_ansi
+from tfworker.util.system import get_version, pipe_exec, strip_ansi, which
 
 
 # context manager to allow testing exceptions in parameterized tests
@@ -33,10 +33,12 @@ def mock_pipe_exec(args, stdin=None, cwd=None, env=None):
 def mock_tf_version(args: str):
     return (0, args.encode(), "".encode())
 
+
 def mock_distribution(*args, **kwargs):
     Class = mock.MagicMock()
     Class.version = "1.2.3"
     return Class
+
 
 class TestUtilSystem:
     @pytest.mark.parametrize(
@@ -139,6 +141,7 @@ class TestUtilSystem:
 
     def test_get_version_unknown(self):
         from pkg_resources import DistributionNotFound
+
         with mock.patch(
             "tfworker.util.system.get_distribution",
             side_effect=DistributionNotFound,

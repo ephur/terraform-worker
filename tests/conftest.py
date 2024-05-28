@@ -20,7 +20,7 @@ from unittest import mock
 
 import boto3
 import pytest
-from moto import mock_dynamodb, mock_s3, mock_sts
+from moto import mock_aws
 from pytest_lazyfixture import lazy_fixture
 
 import tfworker
@@ -70,19 +70,19 @@ def aws_credentials():
 
 @pytest.fixture(scope="class")
 def s3_client(aws_credentials):
-    with mock_s3():
+    with mock_aws():
         yield boto3.client("s3", region_name="us-west-2")
 
 
 @pytest.fixture(scope="class")
 def dynamodb_client(aws_credentials):
-    with mock_dynamodb():
+    with mock_aws():
         yield boto3.client("dynamodb", region_name="us-west-2")
 
 
 @pytest.fixture(scope="class")
 def sts_client(aws_credentials):
-    with mock_sts():
+    with mock_aws():
         yield boto3.client("sts", region_name="us-west-2")
 
 
@@ -93,14 +93,20 @@ class MockAWSAuth:
     (cross account assumed roles, user identity, etc...)
     """
 
+    @mock_aws
     def __init__(self):
         self._session = boto3.Session()
+        self._backend_session = self._session
         self.bucket = "test_bucket"
         self.prefix = "terraform/test-0001"
 
     @property
     def session(self):
         return self._session
+
+    @property
+    def backend_session(self):
+        return self._backend_session
 
 
 @pytest.fixture()

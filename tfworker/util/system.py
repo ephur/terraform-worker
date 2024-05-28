@@ -149,6 +149,7 @@ def which(program):
                 return exe_file
     return None
 
+
 def get_version() -> str:
     """
     Get the version of the current package
