@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 
 import click
-import yaml
 
 from ..util.system import pipe_exec, strip_ansi
 from .base import BaseHandler
@@ -201,7 +200,7 @@ class TrivyHandler(BaseHandler):
                     click.secho(f"Removing planfile: {planfile}", fg="yellow")
                     os.remove(planfile)
                 raise HandlerError(
-                    f"trivy scan required; aborting execution", terminate=True
+                    "trivy scan required; aborting execution", terminate=True
                 )
 
     def _raise_if_not_ready(self):

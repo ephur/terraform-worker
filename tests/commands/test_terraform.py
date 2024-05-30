@@ -23,7 +23,6 @@ import pytest
 from google.cloud.exceptions import NotFound
 
 import tfworker
-from tfworker.backends.base import BackendError
 from tfworker.commands.terraform import BaseCommand
 
 

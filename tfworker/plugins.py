@@ -18,17 +18,9 @@ import json
 import os
 import shutil
 import urllib
-import zipfile
 
 import click
-from tenacity import (
-    RetryError,
-    retry,
-    retry_if_not_exception_message,
-    stop_after_attempt,
-    wait_chain,
-    wait_fixed,
-)
+from tenacity import retry, stop_after_attempt, wait_chain, wait_fixed
 
 from tfworker.commands.root import get_platform
 
@@ -48,7 +40,7 @@ class PluginsCollection(collections.abc.Mapping):
         return len(self._providers)
 
     def __getitem__(self, value):
-        if type(value) == int:
+        if type(value) is int:
             return self._providers[list(self._providers.keys())[value]]
         return self._providers[value]
 

@@ -15,7 +15,6 @@
 
 
 import os
-import struct
 import sys
 from pathlib import Path
 
@@ -228,7 +227,6 @@ def cli(context, **kwargs):
     """CLI for the worker utility."""
     validate_host()
     validate_working_dir(kwargs.get("working_dir", None))
-    config_file = kwargs["config_file"]
     context.obj = RootCommand(args=kwargs)
 
 

@@ -14,14 +14,12 @@
 
 import os
 import tempfile
-from unittest import mock
 from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
 
 import tfworker.cli
-from tfworker.commands import CleanCommand
 
 
 class TestCLI:
@@ -123,7 +121,7 @@ class TestCLI:
     def test_validate_working_dir_not_empty(self, capfd):
         """ensure non empty dirs fail"""
         with tempfile.TemporaryDirectory() as tmpd:
-            with open(os.path.join(tmpd, "test"), "w+") as tmpf:
+            with open(os.path.join(tmpd, "test"), "w+"):
                 with pytest.raises(SystemExit) as e:
                     tfworker.cli.validate_working_dir(tmpd)
                 out, err = capfd.readouterr()
@@ -169,7 +167,7 @@ class TestCLI:
         from tfworker.cli import cli
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["--config-file", test_config_file, "clean", "foo"])
+        runner.invoke(cli, ["--config-file", test_config_file, "clean", "foo"])
         mock_request.assert_called_once()
         assert mock_request.method_calls[0][0] == "().exec"
 
@@ -179,7 +177,7 @@ class TestCLI:
         from tfworker.cli import cli
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["version"])
+        runner.invoke(cli, ["version"])
         mock_request.assert_called_once()
         assert mock_request.method_calls[0][0] == "().exec"
 
@@ -207,6 +205,6 @@ class TestCLI:
         from tfworker.cli import cli
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["--config-file", test_config_file, "env"])
+        runner.invoke(cli, ["--config-file", test_config_file, "env"])
         mock_request.assert_called_once()
         assert mock_request.method_calls[0][0] == "().exec"

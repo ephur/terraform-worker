@@ -1,8 +1,8 @@
 import collections
 
-from .base import BaseHandler
+from .base import BaseHandler  # noqa F401
 from .bitbucket import BitbucketHandler
-from .exceptions import HandlerError, UnknownHandler
+from .exceptions import HandlerError, UnknownHandler  # noqa F401
 from .trivy import TrivyHandler
 
 
@@ -31,7 +31,7 @@ class HandlersCollection(collections.abc.Mapping):
         return len(self._handlers)
 
     def __getitem__(self, value):
-        if type(value) == int:
+        if type(value) is int:
             return self._handlers[list(self._handlers.keys())[value]]
         return self._handlers[value]
 

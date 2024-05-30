@@ -254,7 +254,7 @@ class TerraformCommand(BaseCommand):
         except HandlerError as e:
             click.secho(f"{e}", fg="red")
             if e.terminate:
-                click.secho(f"error is fatal, terminating", fg="red")
+                click.secho("error is fatal, terminating", fg="red")
                 raise SystemExit(1)
 
         if not changes:
@@ -791,7 +791,7 @@ class TerraformCommand(BaseCommand):
             json.loads(stdout)
         except json.JSONDecodeError:
             raise HookError(
-                f"Error parsing terraform state; output is not in json format"
+                "Error parsing terraform state; output is not in json format"
             )
 
         # write the cache to disk
