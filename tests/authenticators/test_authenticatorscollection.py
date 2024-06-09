@@ -47,5 +47,5 @@ class TestAuthenticatorsCollection:
     def test_unknown_authenticator(self, state_args):
         ac = tfworker.authenticators.AuthenticatorsCollection(state_args=state_args)
         assert ac.get("aws") is not None
-        with pytest.raises(tfworker.authenticators.UnknownAuthenticator) as e:
+        with pytest.raises(tfworker.authenticators.UnknownAuthenticator):
             ac.get("unknown")

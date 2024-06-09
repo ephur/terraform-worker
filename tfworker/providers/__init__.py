@@ -42,7 +42,7 @@ class ProvidersCollection(collections.abc.Mapping):
         return len(self._providers)
 
     def __getitem__(self, value):
-        if type(value) == int:
+        if type(value) is int:
             return self._providers[list(self._providers.keys())[value]]
         return self._providers[value]
 

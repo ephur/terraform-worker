@@ -18,17 +18,9 @@ import json
 import os
 import shutil
 import urllib
-import zipfile
 
 import click
-from tenacity import (
-    RetryError,
-    retry,
-    retry_if_not_exception_message,
-    stop_after_attempt,
-    wait_chain,
-    wait_fixed,
-)
+from tenacity import retry, stop_after_attempt, wait_chain, wait_fixed
 
 from tfworker.commands.root import get_platform
 
@@ -43,12 +35,13 @@ class PluginsCollection(collections.abc.Mapping):
         self._temp_dir = temp_dir
         self._cache_dir = cache_dir
         self._tf_version_major = tf_version_major
+        self._downloaded = False
 
     def __len__(self):
         return len(self._providers)
 
     def __getitem__(self, value):
-        if type(value) == int:
+        if type(value) is int:
             return self._providers[list(self._providers.keys())[value]]
         return self._providers[value]
 
@@ -66,6 +59,9 @@ class PluginsCollection(collections.abc.Mapping):
         versions have changed. In production try to remove all all external
         repositories/sources from the critical path.
         """
+        if self._downloaded:
+            return
+
         opsys, machine = get_platform()
         _platform = f"{opsys}_{machine}"
 
@@ -108,6 +104,8 @@ class PluginsCollection(collections.abc.Mapping):
                 except PluginSourceParseException as e:
                     click.secho(str(e), fg="red")
                     click.Abort()
+
+        self._downloaded = True
 
 
 class PluginSource:

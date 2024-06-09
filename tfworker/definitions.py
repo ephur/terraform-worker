@@ -287,7 +287,7 @@ class DefinitionsCollection(collections.abc.Mapping):
         return len(self._definitions)
 
     def __getitem__(self, value):
-        if type(value) == int:
+        if type(value) is int:
             return self._definitions[list(self._definitions.keys())[value]]
         return self._definitions[value]
 

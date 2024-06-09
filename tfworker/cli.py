@@ -15,7 +15,6 @@
 
 
 import os
-import struct
 import sys
 from pathlib import Path
 
@@ -228,7 +227,6 @@ def cli(context, **kwargs):
     """CLI for the worker utility."""
     validate_host()
     validate_working_dir(kwargs.get("working_dir", None))
-    config_file = kwargs["config_file"]
     context.obj = RootCommand(args=kwargs)
 
 
@@ -357,12 +355,6 @@ def terraform(rootc, *args, **kwargs):
 
     click.secho(f"building deployment {kwargs.get('deployment')}", fg="green")
     click.secho(f"working in directory: {tfc.temp_dir}", fg="yellow")
-
-    # common setup required for all definitions
-    click.secho("preparing provider plugins", fg="green")
-    tfc.plugins.download()
-    click.secho("preparing modules", fg="green")
-    tfc.prep_modules()
 
     tfc.exec()
     sys.exit(0)

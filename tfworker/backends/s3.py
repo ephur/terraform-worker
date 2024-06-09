@@ -14,7 +14,6 @@
 
 import json
 import os
-import sys
 from contextlib import closing
 from pathlib import Path
 from uuid import uuid4
@@ -468,7 +467,7 @@ class S3Handler(BaseHandler):
             # verify the lineage and serial from the planfile matches the statefile
             if not self._verify_lineage(planfile, statefile):
                 click.secho(
-                    f"planfile lineage does not match statefile, remote plan is unsuitable and will be removed",
+                    "planfile lineage does not match statefile, remote plan is unsuitable and will be removed",
                     fg="red",
                 )
                 self._s3_delete_plan(remotefile)
@@ -505,7 +504,6 @@ class S3Handler(BaseHandler):
 
     def _pre_apply(self, planfile: Path, definition: str, **kwargs):
         """_pre_apply runs before the apply is started, it should remove the planfile from the backend"""
-        logfile = planfile.with_suffix(".log")
         remotefile = f"{self._authenticator.prefix}/{definition}/{planfile.name}"
         remotelog = remotefile.replace(".tfplan", ".log")
         if self._s3_delete_plan(remotefile):

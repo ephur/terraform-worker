@@ -83,10 +83,8 @@ class BaseProvider:
         space = " "
         result = []
         if isinstance(s, str):
-            tmps = s.replace('"', "").replace("'", "")
             result.append(f"{space * depth}{s}")
         elif isinstance(s, list):
-            tmps = [i.replace('"', "").replace("'", "") for i in s]
             result.append(f"{space * depth}{s}")
         elif isinstance(s, dict):
             # unfortunately, HCL doesn't allow for keys to be quoted so a further

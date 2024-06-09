@@ -134,17 +134,17 @@ class TestUtilSystem:
 
     def test_get_version(self):
         with mock.patch(
-            "tfworker.util.system.get_distribution",
+            "tfworker.util.system.importlib_metadata.distribution",
             side_effect=mock_distribution,
         ):
             assert get_version() == "1.2.3"
 
     def test_get_version_unknown(self):
-        from pkg_resources import DistributionNotFound
+        from importlib_metadata import PackageNotFoundError
 
         with mock.patch(
-            "tfworker.util.system.get_distribution",
-            side_effect=DistributionNotFound,
+            "tfworker.util.system.importlib_metadata.distribution",
+            side_effect=PackageNotFoundError,
         ):
             assert get_version() == "unknown"
 
