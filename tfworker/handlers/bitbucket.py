@@ -1,6 +1,5 @@
 import os
 
-from atlassian import Bitbucket
 from atlassian.bitbucket import Cloud
 
 from .base import BaseHandler

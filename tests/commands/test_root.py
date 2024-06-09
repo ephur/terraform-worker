@@ -22,7 +22,7 @@ import pytest
 from deepdiff import DeepDiff
 
 import tfworker.commands.root
-from tfworker.commands.root import get_platform
+from tfworker.commands.root import get_platform, ordered_config_load
 
 
 class TestMain:
@@ -203,7 +203,7 @@ class TestMain:
 
         # check templating of config_var, no environment
         with pytest.raises(SystemExit) as e:
-            result = rc.template_items(return_as_dict=True)
+            rc.template_items(return_as_dict=True)
         out, err = capfd.readouterr()
         assert e.value.code == 1
         assert "Invalid config-var" in out
@@ -245,13 +245,6 @@ class TestMain:
                 assert machine == actual_machine
                 mock1.assert_called_once()
                 mock2.assert_called_once()
-
-
-import io
-
-import pytest
-
-from tfworker.commands.root import ordered_config_load
 
 
 class TestOrderedConfigLoad:

@@ -31,7 +31,7 @@ class AuthenticatorsCollection(collections.abc.Mapping):
         return len(self._authenticators)
 
     def __getitem__(self, value):
-        if type(value) == int:
+        if type(value) is int:
             return self._authenticators[list(self._authenticators.keys())[value]]
         return self._authenticators[value]
 

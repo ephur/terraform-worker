@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import os
 import random
 import string
 from unittest.mock import MagicMock, patch
@@ -175,12 +174,12 @@ class TestS3BackendInit:
     def test_no_session(self):
         self.authenticators["aws"]._session = None
         with pytest.raises(BackendError):
-            result = S3Backend(self.authenticators, self.definitions)
+            S3Backend(self.authenticators, self.definitions)
 
     def test_no_backend_session(self):
         self.authenticators["aws"]._backend_session = None
         with pytest.raises(BackendError):
-            result = S3Backend(self.authenticators, self.definitions)
+            S3Backend(self.authenticators, self.definitions)
 
     @patch("tfworker.backends.S3Backend._ensure_locking_table", return_value=None)
     @patch("tfworker.backends.S3Backend._ensure_backend_bucket", return_value=None)
@@ -210,7 +209,7 @@ class TestS3BackendInit:
         mock_handler,
     ):
         with pytest.raises(SystemExit):
-            result = S3Backend(self.authenticators, self.definitions)
+            S3Backend(self.authenticators, self.definitions)
 
 
 class TestS3BackendEnsureBackendBucket:
@@ -262,7 +261,7 @@ class TestS3BackendEnsureBackendBucket:
         )
 
         with pytest.raises(ClientError):
-            result = self.backend._check_bucket_exists(STATE_BUCKET)
+            self.backend._check_bucket_exists(STATE_BUCKET)
             assert self.backend._s3_client.head_bucket.called
 
     @mock_aws
@@ -270,7 +269,7 @@ class TestS3BackendEnsureBackendBucket:
         self.backend._authenticator.create_backend_bucket = False
         self.backend._authenticator.bucket = NO_SUCH_BUCKET
         with pytest.raises(BackendError):
-            result = self.backend._ensure_backend_bucket()
+            self.backend._ensure_backend_bucket()
             assert (
                 "Backend bucket not found and --no-create-backend-bucket specified."
                 in capfd.readouterr().out
@@ -313,7 +312,7 @@ class TestS3BackendEnsureBackendBucket:
         )
 
         with pytest.raises(SystemExit):
-            result = self.backend._create_bucket(NO_SUCH_BUCKET)
+            self.backend._create_bucket(NO_SUCH_BUCKET)
             assert "InvalidLocationConstraint" in capsys.readouterr().out
 
         assert NO_SUCH_BUCKET not in [
@@ -341,7 +340,7 @@ class TestS3BackendEnsureBackendBucket:
         )
 
         with pytest.raises(ClientError):
-            result = self.backend._create_bucket(NO_SUCH_BUCKET)
+            self.backend._create_bucket(NO_SUCH_BUCKET)
             assert self.backend._s3_client.create_bucket.called
 
 

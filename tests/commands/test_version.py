@@ -14,19 +14,13 @@
 
 from unittest import mock
 
-from pkg_resources import DistributionNotFound
-
 from tfworker.commands.version import VersionCommand
 
 
-def mock_get_distribution(package: str):
-    raise DistributionNotFound
-
-
-class TestVersionCommand:
-    def test_exec(self, capsys):
-        vc = VersionCommand()
-        vc._version = "1.2.3"
-        vc.exec()
+def test_version_command(capsys):
+    with mock.patch("tfworker.commands.version.get_version") as mock_get_version:
+        mock_get_version.return_value = "1.2.3"
+        command = VersionCommand()
+        command.exec()
         text = capsys.readouterr()
         assert text.out == "terraform-worker version 1.2.3\n"

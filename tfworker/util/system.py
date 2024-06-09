@@ -17,7 +17,7 @@ import shlex
 import subprocess
 
 import click
-from pkg_resources import DistributionNotFound, get_distribution
+import importlib_metadata
 
 
 def strip_ansi(line):
@@ -155,7 +155,6 @@ def get_version() -> str:
     Get the version of the current package
     """
     try:
-        pkg_info = get_distribution("terraform-worker")
-        return pkg_info.version
-    except DistributionNotFound:
+        return importlib_metadata.version("terraform-worker")
+    except importlib_metadata.PackageNotFoundError:
         return "unknown"

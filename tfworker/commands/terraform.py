@@ -17,10 +17,10 @@ import json
 import os
 import pathlib
 import re
-import shutil
 
 import click
 
+import tfworker.util.terraform as tf_util
 from tfworker.commands.base import BaseCommand
 from tfworker.definitions import Definition
 from tfworker.handlers.exceptions import HandlerError
@@ -69,6 +69,9 @@ class TerraformCommand(BaseCommand):
         self._terraform_modules_dir = self._resolve_arg("terraform_modules_dir")
         self._terraform_output = dict()
 
+    ##############
+    # Properties #
+    ##############
     @property
     def plan_for(self):
         """plan_for will either be apply or destroy, indicating what action is being planned for"""
@@ -78,92 +81,157 @@ class TerraformCommand(BaseCommand):
     def tf_version_major(self):
         return self._tf_version_major
 
-    def prep_modules(self):
-        """Puts the modules sub directories into place."""
+    ##################
+    # Public methods #
+    ##################
+    def exec(self) -> None:
+        """exec handles running the terraform chain, it the primary method called by the CLI
 
-        if self._terraform_modules_dir:
-            mod_source = self._terraform_modules_dir
-            mod_path = pathlib.Path(mod_source)
-            if not mod_path.exists():
-                click.secho(
-                    f'The specified terraform-modules directory "{mod_source}" does not exists',
-                    fg="red",
-                )
-                raise SystemExit(1)
-        else:
-            mod_source = f"{self._repository_path}/terraform-modules".replace("//", "/")
-            mod_path = pathlib.Path(mod_source)
-            if not mod_path.exists():
-                click.secho(
-                    "The terraform-modules directory does not exist.  Skipping.",
-                    fg="green",
-                )
-                return
-        mod_destination = f"{self._temp_dir}/terraform-modules".replace("//", "/")
-        click.secho(
-            f"copying modules from {mod_source} to {mod_destination}", fg="yellow"
-        )
-        shutil.copytree(
-            mod_source,
-            mod_destination,
-            symlinks=True,
-            ignore=shutil.ignore_patterns("test", ".terraform", "terraform.tfstate*"),
-        )
-
-    def _prep_and_init(self, def_iter: iter = None) -> None:
-        """_prep_and_init prepares the modules and runs terraform init"""
+        Returns:
+            None
+        """
+        # generate an iterator for the specified definitions (or all if no limit is specified)
         try:
-            def_iter = self.definitions.limited()
+            # convert the definitions iterator to a list to allow reusing the iterator
+            def_iter = list(self.definitions.limited())
         except ValueError as e:
             click.secho(f"Error with supplied limit: {e}", fg="red")
             raise SystemExit(1)
 
+        # download the providers
+        self._plugins.download()
+
+        # prepare the modules, they are required if the modules dir is specified, otherwise they are optional
+        tf_util.prep_modules(
+            self._terraform_modules_dir,
+            self._temp_dir,
+            required=(self._terraform_modules_dir is not None),
+        )
+
+        # prepare the definitions and run terraform init
+        self._prep_and_init(def_iter)
+
         for definition in def_iter:
-            # copy definition files / templates etc.
+            # Execute plan if needed
+            changes = (
+                self._exec_plan(definition) if self._check_plan(definition) else None
+            )
+
+            # execute apply or destroy if needed
+            if self._check_apply_or_destroy(changes, definition):
+                self._exec_apply_or_destroy(definition)
+
+    ###################
+    # Private methods #
+    ###################
+    def _prep_and_init(self, def_iter: list[Definition]) -> None:
+        """Prepares the definition and runs terraform init
+
+        Args:
+            def_iter: an iterator of definitions to prepare
+
+        Returns:
+            None
+        """
+        for definition in def_iter:
             click.secho(f"preparing definition: {definition.tag}", fg="green")
             definition.prep(self._backend)
 
-            # run terraform init
             try:
                 self._run(definition, "init", debug=self._show_output)
             except TerraformError:
                 click.secho("error running terraform init", fg="red")
                 raise SystemExit(1)
 
-    def _check_plan(self, definition: Definition) -> (bool, bool):
-        """determines if a plan is needed"""
-        # when no plan path is specified, it's straight forward
-        if self._plan_file_path is None:
-            if self._tf_plan is False:
-                definition._ready_to_apply = True
-                return False
-            else:
-                definition._ready_to_apply = False
-                return True
+    def _check_plan(self, definition: Definition) -> bool:
+        """
+        Determines if a plan is needed for the provided definition
 
-        # a lot more to consider when a plan path is specified
-        plan_path = pathlib.Path.absolute(pathlib.Path(self._plan_file_path))
-        plan_file = pathlib.Path(
-            f"{plan_path}/{self._deployment}_{definition.tag}.tfplan"
-        )
+        Args:
+            definition: the definition to check for a plan
+
+        Returns:
+            bool: True if a plan is needed, False otherwise
+        """
+        if not self._plan_file_path:
+            return self._handle_no_plan_path(definition)
+
+        plan_file = self._prepare_plan_file(definition)
+        self._validate_plan_path(plan_file.parent)
+        self._run_handlers(definition, "plan", "check", plan_file=plan_file)
+
+        return self._should_plan(definition, plan_file)
+
+    def _handle_no_plan_path(self, definition: Definition) -> bool:
+        """Handles the case where no plan path is specified, saved plans are not possible
+
+        Args:
+            definition: the definition to check for a plan
+
+        Returns:
+            bool: True if a plan is needed, False otherwise
+        """
+
+        if not self._tf_plan:
+            definition._ready_to_apply = True
+            return False
+        definition._ready_to_apply = False
+        return True
+
+    def _prepare_plan_file(self, definition: Definition) -> pathlib.Path:
+        """Prepares the plan file for the definition
+
+        Args:
+            definition: the definition to prepare the plan file for
+
+        Returns:
+            pathlib.Path: the path to the plan file
+        """
+        plan_path = pathlib.Path(self._plan_file_path).resolve()
+        plan_file = plan_path / f"{self._deployment}_{definition.tag}.tfplan"
         definition.plan_file = plan_file
         click.secho(f"using plan file:{plan_file}", fg="yellow")
+        return plan_file
 
+    def _validate_plan_path(self, plan_path: pathlib.Path) -> None:
+        """Validates the plan path
+
+        Args:
+            plan_path: the path to the plan file
+
+        Returns:
+            None
+        """
         if not (plan_path.exists() and plan_path.is_dir()):
             click.secho(
                 f'plan path "{plan_path}" is not suitable, it is not an existing directory'
             )
-            raise SystemExit()
+            raise SystemExit(1)
 
-        # run all the handlers with with action plan and stage check
+    def _run_handlers(
+        self, definition, action, stage, plan_file=None, **kwargs
+    ) -> None:
+        """Runs the handlers for the given action and stage
+
+        Args:
+            definition: the definition to run the handlers for
+            action: the action to run the handlers for
+            stage: the stage to run the handlers for
+            plan_file: the plan file to pass to the handlers
+            kwargs: additional keyword arguments to pass to the handlers
+
+        Returns:
+            None
+        """
         try:
             self._execute_handlers(
-                action="plan",
-                stage="check",
+                action=action,
+                stage=stage,
                 deployment=self._deployment,
                 definition=definition.tag,
                 definition_path=definition.fs_path,
                 planfile=plan_file,
+                **kwargs,
             )
         except HandlerError as e:
             if e.terminate:
@@ -171,12 +239,11 @@ class TerraformCommand(BaseCommand):
                 raise SystemExit(1)
             click.secho(f"handler error: {e}", fg="red")
 
-        # if --no-plan is specified, skip planning step regardless of other conditions
-        if self._tf_plan is False:
+    def _should_plan(self, definition: Definition, plan_file: pathlib.Path) -> bool:
+        if not self._tf_plan:
             definition._ready_to_apply = True
             return False
 
-        # planning was requested, check if existing plan is suitable
         if plan_file.exists():
             if plan_file.stat().st_size == 0:
                 click.secho(
@@ -192,7 +259,6 @@ class TerraformCommand(BaseCommand):
             definition._ready_to_apply = True
             return False
 
-        # All of the false conditions have been returned, so we need to plan
         definition._ready_to_apply = False
         return True
 
@@ -254,7 +320,7 @@ class TerraformCommand(BaseCommand):
         except HandlerError as e:
             click.secho(f"{e}", fg="red")
             if e.terminate:
-                click.secho(f"error is fatal, terminating", fg="red")
+                click.secho("error is fatal, terminating", fg="red")
                 raise SystemExit(1)
 
         if not changes:
@@ -354,26 +420,6 @@ class TerraformCommand(BaseCommand):
                 f"terraform {self._plan_for} complete for {definition.tag}",
                 fg="green",
             )
-
-    def exec(self):
-        """exec handles running the terraform chain"""
-        try:
-            def_iter = self.definitions.limited()
-        except ValueError as e:
-            click.secho(f"Error with supplied limit: {e}", fg="red")
-            raise SystemExit(1)
-
-        # prepare the modules and run terraform init
-        self._prep_and_init(def_iter)
-
-        for definition in def_iter:
-            changes = None
-            # exec planning step if we should
-            if self._check_plan(definition):
-                changes = self._exec_plan(definition)
-            # exec apply step if we should
-            if self._check_apply_or_destroy(changes, definition):
-                self._exec_apply_or_destroy(definition)
 
     def _run(
         self, definition, command, debug=False, plan_action="init", plan_file=None
@@ -515,6 +561,9 @@ class TerraformCommand(BaseCommand):
             raise SystemExit(2)
         return True
 
+    ##################
+    # Static methods #
+    ##################
     @staticmethod
     def hook_exec(
         phase,
@@ -791,7 +840,7 @@ class TerraformCommand(BaseCommand):
             json.loads(stdout)
         except json.JSONDecodeError:
             raise HookError(
-                f"Error parsing terraform state; output is not in json format"
+                "Error parsing terraform state; output is not in json format"
             )
 
         # write the cache to disk
