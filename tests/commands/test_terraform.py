@@ -321,12 +321,13 @@ class TestTerraformCommandExec:
 
     def test_exec_valid_flow(self, terraform_command, definition):
         def_iter = [definition]
+        terraform_command._provider_cache = "/path/to/cache"
 
         with patch.object(
             terraform_command.definitions, "limited", return_value=def_iter
-        ), patch.object(
-            terraform_command._plugins, "download"
-        ) as mock_download_plugins, patch(
+        ), patch(
+            "tfworker.commands.terraform.tf_util.mirror_providers"
+        ) as mock_mirror_providers, patch(
             "tfworker.commands.terraform.tf_util.prep_modules"
         ) as mock_prep_modules, patch.object(
             terraform_command, "_prep_and_init"
@@ -342,7 +343,7 @@ class TestTerraformCommandExec:
 
             terraform_command.exec()
 
-            mock_download_plugins.assert_called_once()
+            mock_mirror_providers.assert_called_once()
             mock_prep_modules.assert_called_once_with(
                 terraform_command._terraform_modules_dir,
                 terraform_command._temp_dir,
@@ -371,9 +372,7 @@ class TestTerraformCommandExec:
 
         with patch.object(
             terraform_command.definitions, "limited", return_value=def_iter
-        ), patch.object(
-            terraform_command._plugins, "download"
-        ) as mock_download_plugins, patch(
+        ), patch(
             "tfworker.commands.terraform.tf_util.prep_modules"
         ) as mock_prep_modules, patch.object(
             terraform_command, "_prep_and_init"
@@ -389,7 +388,6 @@ class TestTerraformCommandExec:
 
             terraform_command.exec()
 
-            mock_download_plugins.assert_called_once()
             mock_prep_modules.assert_called_once_with(
                 terraform_command._terraform_modules_dir,
                 terraform_command._temp_dir,
@@ -406,9 +404,7 @@ class TestTerraformCommandExec:
 
         with patch.object(
             terraform_command.definitions, "limited", return_value=def_iter
-        ), patch.object(
-            terraform_command._plugins, "download"
-        ) as mock_download_plugins, patch(
+        ), patch(
             "tfworker.commands.terraform.tf_util.prep_modules"
         ) as mock_prep_modules, patch.object(
             terraform_command, "_prep_and_init"
@@ -424,7 +420,6 @@ class TestTerraformCommandExec:
 
             terraform_command.exec()
 
-            mock_download_plugins.assert_called_once()
             mock_prep_modules.assert_called_once_with(
                 terraform_command._terraform_modules_dir,
                 terraform_command._temp_dir,
@@ -442,9 +437,7 @@ class TestTerraformCommandExec:
 
         with patch.object(
             terraform_command.definitions, "limited", return_value=def_iter
-        ), patch.object(
-            terraform_command._plugins, "download"
-        ) as mock_download_plugins, patch(
+        ), patch(
             "tfworker.commands.terraform.tf_util.prep_modules"
         ) as mock_prep_modules, patch.object(
             terraform_command, "_prep_and_init"
@@ -460,7 +453,6 @@ class TestTerraformCommandExec:
 
             terraform_command.exec()
 
-            mock_download_plugins.assert_called_once()
             mock_prep_modules.assert_called_once_with(
                 terraform_command._terraform_modules_dir,
                 terraform_command._temp_dir,

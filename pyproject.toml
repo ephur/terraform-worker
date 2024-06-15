@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "terraform-worker"
-version = "0.11.0"
+version = "0.12.0"
 description = "An orchestration tool for Terraform"
 authors = ["Richard Maynard <richard.maynard@gmail.com>"]
 packages = [
@@ -41,6 +41,7 @@ markupsafe = "^2.1"
 mergedeep = "^1.3"
 setuptools = "^70.0"
 atlassian-python-api = "^3.41"
+pydantic = "^2.7"
 
 [tool.poetry.dev-dependencies]
 ipython = "^8.24"

@@ -12,16 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .base import BaseProvider
+from tfworker.providers.base import BaseProvider
+from tfworker.types import ProviderConfig
 
 
 class GenericProvider(BaseProvider):
     tag = "worker-generic"
+    requires_auth = False
 
-    def __init__(self, body, tf_version_major, **kwargs):
-        super(GenericProvider, self).__init__(body, tf_version_major)
-
-        self._tf_version_major = tf_version_major
-        self.tag = kwargs.get("tag", self.tag)
-        self.vars = body.get("vars", {})
-        self.version = self.vars.get("version")
+    def __init__(self, body: ProviderConfig, tag: str) -> None:
+        self.tag = tag
+        super(GenericProvider, self).__init__(body)

@@ -14,12 +14,17 @@ class PlanChange(Exception):
     pass
 
 
-class PluginSourceParseException(Exception):
-    """
-    Exception is raised when a plugin source cannot be parsed.
-    """
+# class PluginSourceParseException(Exception):
+#     """
+#     Exception is raised when a plugin source cannot be parsed.
+#     """
 
-    pass
+#     pass
+
+
+class UnknownProvider(Exception):
+    def __init__(self, provider):
+        super().__init__(f"{provider} is not a known value.")
 
 
 class ReservedFileError(Exception):

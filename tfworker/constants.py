@@ -23,10 +23,14 @@ DEFAULT_REPOSITORY_PATH = _CWD
 DEFAULT_AWS_REGION = "us-east-1"
 DEFAULT_GCP_REGION = "us-east-1a"
 
+TF_PROVIDER_DEFAULT_HOSTNAME = "registry.terraform.io"
+TF_PROVIDER_DEFAULT_NAMESPACE = "hashicorp"
+TF_PROVIDER_DEFAULT_LOCKFILE = ".terraform.lock.hcl"
+
 TF_STATE_CACHE_NAME = "worker_state_cache.json"
-WORKER_LOCALS_FILENAME = "worker-locals.tf"
-WORKER_TF_FILENAME = "worker.tf"
-WORKER_TFVARS_FILENAME = "worker.auto.tfvars"
+WORKER_LOCALS_FILENAME = "worker_generated_locals.tf"
+WORKER_TF_FILENAME = "worker_generated_terraform.tf"
+WORKER_TFVARS_FILENAME = "worker_generated.tfvars"
 RESERVED_FILES = [
     WORKER_LOCALS_FILENAME,
     WORKER_TF_FILENAME,
