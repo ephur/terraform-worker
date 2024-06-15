@@ -82,8 +82,13 @@ class TerraformCommand(BaseCommand):
             click.secho(f"Error with supplied limit: {e}", fg="red")
             raise SystemExit(1)
 
-        # download the providers
-        self._plugins.download()
+        if self._provider_cache is not None:
+            tf_util.mirror_providers(
+                self._providers,
+                self._terraform_bin,
+                self._temp_dir,
+                self._provider_cache,
+            )
 
         # prepare the modules, they are required if the modules dir is specified, otherwise they are optional
         tf_util.prep_modules(
@@ -426,9 +431,14 @@ class TerraformCommand(BaseCommand):
     ):
         """Run terraform."""
 
+        if self._provider_cache is None:
+            plugin_dir = f"{self._temp_dir}/terraform-plugins"
+        else:
+            plugin_dir = self._provider_cache
+
         color_str = "-no-color" if self._use_colors is False else ""
         params = {
-            "init": f"-input=false {color_str} -plugin-dir={self._temp_dir}/terraform-plugins",
+            "init": f"-input=false {color_str} -plugin-dir={plugin_dir}",
             "plan": f"-input=false -detailed-exitcode {color_str}",
             "apply": f"-input=false {color_str} -auto-approve",
             "destroy": f"-input=false {color_str} -auto-approve",

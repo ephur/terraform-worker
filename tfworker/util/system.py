@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import importlib.metadata
 import os
 import platform
 import re
@@ -19,7 +20,6 @@ import subprocess
 from typing import Dict, List, Tuple, Union
 
 import click
-import importlib_metadata
 
 
 def strip_ansi(line: str) -> str:
@@ -188,8 +188,8 @@ def get_version() -> str:
         str: The version of the package
     """
     try:
-        return importlib_metadata.version("terraform-worker")
-    except importlib_metadata.PackageNotFoundError:
+        return importlib.metadata.version("terraform-worker")
+    except importlib.metadata.PackageNotFoundError:
         return "unknown"
 
 

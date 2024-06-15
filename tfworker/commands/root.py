@@ -258,7 +258,7 @@ def ordered_config_load(config: str) -> dict:
         click.secho(f"error loading yaml/json: {e}", fg="red")
         click.secho("the configuration that caused the error was\n:", fg="red")
         for i, line in enumerate(config.split("\n")):
-            click.secho(f"{i+1}: {line}", fg="red")
+            click.secho(f"{i + 1}: {line}", fg="red")
         raise SystemExit(1)
 
 

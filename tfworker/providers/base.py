@@ -11,22 +11,27 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from tfworker.types import ProviderConfig, ProviderGID
 
 
 class BaseProvider:
     tag = None
+    requires_auth = False
 
-    def __init__(self, body, tf_version_major):
-        self._tf_version_major = tf_version_major
+    def __init__(self, config: ProviderConfig) -> None:
+        self.vars = config.vars or {}
+        self.config_blocks = config.config_blocks or {}
+        self.version = config.requirements.version
+        self.source = config.requirements.source or f"hashicorp/{self.tag}"
+        self._field_filter = []
 
-        self.vars = body.get("vars", {})
-        self.config_blocks = body.get("config_blocks", {})
-        self.version = self.vars.get("version")
-        self.source = body.get("source")
+    @property
+    def gid(self) -> ProviderGID:
+        from tfworker.util.terraform import get_provider_gid_from_source
 
-        self._field_filter = ["version"]
+        return get_provider_gid_from_source(self.source)
 
-    def hcl(self):
+    def hcl(self) -> str:
         result = []
         provider_vars = {}
         config_block = {}
@@ -97,7 +102,7 @@ class BaseProvider:
                 elif isinstance(s[k], dict):
                     # decrease depth by 4 to account for extra depth added by hclyifying the key
                     result.append(
-                        f"{space * (depth-4)}{self._hclify(k, depth=depth)} = {{"
+                        f"{space * (depth - 4)}{self._hclify(k, depth=depth)} = {{"
                     )
                     result.append(self._hclify(s[k], depth=depth + 2))
                     result.append(f"{space * depth}}}")
@@ -109,14 +114,10 @@ class BaseProvider:
         return "\n".join(result)
 
 
-class UnknownProvider(Exception):
-    def __init__(self, provider):
-        super().__init__(f"{provider} is not a known value.")
-
-
 def validate_backend_region(state):
     """
     validate_backend_region validates that a statefile
     was previously used in the region the current
     deployment is being created for
     """
+    raise NotImplementedError("validate_backend_region is not implemented")

@@ -15,16 +15,22 @@
 import collections
 import copy
 import json
-from pathlib import Path, PosixPath, PurePath, WindowsPath
+from pathlib import Path, PosixPath, WindowsPath
 
 import click
-import hcl2
 import jinja2
 from mergedeep import merge
 
 from tfworker import constants as const
+from tfworker.constants import (
+    TF_PROVIDER_DEFAULT_LOCKFILE,
+    WORKER_LOCALS_FILENAME,
+    WORKER_TF_FILENAME,
+    WORKER_TFVARS_FILENAME,
+)
 from tfworker.exceptions import ReservedFileError
 from tfworker.util.copier import CopyFactory
+from tfworker.util.terraform import find_required_providers, generate_terraform_lockfile
 
 TERRAFORM_TPL = """\
 terraform {{
@@ -53,6 +59,7 @@ class Definition:
         limited=False,
         template_callback=None,
         use_backend_remotes=False,
+        provider_cache=None,
     ):
         self.tag = definition
         self._body = body
@@ -74,6 +81,7 @@ class Definition:
         self._temp_dir = temp_dir
         self._tf_version_major = tf_version_major
         self._limited = limited
+        self._provider_cache = provider_cache
 
         self._target = f"{self._temp_dir}/definitions/{self.tag}".replace("//", "/")
         self._template_callback = template_callback
@@ -98,19 +106,10 @@ class Definition:
 
     @property
     def provider_names(self):
-        """Extract only the providers used by a definition"""
-        result = set(self._providers.keys())
-        version_path = PurePath(self._target) / "versions.tf"
-        if Path(version_path).exists():
-            with open(version_path, "r") as reader:
-                vinfo = hcl2.load(reader)
-                tf_element = vinfo.get("terraform", [None]).pop()
-                if tf_element:
-                    rp_element = tf_element.get("required_providers", [None]).pop()
-                    if rp_element:
-                        required_providers = set(rp_element.keys())
-                        result = result.intersection(required_providers)
-        return result
+        try:
+            return list(find_required_providers(self.path).keys())
+        except AttributeError:
+            return None
 
     @property
     def plan_file(self):
@@ -171,7 +170,7 @@ class Definition:
 
         # Create local vars from remote data sources
         if len(list(self._remote_vars.keys())) > 0:
-            with open(f"{self._target}/worker-locals.tf", "w+") as tflocals:
+            with open(f"{self._target}/{WORKER_LOCALS_FILENAME}", "w+") as tflocals:
                 tflocals.write("locals {\n")
                 for k, v in self._remote_vars.items():
                     tflocals.write(f"  {k} = data.terraform_remote_state.{v}\n")
@@ -183,15 +182,42 @@ class Definition:
         else:
             remotes = list(map(lambda x: x.split(".")[0], self._remote_vars.values()))
 
-        with open(f"{self._target}/worker_terraform.tf", "w+") as tffile:
-            tffile.write(f"{self._providers.hcl(self.provider_names)}\n\n")
-            tffile.write(TERRAFORM_TPL.format(f"{backend.hcl(self.tag)}", ""))
+        required_providers_content = (
+            ""
+            if self.provider_names is not None
+            else self._providers.required_hcl(self.provider_names)
+        )
+
+        with open(f"{self._target}/{WORKER_TF_FILENAME}", "w+") as tffile:
+            tffile.write(f"{self._providers.provider_hcl(self.provider_names)}\n\n")
+            tffile.write(
+                TERRAFORM_TPL.format(
+                    f"{backend.hcl(self.tag)}",
+                    required_providers_content,
+                )
+            )
             tffile.write(backend.data_hcl(remotes))
 
         # Create the variable definitions
-        with open(f"{self._target}/worker.auto.tfvars", "w+") as varfile:
+        with open(f"{self._target}/{WORKER_TFVARS_FILENAME}", "w+") as varfile:
             for k, v in self._terraform_vars.items():
                 varfile.write(f"{k} = {self.vars_typer(v)}\n")
+
+        self._prep_terraform_lockfile()
+
+    def _prep_terraform_lockfile(self):
+        """
+        Write a terraform lockfile in the definition directory
+        """
+        if self._provider_cache is None:
+            return
+
+        with open(f"{self._target}/{TF_PROVIDER_DEFAULT_LOCKFILE}", "w") as lockfile:
+            lockfile.write(
+                generate_terraform_lockfile(
+                    providers=self._providers, cache_dir=self._provider_cache
+                )
+            )
 
     @staticmethod
     def quote_str(some_string):
@@ -255,6 +281,7 @@ class DefinitionsCollection(collections.abc.Mapping):
         rootc,
         temp_dir,
         tf_version_major,
+        provider_cache=None,
     ):
         self._body = definitions
         self._plan_for = plan_for
@@ -278,6 +305,7 @@ class DefinitionsCollection(collections.abc.Mapping):
                 True if limit and definition in limit else False,
                 template_callback=self.render_templates,
                 use_backend_remotes=self._root_args.backend_use_all_remotes,
+                provider_cache=provider_cache,
             )
 
     def __len__(self):

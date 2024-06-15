@@ -250,7 +250,7 @@ class TestOrderedConfigLoad:
         """
         expected_error_out = ""
         for i, line in enumerate(config.split("\n")):
-            expected_error_out += f"{i+1}: {line}\n"
+            expected_error_out += f"{i + 1}: {line}\n"
         with pytest.raises(SystemExit) as e:
             ordered_config_load(config)
         out, err = capfd.readouterr()

@@ -19,8 +19,9 @@ from tfworker.backends import BackendError, select_backend
 from tfworker.definitions import DefinitionsCollection
 from tfworker.handlers import HandlersCollection
 from tfworker.handlers.exceptions import HandlerError, UnknownHandler
-from tfworker.plugins import PluginsCollection
-from tfworker.providers import ProvidersCollection
+
+# from tfworker.plugins import PluginsCollection
+from tfworker.providers.providers_collection import ProvidersCollection
 from tfworker.util.system import get_version, which
 from tfworker.util.terraform import get_terraform_version
 
@@ -39,7 +40,7 @@ class BaseCommand:
         self._providers = None
         self._definitions = None
         self._backend = None
-        self._plugins = None
+        # self._plugins = None
         self._terraform_vars = dict()
         self._remote_vars = dict()
         self._temp_dir = rootc.temp_dir
@@ -70,7 +71,7 @@ class BaseCommand:
         )
 
         self._providers = ProvidersCollection(
-            rootc.providers_odict, self._authenticators, self._tf_version_major
+            rootc.providers_odict, self._authenticators
         )
         self._plan_for = "destroy" if self._resolve_arg("destroy") else "apply"
         self._definitions = DefinitionsCollection(
@@ -83,8 +84,9 @@ class BaseCommand:
             rootc,
             self._temp_dir,
             self._tf_version_major,
+            provider_cache=self._provider_cache,
         )
-        plugins_odict = dict()
+        # plugins_odict = dict()
         for provider in rootc.providers_odict:
             try:
                 raw_version = rootc.providers_odict[provider]["requirements"]["version"]
@@ -101,10 +103,6 @@ class BaseCommand:
             source = rootc.providers_odict[provider].get("source")
             if source:
                 vals["source"] = source
-            plugins_odict[str(provider)] = vals
-        self._plugins = PluginsCollection(
-            plugins_odict, self._temp_dir, self._provider_cache, self._tf_version_major
-        )
         try:
             self._backend = select_backend(
                 self._resolve_arg("backend"),
@@ -160,9 +158,9 @@ class BaseCommand:
     def definitions(self):
         return self._definitions
 
-    @property
-    def plugins(self):
-        return self._plugins
+    # @property
+    # def plugins(self):
+    #     return self._plugins
 
     @property
     def temp_dir(self):
