@@ -17,7 +17,7 @@ from unittest import mock
 
 import pytest
 
-from tfworker.util.system import get_version, pipe_exec, strip_ansi, which
+from tfworker.util.system import get_platform, get_version, pipe_exec, strip_ansi, which
 
 
 # context manager to allow testing exceptions in parameterized tests
@@ -153,3 +153,29 @@ class TestUtilSystem:
         assert strip_ansi("\x1B[32mWorld\x1B[0m") == "World"
         assert strip_ansi("\x1B[33mFoo\x1B[0m") == "Foo"
         assert strip_ansi("\x1B[34mBar\x1B[0m") == "Bar"
+
+    @pytest.mark.parametrize(
+        "opsys, machine, mock_platform_opsys, mock_platform_machine",
+        [
+            ("linux", "i386", ["linux2"], ["i386"]),
+            ("linux", "arm", ["Linux"], ["arm"]),
+            ("linux", "amd64", ["linux"], ["x86_64"]),
+            ("linux", "amd64", ["linux"], ["amd64"]),
+            ("darwin", "amd64", ["darwin"], ["x86_64"]),
+            ("darwin", "amd64", ["darwin"], ["amd64"]),
+            ("darwin", "arm", ["darwin"], ["arm"]),
+            ("darwin", "arm64", ["darwin"], ["aarch64"]),
+        ],
+    )
+    def test_get_platform(
+        self, opsys, machine, mock_platform_opsys, mock_platform_machine
+    ):
+        with mock.patch("platform.system", side_effect=mock_platform_opsys) as mock1:
+            with mock.patch(
+                "platform.machine", side_effect=mock_platform_machine
+            ) as mock2:
+                actual_opsys, actual_machine = get_platform()
+                assert opsys == actual_opsys
+                assert machine == actual_machine
+                mock1.assert_called_once()
+                mock2.assert_called_once()

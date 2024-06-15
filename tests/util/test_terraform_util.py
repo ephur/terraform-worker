@@ -75,3 +75,24 @@ def test_prep_modules_required(tmp_path):
 
     # check the target path does not exist
     assert not target_path.exists()
+
+    # @pytest.mark.parametrize(
+    #     "stdout, major, minor, expected_exception",
+    #     [
+    #         ("Terraform v0.12.29", 0, 12, does_not_raise()),
+    #         ("Terraform v1.3.5", 1, 3, does_not_raise()),
+    #         ("TF 14", "", "", pytest.raises(SystemExit)),
+    #     ],
+    # )
+    # def test_get_tf_version(
+    #     self, stdout: str, major: int, minor: int, expected_exception: callable
+    # ):
+    #     with mock.patch(
+    #         "tfworker.commands.base.pipe_exec",
+    #         side_effect=mock_tf_version,
+    #     ) as mocked:
+    #         with expected_exception:
+    #             (actual_major, actual_minor) = BaseCommand.get_terraform_version(stdout)
+    #             assert actual_major == major
+    #             assert actual_minor == minor
+    #             mocked.assert_called_once()
