@@ -23,6 +23,7 @@ import jinja2
 from mergedeep import merge
 
 from tfworker import constants as const
+from tfworker.exceptions import ReservedFileError
 from tfworker.util.copier import CopyFactory
 
 TERRAFORM_TPL = """\
@@ -31,10 +32,6 @@ terraform {{
 {1}
 }}
 """
-
-
-class ReservedFileError(Exception):
-    pass
 
 
 class Definition:

@@ -21,10 +21,14 @@ from pathlib import Path
 import click
 
 from tfworker import constants as const
-from tfworker.commands import CleanCommand, RootCommand, TerraformCommand
-from tfworker.commands.env import EnvCommand
-from tfworker.commands.root import get_platform
-from tfworker.commands.version import VersionCommand
+from tfworker.commands import (
+    CleanCommand,
+    EnvCommand,
+    RootCommand,
+    TerraformCommand,
+    VersionCommand,
+)
+from tfworker.util.system import get_platform
 
 
 def validate_deployment(ctx, deployment, name):
@@ -189,7 +193,7 @@ class CSVType(click.types.StringParamType):
 )
 @click.option(
     "--backend-use-all-remotes/--no-backend-use-all-remotes",
-    default=False,
+    default=True,
     envvar="WORKER_BACKEND_USE_ALL_REMOTES",
     help="Generate remote data sources based on all definition paths present in the backend",
 )

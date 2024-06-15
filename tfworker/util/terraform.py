@@ -2,9 +2,13 @@
 # the goal of moving these functions here is to reduce the responsibility of
 # the TerraformCommand class, making it easier to test and maintain
 import pathlib
+import re
 import shutil
 
 import click
+
+from tfworker.constants import DEFAULT_REPOSITORY_PATH
+from tfworker.util.system import pipe_exec
 
 
 def prep_modules(
@@ -23,6 +27,11 @@ def prep_modules(
         ignore_patterns (list(str)): A list of patterns to ignore
         required (bool): If the terraform modules directory is required
     """
+    module_path = (
+        module_path
+        if module_path != ""
+        else f"{DEFAULT_REPOSITORY_PATH}/terraform-modules"
+    )
     module_path = pathlib.Path(module_path)
     target_path = pathlib.Path(f"{target_path}/terraform-modules".replace("//", "/"))
 
@@ -46,3 +55,21 @@ def prep_modules(
         symlinks=True,
         ignore=shutil.ignore_patterns(*ignore_patterns),
     )
+
+
+def get_terraform_version(terraform_bin):
+    (return_code, stdout, stderr) = pipe_exec(f"{terraform_bin} version")
+    if return_code != 0:
+        click.secho(f"unable to get terraform version\n{stderr}", fg="red")
+        raise SystemExit(1)
+    version = stdout.decode("UTF-8").split("\n")[0]
+    version_search = re.search(r".*\s+v(\d+)\.(\d+)\.(\d+)", version)
+    if version_search:
+        click.secho(
+            f"Terraform Version Result: {version}, using major:{version_search.group(1)}, minor:{version_search.group(2)}",
+            fg="yellow",
+        )
+        return (int(version_search.group(1)), int(version_search.group(2)))
+    else:
+        click.secho(f"unable to get terraform version\n{stderr}", fg="red")
+        raise SystemExit(1)

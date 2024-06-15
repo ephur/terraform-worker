@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import re
-
 import click
 
 from tfworker.authenticators import AuthenticatorsCollection
@@ -23,7 +21,8 @@ from tfworker.handlers import HandlersCollection
 from tfworker.handlers.exceptions import HandlerError, UnknownHandler
 from tfworker.plugins import PluginsCollection
 from tfworker.providers import ProvidersCollection
-from tfworker.util.system import get_version, pipe_exec, which
+from tfworker.util.system import get_version, which
+from tfworker.util.terraform import get_terraform_version
 
 
 class MissingDependencyException(Exception):
@@ -64,7 +63,7 @@ class BaseCommand:
             (
                 self._tf_version_major,
                 self._tf_version_minor,
-            ) = self.get_terraform_version(self._terraform_bin)
+            ) = get_terraform_version(self._terraform_bin)
 
         self._authenticators = AuthenticatorsCollection(
             rootc.args, deployment=deployment, **kwargs
@@ -189,21 +188,3 @@ class BaseCommand:
         if name in self._rootc.worker_options_odict:
             return self._rootc.worker_options_odict[name]
         return None
-
-    @staticmethod
-    def get_terraform_version(terraform_bin):
-        (return_code, stdout, stderr) = pipe_exec(f"{terraform_bin} version")
-        if return_code != 0:
-            click.secho(f"unable to get terraform version\n{stderr}", fg="red")
-            raise SystemExit(1)
-        version = stdout.decode("UTF-8").split("\n")[0]
-        version_search = re.search(r".*\s+v(\d+)\.(\d+)\.(\d+)", version)
-        if version_search:
-            click.secho(
-                f"Terraform Version Result: {version}, using major:{version_search.group(1)}, minor:{version_search.group(2)}",
-                fg="yellow",
-            )
-            return (int(version_search.group(1)), int(version_search.group(2)))
-        else:
-            click.secho(f"unable to get terraform version\n{stderr}", fg="red")
-            raise SystemExit(1)

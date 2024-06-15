@@ -22,11 +22,8 @@ import urllib
 import click
 from tenacity import retry, stop_after_attempt, wait_chain, wait_fixed
 
-from tfworker.commands.root import get_platform
-
-
-class PluginSourceParseException(Exception):
-    pass
+from tfworker.exceptions import PluginSourceParseException
+from tfworker.util.system import get_platform
 
 
 class PluginsCollection(collections.abc.Mapping):

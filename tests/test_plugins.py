@@ -20,9 +20,10 @@ import pytest
 
 import tfworker.commands.root
 import tfworker.plugins
+from tfworker.util.system import get_platform
 
 # values needed by multiple tests
-opsys, machine = tfworker.commands.root.get_platform()
+opsys, machine = get_platform()
 _platform = f"{opsys}_{machine}"
 
 

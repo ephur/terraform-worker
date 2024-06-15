@@ -22,7 +22,7 @@ import pytest
 from google.cloud.exceptions import NotFound
 
 import tfworker
-from tfworker.commands.terraform import BaseCommand, TerraformCommand, TerraformError
+from tfworker.commands.terraform import TerraformCommand, TerraformError
 from tfworker.definitions import Definition
 from tfworker.handlers import HandlerError
 
@@ -185,27 +185,6 @@ class TestTerraformCommand:
             for arg in args:
                 assert arg in call_as_string
 
-    @pytest.mark.parametrize(
-        "stdout, major, minor, expected_exception",
-        [
-            ("Terraform v0.12.29", 0, 12, does_not_raise()),
-            ("Terraform v1.3.5", 1, 3, does_not_raise()),
-            ("TF 14", "", "", pytest.raises(SystemExit)),
-        ],
-    )
-    def test_get_tf_version(
-        self, stdout: str, major: int, minor: int, expected_exception: callable
-    ):
-        with mock.patch(
-            "tfworker.commands.base.pipe_exec",
-            side_effect=mock_tf_version,
-        ) as mocked:
-            with expected_exception:
-                (actual_major, actual_minor) = BaseCommand.get_terraform_version(stdout)
-                assert actual_major == major
-                assert actual_minor == minor
-                mocked.assert_called_once()
-
     def test_worker_options(self, tf_13cmd_options):
         # Verify that the options from the CLI override the options from the config
         assert tf_13cmd_options._rootc.worker_options_odict.get("backend") == "s3"
@@ -236,7 +215,7 @@ class TestTerraformCommand:
     def test_no_create_backend_bucket_fails_gcs(self, grootc_no_create_backend_bucket):
         with pytest.raises(SystemExit):
             with mock.patch(
-                "tfworker.commands.base.BaseCommand.get_terraform_version",
+                "tfworker.commands.base.get_terraform_version",
                 side_effect=lambda x: (13, 3),
             ):
                 with mock.patch(
@@ -367,7 +346,7 @@ class TestTerraformCommandExec:
             mock_prep_modules.assert_called_once_with(
                 terraform_command._terraform_modules_dir,
                 terraform_command._temp_dir,
-                required=False,
+                required=True,
             )
             mock_prep_and_init.assert_called_once_with(def_iter)
             mock_check_plan.assert_called_once_with(definition)
@@ -414,7 +393,7 @@ class TestTerraformCommandExec:
             mock_prep_modules.assert_called_once_with(
                 terraform_command._terraform_modules_dir,
                 terraform_command._temp_dir,
-                required=False,
+                required=True,
             )
             mock_prep_and_init.assert_called_once_with(def_iter)
             mock_check_plan.assert_called_once_with(definition)
@@ -449,7 +428,7 @@ class TestTerraformCommandExec:
             mock_prep_modules.assert_called_once_with(
                 terraform_command._terraform_modules_dir,
                 terraform_command._temp_dir,
-                required=False,
+                required=True,
             )
             mock_prep_and_init.assert_called_once_with(def_iter)
             mock_check_plan.assert_called_once_with(definition)

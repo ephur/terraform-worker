@@ -23,4 +23,13 @@ DEFAULT_REPOSITORY_PATH = _CWD
 DEFAULT_AWS_REGION = "us-east-1"
 DEFAULT_GCP_REGION = "us-east-1a"
 
-RESERVED_FILES = ["terraform.tf", "worker-locals.tf", "worker.auto.tfvars"]
+TF_STATE_CACHE_NAME = "worker_state_cache.json"
+WORKER_LOCALS_FILENAME = "worker-locals.tf"
+WORKER_TF_FILENAME = "worker.tf"
+WORKER_TFVARS_FILENAME = "worker.auto.tfvars"
+RESERVED_FILES = [
+    WORKER_LOCALS_FILENAME,
+    WORKER_TF_FILENAME,
+    WORKER_TFVARS_FILENAME,
+    TF_STATE_CACHE_NAME,
+]
