@@ -14,7 +14,7 @@
 
 from abc import ABCMeta, abstractmethod
 
-from tfworker import JSONType
+from tfworker.types import JSONType
 
 
 class BackendError(Exception):

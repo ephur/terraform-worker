@@ -12,15 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .base import BaseProvider
+from tfworker.authenticators import AuthenticatorsCollection
+from tfworker.providers.base import BaseProvider
+from tfworker.types import ProviderConfig
 
 
 class GoogleProvider(BaseProvider):
     tag = "google"
+    requires_auth = True
 
-    def __init__(self, body, authenticators, tf_version_major, **kwargs):
-        super(GoogleProvider, self).__init__(body, tf_version_major)
+    def __init__(self, body: ProviderConfig):
+        super(GoogleProvider, self).__init__(body)
 
+        self._authenticator = None
+
+    def add_authenticators(self, authenticators: AuthenticatorsCollection):
         self._authenticator = authenticators.get(self.tag)
 
         # if there is a creds file, tuck it into the provider vars

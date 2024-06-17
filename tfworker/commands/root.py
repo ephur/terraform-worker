@@ -15,7 +15,6 @@
 import io
 import os
 import pathlib
-import platform
 import tempfile
 from pathlib import Path
 from typing import Union
@@ -259,32 +258,8 @@ def ordered_config_load(config: str) -> dict:
         click.secho(f"error loading yaml/json: {e}", fg="red")
         click.secho("the configuration that caused the error was\n:", fg="red")
         for i, line in enumerate(config.split("\n")):
-            click.secho(f"{i+1}: {line}", fg="red")
+            click.secho(f"{i + 1}: {line}", fg="red")
         raise SystemExit(1)
-
-
-def get_platform():
-    """
-    Returns a formatted operating system / architecture tuple that is consistent with common distribution creation tools.
-
-    Returns:
-        tuple: A tuple containing the operating system and architecture.
-    """
-
-    # strip off "2" which only appears on old linux kernels
-    opsys = platform.system().rstrip("2").lower()
-
-    # make sure machine uses consistent format
-    machine = platform.machine()
-    if machine == "x86_64":
-        machine = "amd64"
-
-    # some 64 bit arm extensions will report aarch64, this is functionaly
-    # equivalent to arm64 which is recognized and the pattern used by the TF
-    # community
-    if machine == "aarch64":
-        machine = "arm64"
-    return (opsys, machine)
 
 
 def rm_tree(base_path: Union[str, Path], inner: bool = False) -> None:

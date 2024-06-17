@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import pathlib
-from contextlib import contextmanager
 from typing import Tuple
 from unittest import mock
 from unittest.mock import MagicMock, patch
@@ -22,15 +21,9 @@ import pytest
 from google.cloud.exceptions import NotFound
 
 import tfworker
-from tfworker.commands.terraform import BaseCommand, TerraformCommand, TerraformError
+from tfworker.commands.terraform import TerraformCommand, TerraformError
 from tfworker.definitions import Definition
 from tfworker.handlers import HandlerError
-
-
-# context manager to allow testing exceptions in parameterized tests
-@contextmanager
-def does_not_raise():
-    yield
 
 
 def mock_pipe_exec(
@@ -185,27 +178,6 @@ class TestTerraformCommand:
             for arg in args:
                 assert arg in call_as_string
 
-    @pytest.mark.parametrize(
-        "stdout, major, minor, expected_exception",
-        [
-            ("Terraform v0.12.29", 0, 12, does_not_raise()),
-            ("Terraform v1.3.5", 1, 3, does_not_raise()),
-            ("TF 14", "", "", pytest.raises(SystemExit)),
-        ],
-    )
-    def test_get_tf_version(
-        self, stdout: str, major: int, minor: int, expected_exception: callable
-    ):
-        with mock.patch(
-            "tfworker.commands.base.pipe_exec",
-            side_effect=mock_tf_version,
-        ) as mocked:
-            with expected_exception:
-                (actual_major, actual_minor) = BaseCommand.get_terraform_version(stdout)
-                assert actual_major == major
-                assert actual_minor == minor
-                mocked.assert_called_once()
-
     def test_worker_options(self, tf_13cmd_options):
         # Verify that the options from the CLI override the options from the config
         assert tf_13cmd_options._rootc.worker_options_odict.get("backend") == "s3"
@@ -236,7 +208,7 @@ class TestTerraformCommand:
     def test_no_create_backend_bucket_fails_gcs(self, grootc_no_create_backend_bucket):
         with pytest.raises(SystemExit):
             with mock.patch(
-                "tfworker.commands.base.BaseCommand.get_terraform_version",
+                "tfworker.commands.base.get_terraform_version",
                 side_effect=lambda x: (13, 3),
             ):
                 with mock.patch(
@@ -342,12 +314,13 @@ class TestTerraformCommandExec:
 
     def test_exec_valid_flow(self, terraform_command, definition):
         def_iter = [definition]
+        terraform_command._provider_cache = "/path/to/cache"
 
         with patch.object(
             terraform_command.definitions, "limited", return_value=def_iter
-        ), patch.object(
-            terraform_command._plugins, "download"
-        ) as mock_download_plugins, patch(
+        ), patch(
+            "tfworker.commands.terraform.tf_util.mirror_providers"
+        ) as mock_mirror_providers, patch(
             "tfworker.commands.terraform.tf_util.prep_modules"
         ) as mock_prep_modules, patch.object(
             terraform_command, "_prep_and_init"
@@ -363,11 +336,11 @@ class TestTerraformCommandExec:
 
             terraform_command.exec()
 
-            mock_download_plugins.assert_called_once()
+            mock_mirror_providers.assert_called_once()
             mock_prep_modules.assert_called_once_with(
                 terraform_command._terraform_modules_dir,
                 terraform_command._temp_dir,
-                required=False,
+                required=True,
             )
             mock_prep_and_init.assert_called_once_with(def_iter)
             mock_check_plan.assert_called_once_with(definition)
@@ -392,9 +365,7 @@ class TestTerraformCommandExec:
 
         with patch.object(
             terraform_command.definitions, "limited", return_value=def_iter
-        ), patch.object(
-            terraform_command._plugins, "download"
-        ) as mock_download_plugins, patch(
+        ), patch(
             "tfworker.commands.terraform.tf_util.prep_modules"
         ) as mock_prep_modules, patch.object(
             terraform_command, "_prep_and_init"
@@ -410,11 +381,10 @@ class TestTerraformCommandExec:
 
             terraform_command.exec()
 
-            mock_download_plugins.assert_called_once()
             mock_prep_modules.assert_called_once_with(
                 terraform_command._terraform_modules_dir,
                 terraform_command._temp_dir,
-                required=False,
+                required=True,
             )
             mock_prep_and_init.assert_called_once_with(def_iter)
             mock_check_plan.assert_called_once_with(definition)
@@ -427,9 +397,7 @@ class TestTerraformCommandExec:
 
         with patch.object(
             terraform_command.definitions, "limited", return_value=def_iter
-        ), patch.object(
-            terraform_command._plugins, "download"
-        ) as mock_download_plugins, patch(
+        ), patch(
             "tfworker.commands.terraform.tf_util.prep_modules"
         ) as mock_prep_modules, patch.object(
             terraform_command, "_prep_and_init"
@@ -445,11 +413,10 @@ class TestTerraformCommandExec:
 
             terraform_command.exec()
 
-            mock_download_plugins.assert_called_once()
             mock_prep_modules.assert_called_once_with(
                 terraform_command._terraform_modules_dir,
                 terraform_command._temp_dir,
-                required=False,
+                required=True,
             )
             mock_prep_and_init.assert_called_once_with(def_iter)
             mock_check_plan.assert_called_once_with(definition)
@@ -463,9 +430,7 @@ class TestTerraformCommandExec:
 
         with patch.object(
             terraform_command.definitions, "limited", return_value=def_iter
-        ), patch.object(
-            terraform_command._plugins, "download"
-        ) as mock_download_plugins, patch(
+        ), patch(
             "tfworker.commands.terraform.tf_util.prep_modules"
         ) as mock_prep_modules, patch.object(
             terraform_command, "_prep_and_init"
@@ -481,7 +446,6 @@ class TestTerraformCommandExec:
 
             terraform_command.exec()
 
-            mock_download_plugins.assert_called_once()
             mock_prep_modules.assert_called_once_with(
                 terraform_command._terraform_modules_dir,
                 terraform_command._temp_dir,

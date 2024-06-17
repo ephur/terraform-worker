@@ -11,34 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-import base64
-import json
 import os
 import pathlib
-import re
 
 import click
 
+import tfworker.util.hooks as hooks
 import tfworker.util.terraform as tf_util
 from tfworker.commands.base import BaseCommand
 from tfworker.definitions import Definition
+from tfworker.exceptions import HookError, PlanChange, TerraformError
 from tfworker.handlers.exceptions import HandlerError
 from tfworker.util.system import pipe_exec, strip_ansi
-
-TF_STATE_CACHE_NAME = "worker_state_cache.json"
-
-
-class HookError(Exception):
-    pass
-
-
-class PlanChange(Exception):
-    pass
-
-
-class TerraformError(Exception):
-    pass
 
 
 class TerraformCommand(BaseCommand):
@@ -98,14 +82,19 @@ class TerraformCommand(BaseCommand):
             click.secho(f"Error with supplied limit: {e}", fg="red")
             raise SystemExit(1)
 
-        # download the providers
-        self._plugins.download()
+        if self._provider_cache is not None:
+            tf_util.mirror_providers(
+                self._providers,
+                self._terraform_bin,
+                self._temp_dir,
+                self._provider_cache,
+            )
 
         # prepare the modules, they are required if the modules dir is specified, otherwise they are optional
         tf_util.prep_modules(
             self._terraform_modules_dir,
             self._temp_dir,
-            required=(self._terraform_modules_dir is not None),
+            required=(self._terraform_modules_dir != ""),
         )
 
         # prepare the definitions and run terraform init
@@ -124,6 +113,10 @@ class TerraformCommand(BaseCommand):
     ###################
     # Private methods #
     ###################
+
+    ###########################################
+    # Methods for dealing with terraform init #
+    ###########################################
     def _prep_and_init(self, def_iter: list[Definition]) -> None:
         """Prepares the definition and runs terraform init
 
@@ -143,6 +136,9 @@ class TerraformCommand(BaseCommand):
                 click.secho("error running terraform init", fg="red")
                 raise SystemExit(1)
 
+    ###########################################
+    # Methods for dealing with terraform plan #
+    ###########################################
     def _check_plan(self, definition: Definition) -> bool:
         """
         Determines if a plan is needed for the provided definition
@@ -207,60 +203,6 @@ class TerraformCommand(BaseCommand):
                 f'plan path "{plan_path}" is not suitable, it is not an existing directory'
             )
             raise SystemExit(1)
-
-    def _run_handlers(
-        self, definition, action, stage, plan_file=None, **kwargs
-    ) -> None:
-        """Runs the handlers for the given action and stage
-
-        Args:
-            definition: the definition to run the handlers for
-            action: the action to run the handlers for
-            stage: the stage to run the handlers for
-            plan_file: the plan file to pass to the handlers
-            kwargs: additional keyword arguments to pass to the handlers
-
-        Returns:
-            None
-        """
-        try:
-            self._execute_handlers(
-                action=action,
-                stage=stage,
-                deployment=self._deployment,
-                definition=definition.tag,
-                definition_path=definition.fs_path,
-                planfile=plan_file,
-                **kwargs,
-            )
-        except HandlerError as e:
-            if e.terminate:
-                click.secho(f"terminating due to fatal handler error {e}", fg="red")
-                raise SystemExit(1)
-            click.secho(f"handler error: {e}", fg="red")
-
-    def _should_plan(self, definition: Definition, plan_file: pathlib.Path) -> bool:
-        if not self._tf_plan:
-            definition._ready_to_apply = True
-            return False
-
-        if plan_file.exists():
-            if plan_file.stat().st_size == 0:
-                click.secho(
-                    f"exiting plan file {plan_file} exists but is empty; planning again",
-                    fg="green",
-                )
-                definition._ready_to_apply = False
-                return True
-            click.secho(
-                f"existing plan file {plan_file} is suitable for apply; not planning again; remove plan file to allow planning",
-                fg="green",
-            )
-            definition._ready_to_apply = True
-            return False
-
-        definition._ready_to_apply = False
-        return True
 
     def _exec_plan(self, definition) -> bool:
         """_exec_plan executes a terraform plan, returns true if a plan has changes"""
@@ -328,6 +270,32 @@ class TerraformCommand(BaseCommand):
 
         return changes
 
+    def _should_plan(self, definition: Definition, plan_file: pathlib.Path) -> bool:
+        if not self._tf_plan:
+            definition._ready_to_apply = True
+            return False
+
+        if plan_file.exists():
+            if plan_file.stat().st_size == 0:
+                click.secho(
+                    f"exiting plan file {plan_file} exists but is empty; planning again",
+                    fg="green",
+                )
+                definition._ready_to_apply = False
+                return True
+            click.secho(
+                f"existing plan file {plan_file} is suitable for apply; not planning again; remove plan file to allow planning",
+                fg="green",
+            )
+            definition._ready_to_apply = True
+            return False
+
+        definition._ready_to_apply = False
+        return True
+
+    ####################################################
+    # Methods for dealing with terraform apply/destroy #
+    ####################################################
     def _check_apply_or_destroy(self, changes, definition) -> bool:
         """_check_apply_or_destroy determines if a terraform execution is needed"""
         # never apply if --no-apply is used
@@ -421,14 +389,56 @@ class TerraformCommand(BaseCommand):
                 fg="green",
             )
 
+    #####################################
+    # Methods for dealing with handlers #
+    #####################################
+    def _run_handlers(
+        self, definition, action, stage, plan_file=None, **kwargs
+    ) -> None:
+        """Runs the handlers for the given action and stage
+
+        Args:
+            definition: the definition to run the handlers for
+            action: the action to run the handlers for
+            stage: the stage to run the handlers for
+            plan_file: the plan file to pass to the handlers
+            kwargs: additional keyword arguments to pass to the handlers
+
+        Returns:
+            None
+        """
+        try:
+            self._execute_handlers(
+                action=action,
+                stage=stage,
+                deployment=self._deployment,
+                definition=definition.tag,
+                definition_path=definition.fs_path,
+                planfile=plan_file,
+                **kwargs,
+            )
+        except HandlerError as e:
+            if e.terminate:
+                click.secho(f"terminating due to fatal handler error {e}", fg="red")
+                raise SystemExit(1)
+            click.secho(f"handler error: {e}", fg="red")
+
+    ########################################
+    # Common methods for running terraform #
+    ########################################
     def _run(
         self, definition, command, debug=False, plan_action="init", plan_file=None
     ):
         """Run terraform."""
 
+        if self._provider_cache is None:
+            plugin_dir = f"{self._temp_dir}/terraform-plugins"
+        else:
+            plugin_dir = self._provider_cache
+
         color_str = "-no-color" if self._use_colors is False else ""
         params = {
-            "init": f"-input=false {color_str} -plugin-dir={self._temp_dir}/terraform-plugins",
+            "init": f"-input=false {color_str} -plugin-dir={plugin_dir} -lockfile=readonly",
             "plan": f"-input=false -detailed-exitcode {color_str}",
             "apply": f"-input=false {color_str} -auto-approve",
             "destroy": f"-input=false {color_str} -auto-approve",
@@ -460,9 +470,11 @@ class TerraformCommand(BaseCommand):
 
         # only execute hooks for plan/apply/destroy
         try:
-            if TerraformCommand.check_hooks(
-                "pre", working_dir, command
-            ) and command in ["apply", "destroy", "plan"]:
+            if hooks.check_hooks("pre", working_dir, command) and command in [
+                "apply",
+                "destroy",
+                "plan",
+            ]:
                 # pre exec hooks
                 # want to pass remotes
                 # want to pass tf_vars
@@ -471,7 +483,7 @@ class TerraformCommand(BaseCommand):
                     " executing ",
                     fg="yellow",
                 )
-                TerraformCommand.hook_exec(
+                hooks.hook_exec(
                     "pre",
                     command,
                     working_dir,
@@ -536,15 +548,17 @@ class TerraformCommand(BaseCommand):
 
         # only execute hooks for plan/destroy
         try:
-            if TerraformCommand.check_hooks(
-                "post", working_dir, command
-            ) and command in ["apply", "destroy", "plan"]:
+            if hooks.check_hooks("post", working_dir, command) and command in [
+                "apply",
+                "destroy",
+                "plan",
+            ]:
                 click.secho(
                     f"found post-{command} hook script for definition {definition.tag},"
                     " executing ",
                     fg="yellow",
                 )
-                TerraformCommand.hook_exec(
+                hooks.hook_exec(
                     "post",
                     command,
                     working_dir,
@@ -560,304 +574,3 @@ class TerraformCommand(BaseCommand):
             )
             raise SystemExit(2)
         return True
-
-    ##################
-    # Static methods #
-    ##################
-    @staticmethod
-    def hook_exec(
-        phase,
-        command,
-        working_dir,
-        env,
-        terraform_path,
-        debug=False,
-        b64_encode=False,
-        extra_vars={},
-    ):
-        """
-        hook_exec executes a hook script.
-
-        Before execution it sets up the environment to make all terraform and remote
-        state variables available to the hook via environment vars
-        """
-
-        key_replace_items = {
-            " ": "",
-            '"': "",
-            "-": "_",
-            ".": "_",
-        }
-        val_replace_items = {
-            " ": "",
-            '"': "",
-            "\n": "",
-        }
-        local_env = env.copy()
-        local_env["TF_PATH"] = terraform_path
-        hook_dir = f"{working_dir}/hooks"
-        hook_script = None
-
-        for f in os.listdir(hook_dir):
-            # this file format is specifically structured by the prep_def function
-            if os.path.splitext(f)[0] == f"{phase}_{command}":
-                hook_script = f"{hook_dir}/{f}"
-        # this should never have been called if the hook script didn't exist...
-        if hook_script is None:
-            raise HookError(f"hook script missing from {hook_dir}")
-
-        # populate environment with terraform remotes
-        if os.path.isfile(f"{working_dir}/worker-locals.tf"):
-            # I'm sorry. :-)
-            r = re.compile(
-                r"\s*(?P<item>\w+)\s*\=.+data\.terraform_remote_state\.(?P<state>\w+)\.outputs\.(?P<state_item>\w+)\s*"
-            )
-
-            with open(f"{working_dir}/worker-locals.tf") as f:
-                for line in f:
-                    m = r.match(line)
-                    if m:
-                        item = m.group("item")
-                        state = m.group("state")
-                        state_item = m.group("state_item")
-                    else:
-                        continue
-
-                    state_value = TerraformCommand.get_state_item(
-                        working_dir, env, terraform_path, state, state_item
-                    )
-
-                    if state_value is not None:
-                        if b64_encode:
-                            state_value = base64.b64encode(state_value.encode("utf-8"))
-                        local_env[f"TF_REMOTE_{state}_{item}".upper()] = state_value
-
-        # populate environment with terraform variables
-        if os.path.isfile(f"{working_dir}/worker.auto.tfvars"):
-            with open(f"{working_dir}/worker.auto.tfvars") as f:
-                for line in f:
-                    tf_var = line.split("=")
-
-                    # strip bad names out for env var settings
-                    for k, v in key_replace_items.items():
-                        tf_var[0] = tf_var[0].replace(k, v)
-
-                    for k, v in val_replace_items.items():
-                        tf_var[1] = tf_var[1].replace(k, v)
-
-                    if b64_encode:
-                        tf_var[1] = base64.b64encode(tf_var[1].encode("utf-8"))
-
-                    local_env[f"TF_VAR_{tf_var[0].upper()}"] = tf_var[1]
-        else:
-            click.secho(
-                f"{working_dir}/worker.auto.tfvars not found!",
-                fg="red",
-            )
-
-        for k, v in extra_vars.items():
-            if b64_encode:
-                v = base64.b64encode(v.encode("utf-8"))
-            local_env[f"TF_EXTRA_{k.upper()}"] = v
-
-        # execute the hook
-        (exit_code, stdout, stderr) = pipe_exec(
-            f"{hook_script} {phase} {command}",
-            cwd=hook_dir,
-            env=local_env,
-        )
-
-        # handle output from hook_script
-        if debug:
-            click.secho(f"exit code: {exit_code}", fg="blue")
-            for line in stdout.decode().splitlines():
-                click.secho(f"stdout: {line}", fg="blue")
-            for line in stderr.decode().splitlines():
-                click.secho(f"stderr: {line}", fg="red")
-
-        if exit_code != 0:
-            raise HookError("hook script {}")
-
-    @staticmethod
-    def check_hooks(phase, working_dir, command):
-        """
-        check_hooks determines if a hook exists for a given operation/definition
-        """
-        hook_dir = f"{working_dir}/hooks"
-        if not os.path.isdir(hook_dir):
-            # there is no hooks dir
-            return False
-        for f in os.listdir(hook_dir):
-            if os.path.splitext(f)[0] == f"{phase}_{command}":
-                if os.access(f"{hook_dir}/{f}", os.X_OK):
-                    return True
-                else:
-                    raise HookError(f"{hook_dir}/{f} exists, but is not executable!")
-        return False
-
-    @staticmethod
-    def get_state_item(working_dir, env, terraform_bin, state, item):
-        """
-        The general handler function for getting a state item, it will first
-        try to get the item from another definitions output, but if the other
-        definition is not setup, it will fallback to getting the item from the
-        remote state.
-
-        @param working_dir: The working directory of the terraform definition
-        @param env: The environment variables to pass to the terraform command
-        @param terraform_bin: The path to the terraform binary
-        @param state: The state name to get the item from
-        @param item: The item to get from the state
-        """
-        try:
-            return TerraformCommand._get_state_item_from_output(
-                working_dir, env, terraform_bin, state, item
-            )
-        except FileNotFoundError:
-            return TerraformCommand._get_state_item_from_remote(
-                working_dir, env, terraform_bin, state, item
-            )
-
-    @staticmethod
-    def _get_state_item_from_remote(working_dir, env, terraform_bin, state, item):
-        """
-        get_state_item returns json encoded output from a terraform remote state
-
-        @param working_dir: The working directory of the terraform definition
-        @param env: The environment variables to pass to the terraform command
-        @param terraform_bin: The path to the terraform binary
-        @param state: The state name to get the item from
-        @param item: The item to get from the state
-        """
-
-        remote_state = None
-
-        # setup the state cache
-        cache_file = TerraformCommand._get_cache_name(working_dir)
-        TerraformCommand._make_state_cache(working_dir, env, terraform_bin)
-
-        # read the cache
-        with open(cache_file, "r") as f:
-            state_cache = json.load(f)
-
-        # Get the remote state we are looking for, and raise an error if it's not there
-        resources = state_cache["values"]["root_module"]["resources"]
-        for resource in resources:
-            if (
-                resource["type"] == "terraform_remote_state"
-                and resource["name"] == state
-            ):
-                remote_state = resource
-        if remote_state is None:
-            raise HookError(f"Remote state item {state} not found")
-
-        if item in remote_state["values"]["outputs"]:
-            return json.dumps(
-                remote_state["values"]["outputs"][item],
-                indent=None,
-                separators=(",", ":"),
-            )
-
-        raise HookError(f"Remote state item {state}.{item} not found in state cache")
-
-    @staticmethod
-    def _get_state_item_from_output(working_dir, env, terraform_bin, state, item):
-        """
-        Get a single item from the terraform output, this is the preferred
-        mechanism as items will be more guaranteed to be up to date, but it
-        creates problems when the remote state is not setup, like when using
-        --limit
-
-        @param work_dir: The working directory of the terraform definition
-        @param env: The environment variables to pass to the terraform command
-        @param terraform_bin: The path to the terraform binary
-        @param state: The state name to get the item from
-        @param item: The item to get from the state
-        """
-
-        base_dir, _ = os.path.split(working_dir)
-        try:
-            (exit_code, stdout, stderr) = pipe_exec(
-                f"{terraform_bin} output -json -no-color {item}",
-                cwd=f"{base_dir}/{state}",
-                env=env,
-            )
-        except FileNotFoundError:
-            # the remote state is not setup, likely do to use of --limit
-            # this is acceptable, and is the responsibility of the hook
-            # to ensure it has all values needed for safe execution
-            raise
-
-        if exit_code != 0:
-            raise HookError(
-                f"Error reading remote state item {state}.{item}, details: {stderr}"
-            )
-
-        if stdout is None:
-            raise HookError(
-                f"Remote state item {state}.{item} is empty; This is completely"
-                " unexpected, failing..."
-            )
-        json_output = json.loads(stdout)
-        return json.dumps(json_output, indent=None, separators=(",", ":"))
-
-    @staticmethod
-    def _make_state_cache(
-        working_dir: str, env: dict, terraform_bin: str, refresh: bool = False
-    ):
-        """
-        Using `terraform show -json` make a cache of the state file
-
-        @param working_dir: The working directory of the terraform definition
-        @param env: The environment variables to pass to the terraform command
-        @param terraform_bin: The path to the terraform binary
-        @param refresh: If true, the cache will be refreshed
-        """
-
-        # check if the cache exists
-        state_cache = TerraformCommand._get_cache_name(working_dir)
-        if not refresh and os.path.exists(state_cache):
-            return
-
-        # ensure the state is refreshed; but no changes to resources are made
-        (exit_code, stdout, stderr) = pipe_exec(
-            f"{terraform_bin} apply -auto-approve -refresh-only",
-            cwd=working_dir,
-            env=env,
-        )
-
-        # get the json from terraform to generate the cache
-        (exit_code, stdout, stderr) = pipe_exec(
-            f"{terraform_bin} show -json",
-            cwd=working_dir,
-            env=env,
-        )
-
-        # validate the output, check exit code and ensure output is json
-        if exit_code != 0:
-            raise HookError(f"Error reading terraform state, details: {stderr}")
-        try:
-            json.loads(stdout)
-        except json.JSONDecodeError:
-            raise HookError(
-                "Error parsing terraform state; output is not in json format"
-            )
-
-        # write the cache to disk
-        try:
-            with open(state_cache, "w") as f:
-                f.write(stdout.decode())
-        except Exception as e:
-            raise HookError(f"Error writing state cache to {state_cache}, details: {e}")
-        return
-
-    @staticmethod
-    def _get_cache_name(working_dir: str) -> str:
-        """
-        Get the cache directory for the state cache
-
-        @param working_dir: The working directory of the terraform definition
-
-        @return: The cache directory path
-        """
-        return f"{working_dir}/{TF_STATE_CACHE_NAME}"

@@ -12,17 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .base import BaseProvider
+from tfworker.providers.google import GoogleProvider
 
 
-class GoogleBetaProvider(BaseProvider):
+class GoogleBetaProvider(GoogleProvider):
     tag = "google-beta"
-
-    def __init__(self, body, authenticators, tf_version_major, **kwargs):
-        super(GoogleBetaProvider, self).__init__(body, tf_version_major)
-
-        self._authenticator = authenticators.get("google")
-
-        # if there is a creds file, tuck it into the provider vars
-        if self._authenticator.creds_path:
-            self.vars["credentials"] = f'file("{self._authenticator.creds_path}")'
+    requires_auth = True

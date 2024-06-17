@@ -16,9 +16,9 @@ import collections
 
 from .aws import AWSAuthenticator  # noqa
 from .base import UnknownAuthenticator  # noqa
-from .google import GoogleAuthenticator  # noqa
+from .google import GoogleAuthenticator, GoogleBetaAuthenticator  # noqa
 
-ALL = [AWSAuthenticator, GoogleAuthenticator]
+ALL = [AWSAuthenticator, GoogleAuthenticator, GoogleBetaAuthenticator]
 
 
 class AuthenticatorsCollection(collections.abc.Mapping):

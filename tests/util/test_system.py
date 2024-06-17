@@ -11,19 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-from contextlib import contextmanager
 from unittest import mock
 
 import pytest
 
-from tfworker.util.system import get_version, pipe_exec, strip_ansi, which
-
-
-# context manager to allow testing exceptions in parameterized tests
-@contextmanager
-def does_not_raise():
-    yield
+from tfworker.util.system import get_platform, get_version, pipe_exec, strip_ansi, which
 
 
 def mock_pipe_exec(args, stdin=None, cwd=None, env=None):
@@ -134,16 +126,16 @@ class TestUtilSystem:
 
     def test_get_version(self):
         with mock.patch(
-            "tfworker.util.system.importlib_metadata.distribution",
+            "tfworker.util.system.importlib.metadata.distribution",
             side_effect=mock_distribution,
         ):
             assert get_version() == "1.2.3"
 
     def test_get_version_unknown(self):
-        from importlib_metadata import PackageNotFoundError
+        from importlib.metadata import PackageNotFoundError
 
         with mock.patch(
-            "tfworker.util.system.importlib_metadata.distribution",
+            "tfworker.util.system.importlib.metadata.distribution",
             side_effect=PackageNotFoundError,
         ):
             assert get_version() == "unknown"
@@ -153,3 +145,29 @@ class TestUtilSystem:
         assert strip_ansi("\x1B[32mWorld\x1B[0m") == "World"
         assert strip_ansi("\x1B[33mFoo\x1B[0m") == "Foo"
         assert strip_ansi("\x1B[34mBar\x1B[0m") == "Bar"
+
+    @pytest.mark.parametrize(
+        "opsys, machine, mock_platform_opsys, mock_platform_machine",
+        [
+            ("linux", "i386", ["linux2"], ["i386"]),
+            ("linux", "arm", ["Linux"], ["arm"]),
+            ("linux", "amd64", ["linux"], ["x86_64"]),
+            ("linux", "amd64", ["linux"], ["amd64"]),
+            ("darwin", "amd64", ["darwin"], ["x86_64"]),
+            ("darwin", "amd64", ["darwin"], ["amd64"]),
+            ("darwin", "arm", ["darwin"], ["arm"]),
+            ("darwin", "arm64", ["darwin"], ["aarch64"]),
+        ],
+    )
+    def test_get_platform(
+        self, opsys, machine, mock_platform_opsys, mock_platform_machine
+    ):
+        with mock.patch("platform.system", side_effect=mock_platform_opsys) as mock1:
+            with mock.patch(
+                "platform.machine", side_effect=mock_platform_machine
+            ) as mock2:
+                actual_opsys, actual_machine = get_platform()
+                assert opsys == actual_opsys
+                assert machine == actual_machine
+                mock1.assert_called_once()
+                mock2.assert_called_once()

@@ -304,7 +304,7 @@ def rootc_options(s3_client, dynamodb_client, sts_client):
 @pytest.fixture
 def basec(rootc, s3_client):
     with mock.patch(
-        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        "tfworker.commands.base.get_terraform_version",
         side_effect=lambda x: (13, 3),
     ):
         with mock.patch(
@@ -319,7 +319,7 @@ def basec(rootc, s3_client):
 @pytest.fixture
 def gbasec(grootc):
     with mock.patch(
-        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        "tfworker.commands.base.get_terraform_version",
         side_effect=lambda x: (13, 3),
     ):
         with mock.patch(
@@ -342,7 +342,7 @@ def tf_Xcmd(rootc):
 @pytest.fixture
 def tf_15cmd(rootc):
     with mock.patch(
-        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        "tfworker.util.terraform.get_terraform_version",
         side_effect=lambda x: (15, 0),
     ):
         with mock.patch(
@@ -357,7 +357,7 @@ def tf_15cmd(rootc):
 @pytest.fixture
 def tf_14cmd(rootc):
     with mock.patch(
-        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        "tfworker.util.terraform.get_terraform_version",
         side_effect=lambda x: (14, 5),
     ):
         with mock.patch(
@@ -372,7 +372,7 @@ def tf_14cmd(rootc):
 @pytest.fixture
 def tf_13cmd(rootc):
     with mock.patch(
-        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        "tfworker.util.terraform.get_terraform_version",
         side_effect=lambda x: (13, 5),
     ):
         with mock.patch(
@@ -387,7 +387,7 @@ def tf_13cmd(rootc):
 @pytest.fixture
 def tf_12cmd(rootc):
     with mock.patch(
-        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        "tfworker.util.terraform.get_terraform_version",
         side_effect=lambda x: (12, 27),
     ):
         with mock.patch(
@@ -402,7 +402,7 @@ def tf_12cmd(rootc):
 @pytest.fixture
 def tf_13cmd_options(rootc_options):
     with mock.patch(
-        "tfworker.commands.base.BaseCommand.get_terraform_version",
+        "tfworker.util.terraform.get_terraform_version",
         side_effect=lambda x: (13, 5),
     ):
         with mock.patch(

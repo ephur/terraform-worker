@@ -11,28 +11,50 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import importlib.metadata
 import os
+import platform
 import re
 import shlex
 import subprocess
+from typing import Dict, List, Tuple, Union
 
 import click
-import importlib_metadata
 
 
-def strip_ansi(line):
+def strip_ansi(line: str) -> str:
     """
     Strips ANSI escape sequences from a string.
+
+    Args:
+        line (str): The string to strip ANSI escape sequences from.
+
+    Returns:
+        str: The string with ANSI escape sequences stripped.
     """
     ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
     return ansi_escape.sub("", line)
 
 
-def pipe_exec(args, stdin=None, cwd=None, env=None, stream_output=False):
+def pipe_exec(
+    args: Union[str, List[str]],
+    stdin: str = None,
+    cwd: str = None,
+    env: Dict[str, str] = None,
+    stream_output: bool = False,
+) -> Tuple[int, Union[bytes, None], Union[bytes, None]]:
     """
-    A function to accept a list of commands and pipe them together.
+    A function to take one or more commands and execute them in a pipeline, returning the output of the last command.
 
-    Takes optional stdin to give to the first item in the pipe chain.
+    Args:
+        args (str or list): A string or list of strings representing the command(s) to execute.
+        stdin (str, optional): A string to pass as stdin to the first command
+        cwd (str, optional): The working directory to execute the command in.
+        env (dict, optional): A dictionary of environment variables to set for the command.
+        stream_output (bool, optional): A boolean indicating if the output should be streamed back to the caller.
+
+    Returns:
+        tuple: A tuple containing the return code, stdout, and stderr of the last command in the pipeline.
     """
     commands = []  # listed used to hold all the popen objects
     # use the default environment if one is not specified
@@ -132,8 +154,16 @@ def pipe_exec(args, stdin=None, cwd=None, env=None, stream_output=False):
     return (returncode, stdout, stderr)
 
 
-def which(program):
-    """From stack overflow"""
+def which(program: str) -> Union[str, None]:
+    """
+    A function to mimic the behavior of the `which` command in Unix-like systems.
+
+    Args:
+        program (str): The program to search for in the PATH.
+
+    Returns:
+        str: The full path to the program if found, otherwise None.
+    """
 
     def is_exe(fpath):
         return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
@@ -153,8 +183,35 @@ def which(program):
 def get_version() -> str:
     """
     Get the version of the current package
+
+    Returns:
+        str: The version of the package
     """
     try:
-        return importlib_metadata.version("terraform-worker")
-    except importlib_metadata.PackageNotFoundError:
+        return importlib.metadata.version("terraform-worker")
+    except importlib.metadata.PackageNotFoundError:
         return "unknown"
+
+
+def get_platform() -> Tuple[str, str]:
+    """
+    Returns a formatted operating system / architecture tuple that is consistent with common distribution creation tools.
+
+    Returns:
+        tuple: A tuple containing the operating system and architecture.
+    """
+
+    # strip off "2" which only appears on old linux kernels
+    opsys = platform.system().rstrip("2").lower()
+
+    # make sure machine uses consistent format
+    machine = platform.machine()
+    if machine == "x86_64":
+        machine = "amd64"
+
+    # some 64 bit arm extensions will `report aarch64, this is functionaly
+    # equivalent to arm64 which is recognized and the pattern used by the TF
+    # community
+    if machine == "aarch64":
+        machine = "arm64"
+    return (opsys, machine)

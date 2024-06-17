@@ -43,3 +43,7 @@ class GoogleAuthenticator(BaseAuthenticator):
         if self.creds_path:
             result["GOOGLE_APPLICATION_CREDENTIALS"] = shlex.quote(self.creds_path)
         return result
+
+
+class GoogleBetaAuthenticator(GoogleAuthenticator):
+    tag = "google-beta"
