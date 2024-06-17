@@ -11,19 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-from contextlib import contextmanager
 from unittest import mock
 
 import pytest
 
 from tfworker.util.system import get_platform, get_version, pipe_exec, strip_ansi, which
-
-
-# context manager to allow testing exceptions in parameterized tests
-@contextmanager
-def does_not_raise():
-    yield
 
 
 def mock_pipe_exec(args, stdin=None, cwd=None, env=None):

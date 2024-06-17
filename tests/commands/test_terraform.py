@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import pathlib
-from contextlib import contextmanager
 from typing import Tuple
 from unittest import mock
 from unittest.mock import MagicMock, patch
@@ -25,12 +24,6 @@ import tfworker
 from tfworker.commands.terraform import TerraformCommand, TerraformError
 from tfworker.definitions import Definition
 from tfworker.handlers import HandlerError
-
-
-# context manager to allow testing exceptions in parameterized tests
-@contextmanager
-def does_not_raise():
-    yield
 
 
 def mock_pipe_exec(

@@ -20,5 +20,7 @@ dep-test: init
 	poetry run coverage report --fail-under=60 -m --skip-empty
 
 clean:
-	rm -rf build dist .eggs terraform_worker.egg-info
-	find . -name *.pyc -exec rm {} \;
+	@echo "removing python temporary and build files "
+	@rm -rf build dist .eggs terraform_worker.egg-info
+	@find . -name *.pyc -exec rm {} \;
+	@find . -name __pycache__ -type d -exec rmdir {} \;

@@ -12,7 +12,7 @@ terraform:
       vars:
         region: {{ aws_region }}
 
-    google_beta:
+    google-beta:
       requirements:
         version: 3.38.0
 

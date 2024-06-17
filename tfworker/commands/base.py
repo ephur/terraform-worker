@@ -69,7 +69,6 @@ class BaseCommand:
         self._authenticators = AuthenticatorsCollection(
             rootc.args, deployment=deployment, **kwargs
         )
-
         self._providers = ProvidersCollection(
             rootc.providers_odict, self._authenticators
         )
