@@ -196,8 +196,6 @@ def get_provider_gid_from_source(source: str) -> ProviderGID:
 
     return ProviderGID(hostname=hostname, namespace=namespace, type=ptype)
 
-
-@lru_cache
 def find_required_providers(
     search_dir: str,
 ) -> Union[None, Dict[str, [Dict[str, str]]]]:

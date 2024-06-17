@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import click
+import pathlib
 
 from tfworker.authenticators import AuthenticatorsCollection
 from tfworker.backends import BackendError, select_backend
@@ -50,6 +51,8 @@ class BaseCommand:
         rootc.load_config()
 
         self._provider_cache = self._resolve_arg("provider_cache")
+        if self._provider_cache is not None:
+            self._provider_cache = pathlib.Path(self._provider_cache).resolve()
 
         (self._tf_version_major, self._tf_version_minor) = self._resolve_arg(
             "tf_version"
