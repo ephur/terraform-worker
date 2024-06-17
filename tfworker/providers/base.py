@@ -25,6 +25,9 @@ class BaseProvider:
         self.source = config.requirements.source or f"hashicorp/{self.tag}"
         self._field_filter = []
 
+    def __str__(self):
+        return self.tag
+
     @property
     def gid(self) -> ProviderGID:
         from tfworker.util.terraform import get_provider_gid_from_source

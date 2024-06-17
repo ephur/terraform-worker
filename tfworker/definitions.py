@@ -107,7 +107,7 @@ class Definition:
     @property
     def provider_names(self):
         try:
-            return list(find_required_providers(self.path).keys())
+            return list(find_required_providers(self.fs_path).keys())
         except AttributeError:
             return None
 
@@ -212,14 +212,15 @@ class Definition:
         if self._provider_cache is None:
             return
 
-        with open(f"{self._target}/{TF_PROVIDER_DEFAULT_LOCKFILE}", "w") as lockfile:
-            lockfile.write(
-                generate_terraform_lockfile(
-                    providers=self._providers,
-                    included_providers=self.provider_names,
-                    cache_dir=self._provider_cache,
-                )
-            )
+        result = generate_terraform_lockfile(
+            providers=self._providers,
+            included_providers=self.provider_names,
+            cache_dir=self._provider_cache,
+        )
+
+        if result is not None:
+            with open(f"{self._target}/{TF_PROVIDER_DEFAULT_LOCKFILE}", "w") as lockfile:
+                lockfile.write(result)
 
     @staticmethod
     def quote_str(some_string):

@@ -1,6 +1,7 @@
 import json
 import os
 import pathlib
+from functools import lru_cache
 from tempfile import TemporaryDirectory
 from typing import Dict, List, Union
 
@@ -79,10 +80,9 @@ def _write_mirror_configuration(
     Raises:
         IndexError: If there are no providers to mirror.
     """
-    includes = [x for x in providers if _not_in_cache(x.gid, x.version, cache_dir)]
+    includes = [x.tag for x in providers if _not_in_cache(x.gid, x.version, cache_dir)]
     if len(includes) == 0:
         raise IndexError("No providers to mirror")
-    click.secho(f"Mirroring providers: {includes}", fg="yellow")
 
     mirror_configuration = _create_mirror_configuration(
         providers=providers, includes=includes
@@ -166,9 +166,10 @@ def _parse_required_providers(content: dict) -> Union[None, Dict[str, Dict[str, 
     return providers
 
 
+@lru_cache
 def _find_required_providers(search_dir: str) -> Dict[str, [Dict[str, str]]]:
     providers = {}
-    for root, _, files in os.walk(search_dir):
+    for root, _, files in os.walk(search_dir, followlinks=True):
         for file in files:
             if file.endswith(".tf"):
                 with open(f"{root}/{file}", "r") as f:

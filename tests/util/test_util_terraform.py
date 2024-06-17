@@ -177,7 +177,7 @@ def test_get_tf_version(
 def mock_mirror_setup():
     mock_mirror_settings = {
         "providers": MagicMock(),
-        "terraform_bin": "/path/to/terraform",
+        'terraform_bin': "/path/to/terraform",
         "working_dir": "/working/dir",
         "cache_dir": "/cache/dir",
         "temp_dir": "/temp/dir",
@@ -208,7 +208,7 @@ def test_mirror_providers(mock_mirror_setup):
 
     result = mirror_providers(
         providers=mock_mirror_settings["providers"],
-        terraform_bin=mock_mirror_settings["terraform_bin"],
+        terraform_bin=mock_mirror_settings['terraform_bin'],
         working_dir=mock_mirror_settings["working_dir"],
         cache_dir=mock_mirror_settings["cache_dir"],
     )
@@ -220,7 +220,7 @@ def test_mirror_providers(mock_mirror_setup):
         mock_mirror_settings["cache_dir"],
     )
     mock_pipe_exec.assert_called_once_with(
-        f"{mock_mirror_settings["terraform_bin"]} providers mirror {mock_mirror_settings['cache_dir']}",
+        f"{mock_mirror_settings['terraform_bin']} providers mirror {mock_mirror_settings['cache_dir']}",
         cwd=mock_mirror_settings["temp_dir"],
         stream_output=True,
     )
@@ -243,7 +243,7 @@ def test_mirror_providers_tf_error(mock_mirror_setup):
     with pytest.raises(SystemExit):
         mirror_providers(
             providers=mock_mirror_settings["providers"],
-            terraform_bin=mock_mirror_settings["terraform_bin"],
+            terraform_bin=mock_mirror_settings['terraform_bin'],
             working_dir=mock_mirror_settings["working_dir"],
             cache_dir=mock_mirror_settings["cache_dir"],
         )
@@ -255,7 +255,7 @@ def test_mirror_providers_tf_error(mock_mirror_setup):
         mock_mirror_settings["cache_dir"],
     )
     mock_pipe_exec.assert_called_once_with(
-        f"{mock_mirror_settings["terraform_bin"]} providers mirror {mock_mirror_settings['cache_dir']}",
+        f"{mock_mirror_settings['terraform_bin']} providers mirror {mock_mirror_settings['cache_dir']}",
         cwd=mock_mirror_settings["temp_dir"],
         stream_output=True,
     )
@@ -273,7 +273,7 @@ def test_mirror_providers_all_in_cache(mock_mirror_setup):
 
     mirror_providers(
         providers=mock_mirror_settings["providers"],
-        terraform_bin=mock_mirror_settings["terraform_bin"],
+        terraform_bin=mock_mirror_settings['terraform_bin'],
         working_dir=mock_mirror_settings["working_dir"],
         cache_dir=mock_mirror_settings["cache_dir"],
     )
