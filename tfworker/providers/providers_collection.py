@@ -14,6 +14,7 @@
 
 import collections
 import copy
+import click
 from typing import List
 
 from tfworker.providers.generic import GenericProvider
@@ -48,6 +49,9 @@ class ProvidersCollection(collections.abc.Mapping):
 
     def __iter__(self):
         return iter(self._providers.values())
+
+    def __str__(self):
+        return str([f"{x.tag}: {str(x.gid)}" for x in self._providers.values()])
 
     def keys(self):
         return self._providers.keys()
