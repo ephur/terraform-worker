@@ -438,7 +438,7 @@ class TerraformCommand(BaseCommand):
 
         color_str = "-no-color" if self._use_colors is False else ""
         params = {
-            "init": f"-input=false {color_str} -plugin-dir={plugin_dir}",
+            "init": f"-input=false {color_str} -plugin-dir={plugin_dir} -lockfile=readonly",
             "plan": f"-input=false -detailed-exitcode {color_str}",
             "apply": f"-input=false {color_str} -auto-approve",
             "destroy": f"-input=false {color_str} -auto-approve",

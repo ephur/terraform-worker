@@ -215,7 +215,9 @@ class Definition:
         with open(f"{self._target}/{TF_PROVIDER_DEFAULT_LOCKFILE}", "w") as lockfile:
             lockfile.write(
                 generate_terraform_lockfile(
-                    providers=self._providers, cache_dir=self._provider_cache
+                    providers=self._providers,
+                    included_providers=self.provider_names,
+                    cache_dir=self._provider_cache,
                 )
             )
 
