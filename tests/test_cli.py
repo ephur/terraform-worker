@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-import tempfile
 from unittest.mock import patch
 
 import pytest
@@ -47,22 +45,6 @@ class TestCLI:
         assert e.value.code == 1
         assert "32 characters" in out
 
-    def test_validate_gcp_creds_path(self):
-        """ensure valid creds paths are returned"""
-        with tempfile.NamedTemporaryFile(mode="w+") as tmpf:
-            assert (
-                tfworker.cli.validate_gcp_creds_path(None, None, tmpf.name) == tmpf.name
-            )
-
-    def test_validate_gcp_creds_path_invalid(self, capfd):
-        """ensure invalid creds paths fail"""
-        with pytest.raises(SystemExit) as e:
-            tfworker.cli.validate_gcp_creds_path(None, None, "test")
-        out, err = capfd.readouterr()
-        assert e.type == SystemExit
-        assert e.value.code == 1
-        assert "not resolve GCP credentials" in out
-
     def test_validate_host(self):
         """only linux and darwin are supported, and require 64 bit platforms"""
         with patch("tfworker.cli.get_platform", return_value=("linux", "amd64")):
@@ -91,43 +73,6 @@ class TestCLI:
             assert e.type == SystemExit
             assert e.value.code == 1
             assert "not supported" in out
-
-    def test_validate_working_dir(self):
-        """ensure valid working dirs are returned"""
-        assert tfworker.cli.validate_working_dir(None) is None
-
-        with tempfile.TemporaryDirectory() as tmpd:
-            assert tfworker.cli.validate_working_dir(tmpd) is None
-
-    def test_validate_working_dir_is_file(self, capfd):
-        """ensure files fail"""
-        with tempfile.NamedTemporaryFile(mode="w+") as tmpf:
-            with pytest.raises(SystemExit) as e:
-                tfworker.cli.validate_working_dir(tmpf.name)
-            out, err = capfd.readouterr()
-            assert e.type == SystemExit
-            assert e.value.code == 1
-            assert "not a directory" in out
-
-    def test_validate_working_dir_does_not_exist(self, capfd):
-        """ensure non existent dirs fail"""
-        with pytest.raises(SystemExit) as e:
-            tfworker.cli.validate_working_dir("test")
-        out, err = capfd.readouterr()
-        assert e.type == SystemExit
-        assert e.value.code == 1
-        assert "does not exist" in out
-
-    def test_validate_working_dir_not_empty(self, capfd):
-        """ensure non empty dirs fail"""
-        with tempfile.TemporaryDirectory() as tmpd:
-            with open(os.path.join(tmpd, "test"), "w+"):
-                with pytest.raises(SystemExit) as e:
-                    tfworker.cli.validate_working_dir(tmpd)
-                out, err = capfd.readouterr()
-                assert e.type == SystemExit
-                assert e.value.code == 1
-                assert "must be empty" in out
 
     def test_cli_no_params(self):
         """ensure cli returns usage with no params"""

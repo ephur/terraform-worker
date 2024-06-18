@@ -219,7 +219,9 @@ class Definition:
         )
 
         if result is not None:
-            with open(f"{self._target}/{TF_PROVIDER_DEFAULT_LOCKFILE}", "w") as lockfile:
+            with open(
+                f"{self._target}/{TF_PROVIDER_DEFAULT_LOCKFILE}", "w"
+            ) as lockfile:
                 lockfile.write(result)
 
     @staticmethod

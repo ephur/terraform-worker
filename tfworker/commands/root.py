@@ -25,23 +25,24 @@ import jinja2
 import yaml
 from jinja2.runtime import StrictUndefined
 
+from tfworker.types import CLIOptionsRoot
+
 
 class RootCommand:
-    def __init__(self, args={}):
+    def __init__(self, options: CLIOptionsRoot):
         """
         Initialize the RootCommand with the given arguments.
 
         Args:
             args (dict, optional): A dictionary of arguments to initialize the RootCommand with. Defaults to {}.
         """
-        self.working_dir = args.get("working_dir", None)
 
-        # the default behavior of --clean/--no-clean varies depending on if working-dir is passed
-        defaultClean = False if (self.working_dir is not None) else True
-        if args.get("clean", None) is None:
-            self.clean = defaultClean
-        else:
-            self.clean = args.get("clean")
+        # To avoid refactoring everything all at once, take items from CLIOptionsRoot and assign them to self
+        # This is a temporary measure to allow for a gradual transition to the new CLIOptionsRoot class
+        self.working_dir = options.working_dir
+        self.clean = options.clean
+        self.config_file = options.config_file
+        self.tf = None
 
         if self.working_dir is not None:
             self.temp_dir = pathlib.Path(self.working_dir).resolve()
@@ -49,16 +50,18 @@ class RootCommand:
             self.temp_dir = tempfile.mkdtemp()
 
         self.args = self.StateArgs()
-        self.config_file = args.get("config_file")
-
-        # Config accessors
-        self.tf = None
-        self.add_args(args)
+        self.add_args(options.dict())
 
     def __del__(self):
         """
         Cleanup the temporary directory after execution.
         """
+
+        # Temporary for refactoring
+        if not hasattr(self, "clean"):
+            if hasattr(self, "temp_dir"):
+                print(f"self.temp_dir: {self.temp_dir} may be abandoned!!!")
+            return
 
         if self.clean:
             # the affect of remove_top being true is removing the top level directory, for a temporary
