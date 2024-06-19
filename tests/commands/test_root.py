@@ -16,12 +16,15 @@ import copy
 import os
 import platform
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import pytest
 from deepdiff import DeepDiff
 
 import tfworker.commands.root
 from tfworker.commands.root import ordered_config_load
+from tfworker.constants import DEFAULT_CONFIG
+from tfworker.types import CLIOptionsRoot
 
 
 class TestMain:
@@ -36,26 +39,24 @@ class TestMain:
         assert rc.args.a == 1
         assert rc.args.b == "two"
 
-    def test_rc_init(self, rootc):
-        rc = tfworker.commands.root.RootCommand(args={"a": 1, "b": "two"})
-        assert rc.args.a == 1
-        assert rc.args.b == "two"
-
     def test_rc_init_clean(self, rootc):
         # by default clean should be true
-        rc = tfworker.commands.root.RootCommand()
+        rc = tfworker.commands.root.RootCommand(CLIOptionsRoot())
         assert rc.clean is True
 
         # if working_dir is passed, clean should be false
-        rc = tfworker.commands.root.RootCommand(args={"working_dir": "/tmp"})
+        random_working_dir = TemporaryDirectory()
+        rc = tfworker.commands.root.RootCommand(
+            CLIOptionsRoot(working_dir=random_working_dir.name)
+        )
         assert rc.clean is False
         if platform.system() == "Darwin":
-            assert str(rc.temp_dir) == "/private/tmp"
+            assert str(rc.temp_dir) == f"/private{random_working_dir.name}"
         else:
-            assert str(rc.temp_dir) == "/tmp"
+            assert str(rc.temp_dir) == random_working_dir.name
 
         # if clean is passed, it should be set to the value passed
-        rc = tfworker.commands.root.RootCommand(args={"clean": False})
+        rc = tfworker.commands.root.RootCommand(CLIOptionsRoot(clean=False))
         assert rc.temp_dir is not None
         assert rc.clean is False
 
@@ -64,7 +65,7 @@ class TestMain:
         tmpdir = TemporaryDirectory()
         assert os.path.exists(tmpdir.name) is True
         rc = tfworker.commands.root.RootCommand(
-            args={"clean": True, "working_dir": tmpdir.name}
+            CLIOptionsRoot(clean=True, working_dir=tmpdir.name)
         )
         assert rc.clean is True
         if platform.system() == "Darwin":
@@ -94,12 +95,18 @@ class TestMain:
         for k, v in expected_tf_vars.items():
             assert terraform_config["terraform_vars"][k] == v
 
-        # a root command with no config should return None
-        emptyrc = tfworker.commands.root.RootCommand()
-        assert emptyrc.load_config() is None
+        # a root command with no config should attempt to load the default, but fail, and exit
+        with patch("os.path.exists") as mock_exists:
+            mock_exists.return_value = False
+            with pytest.raises(SystemExit) as e:
+                emptyrc = tfworker.commands.root.RootCommand(CLIOptionsRoot())
+                assert emptyrc.load_config() is None
+            mock_exists.assert_called_with(DEFAULT_CONFIG)
 
         # an invalid path should raise an error
-        invalidrc = tfworker.commands.root.RootCommand({"config_file": "/tmp/invalid"})
+        invalidrc = tfworker.commands.root.RootCommand(
+            CLIOptionsRoot(config_file="/tmp/invalid")
+        )
         with pytest.raises(SystemExit) as e:
             invalidrc.load_config()
         assert e.value.code == 1
@@ -108,14 +115,16 @@ class TestMain:
 
         # a j2 template with invalid substitutions should raise an error
         invalidrc = tfworker.commands.root.RootCommand(
-            {
-                "config_file": os.path.join(
-                    os.path.dirname(__file__),
-                    "..",
-                    "fixtures",
-                    "test_config_invalid_j2.yaml",
-                )
-            }
+            CLIOptionsRoot(
+                **{
+                    "config_file": os.path.join(
+                        os.path.dirname(__file__),
+                        "..",
+                        "fixtures",
+                        "test_config_invalid_j2.yaml",
+                    )
+                }
+            )
         )
         with pytest.raises(SystemExit) as e:
             invalidrc.load_config()
@@ -123,11 +132,11 @@ class TestMain:
         out, err = capfd.readouterr()
         assert "invalid template" in out
 
-    def test_pullup_keys_edge(self):
-        rc = tfworker.commands.root.RootCommand()
-        assert rc.load_config() is None
-        assert rc._pullup_keys() is None
-        assert rc.providers_odict is None
+    # def test_pullup_keys_edge(self):
+    #     rc = tfworker.commands.root.RootCommand()
+    #     assert rc.load_config() is None
+    #     assert rc._pullup_keys() is None
+    #     assert rc.providers_odict is None
 
     def test_get_config_var_dict(self):
         config_vars = ["foo=bar", "this=that", "one=two"]

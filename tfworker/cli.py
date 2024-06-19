@@ -14,13 +14,12 @@
 # limitations under the License.
 
 
-import os
 import sys
-from pathlib import Path
 
 import click
+from pydantic import ValidationError
 
-from tfworker import constants as const
+import tfworker.types as tf_types
 from tfworker.commands import (
     CleanCommand,
     EnvCommand,
@@ -28,6 +27,7 @@ from tfworker.commands import (
     TerraformCommand,
     VersionCommand,
 )
+from tfworker.util.cli import pydantic_to_click
 from tfworker.util.system import get_platform
 
 
@@ -40,16 +40,6 @@ def validate_deployment(ctx, deployment, name):
         click.secho("deployment must not contain spaces", fg="red")
         raise SystemExit(1)
     return name
-
-
-def validate_gcp_creds_path(ctx, path, value):
-    if value:
-        if not os.path.isabs(value):
-            value = os.path.abspath(value)
-        if os.path.isfile(value):
-            return value
-        click.secho(f"Could not resolve GCP credentials path: {value}", fg="red")
-        raise SystemExit(1)
 
 
 def validate_host():
@@ -76,22 +66,6 @@ def validate_host():
     return True
 
 
-def validate_working_dir(fpath):
-    # if fpath is none, then a custom working directory was not defined, so this validates
-    if fpath is None:
-        return
-    with Path(fpath) as wpath:
-        if not wpath.exists():
-            click.secho(f"Working path {fpath} does not exist!", fg="red")
-            raise SystemExit(1)
-        if not wpath.is_dir():
-            click.secho(f"Working path {fpath} is not a directory!", fg="red")
-            raise SystemExit(1)
-        if any(wpath.iterdir()):
-            click.secho(f"Working path {fpath} must be empty!", fg="red")
-            raise SystemExit(1)
-
-
 class CSVType(click.types.StringParamType):
     name = "csv"
     envvar_list_splitter = ","
@@ -101,137 +75,17 @@ class CSVType(click.types.StringParamType):
 
 
 @click.group()
-@click.option(
-    "--aws-access-key-id",
-    envvar="AWS_ACCESS_KEY_ID",
-    help="AWS Access key",
-)
-@click.option(
-    "--aws-secret-access-key",
-    envvar="AWS_SECRET_ACCESS_KEY",
-    help="AWS access key secret",
-)
-@click.option(
-    "--aws-session-token",
-    envvar="AWS_SESSION_TOKEN",
-    help="AWS access key token",
-)
-@click.option(
-    "--aws-role-arn",
-    envvar="AWS_ROLE_ARN",
-    help="If provided, credentials will be used to assume this role (complete ARN)",
-)
-@click.option(
-    "--aws-external-id",
-    envvar="AWS_EXTERNAL_ID",
-    help="If provided, will be used to assume the role specified by --aws-role-arn",
-)
-@click.option(
-    "--aws-region",
-    envvar="AWS_DEFAULT_REGION",
-    default=const.DEFAULT_AWS_REGION,
-    help="AWS Region to build in",
-)
-@click.option(
-    "--aws-profile",
-    envvar="AWS_PROFILE",
-    help="The AWS/Boto3 profile to use",
-)
-@click.option(
-    "--gcp-region",
-    envvar="GCP_REGION",
-    default=const.DEFAULT_GCP_REGION,
-    help="Region to build in",
-)
-@click.option(
-    "--gcp-creds-path",
-    envvar="GCP_CREDS_PATH",
-    help=(
-        "Relative path to the credentials JSON file for the service account to be used."
-    ),
-    callback=validate_gcp_creds_path,
-)
-@click.option(
-    "--gcp-project",
-    envvar="GCP_PROJECT",
-    help="GCP project name to which work will be applied",
-)
-@click.option(
-    "--config-file",
-    default=const.DEFAULT_CONFIG,
-    envvar="WORKER_CONFIG_FILE",
-    required=True,
-)
-@click.option(
-    "--repository-path",
-    default=const.DEFAULT_REPOSITORY_PATH,
-    envvar="WORKER_REPOSITORY_PATH",
-    required=True,
-    help="The path to the terraform module repository",
-)
-@click.option(
-    "--backend",
-    type=click.Choice(["s3", "gcs"]),
-    envvar="WORKER_BACKEND",
-    help="State/locking provider. One of: s3, gcs",
-)
-@click.option(
-    "--backend-bucket",
-    envvar="WORKER_BACKEND_BUCKET",
-    help="Bucket (must exist) where all terraform states are stored",
-)
-@click.option(
-    "--backend-prefix",
-    default=const.DEFAULT_BACKEND_PREFIX,
-    envvar="WORKER_BACKEND_PREFIX",
-    help=f"Prefix to use in backend storage bucket for all terraform states (DEFAULT: {const.DEFAULT_BACKEND_PREFIX})",
-)
-@click.option(
-    "--backend-region",
-    default=const.DEFAULT_AWS_REGION,
-    help="Region where terraform rootc/lock bucket exists",
-)
-@click.option(
-    "--backend-use-all-remotes/--no-backend-use-all-remotes",
-    default=True,
-    envvar="WORKER_BACKEND_USE_ALL_REMOTES",
-    help="Generate remote data sources based on all definition paths present in the backend",
-)
-@click.option(
-    "--create-backend-bucket/--no-create-backend-bucket",
-    default=True,
-    help="Create the backend bucket if it does not exist",
-)
-@click.option(
-    "--config-var",
-    multiple=True,
-    default=[],
-    help='key=value to be supplied as jinja variables in config_file under "var" dictionary, can be specified multiple times',
-)
-@click.option(
-    "--working-dir",
-    envvar="WORKER_WORKING_DIR",
-    default=None,
-    help="Specify the path to use instead of a temporary directory, must exist, be empty, and be writeable, --clean applies to this directory as well",
-)
-@click.option(
-    "--clean/--no-clean",
-    default=None,
-    envvar="WORKER_CLEAN",
-    help="clean up the temporary directory created by the worker after execution",
-)
-@click.option(
-    "--backend-plans/--no-backend-plans",
-    default=False,
-    envvar="WORKER_BACKEND_PLANS",
-    help="store plans in the backend",
-)
+@pydantic_to_click(tf_types.CLIOptionsRoot)
 @click.pass_context
-def cli(context, **kwargs):
+def cli(ctx, **kwargs):
     """CLI for the worker utility."""
-    validate_host()
-    validate_working_dir(kwargs.get("working_dir", None))
-    context.obj = RootCommand(args=kwargs)
+    try:
+        options = tf_types.CLIOptionsRoot(**kwargs)
+        validate_host()
+        ctx.obj = RootCommand(options)
+    except ValidationError as e:
+        click.echo(f"Error in options: {e}")
+        ctx.exit(1)
 
 
 @cli.command()

@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import click
 import pathlib
+
+import click
 
 from tfworker.authenticators import AuthenticatorsCollection
 from tfworker.backends import BackendError, select_backend

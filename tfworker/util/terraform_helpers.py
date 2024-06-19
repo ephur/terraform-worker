@@ -1,13 +1,11 @@
 import json
 import os
 import pathlib
-from functools import lru_cache
 from tempfile import TemporaryDirectory
 from typing import Dict, List, Union
 
 import click
 import hcl2
-
 from lark.exceptions import UnexpectedToken
 
 from tfworker.providers.providers_collection import ProvidersCollection
@@ -168,7 +166,6 @@ def _parse_required_providers(content: dict) -> Union[None, Dict[str, Dict[str, 
     return providers
 
 
-@lru_cache
 def _find_required_providers(search_dir: str) -> Dict[str, [Dict[str, str]]]:
     providers = {}
     for root, _, files in os.walk(search_dir, followlinks=True):

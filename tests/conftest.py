@@ -25,6 +25,7 @@ import tfworker
 import tfworker.commands.base
 import tfworker.commands.root
 import tfworker.providers
+import tfworker.types as tf_types
 
 
 @pytest.fixture
@@ -40,6 +41,22 @@ def aws_secret_access_key():
             string.ascii_uppercase + string.ascii_lowercase + string.digits, k=40
         )
     )
+
+
+@pytest.fixture()
+def gcp_creds_file(tmp_path):
+    creds_file = tmp_path / "creds.json"
+    creds_file.write_text(
+        """
+        {
+            "type": "service_account",
+            "project_id": "test_project",
+            "private_key_id": "test_key_id",
+            "private_key": "test_key",
+            "client_email": "
+            }"""
+    )
+    return creds_file
 
 
 @pytest.fixture
@@ -108,195 +125,217 @@ class MockAWSAuth:
 
 
 @pytest.fixture()
-def grootc():
+def grootc(gcp_creds_file):
     result = tfworker.commands.root.RootCommand(
-        args={
-            "backend": "gcs",
-            "backend_region": "us-central1",
-            "backend_bucket": "test_gcp_bucket",
-            "backend_prefix": "terraform/test-0002",
-            "backend_use_all_remotes": False,
-            "config_file": os.path.join(
-                os.path.dirname(__file__), "fixtures", "gcp_test_config.yaml"
-            ),
-            "gcp_creds_path": "/home/test/test-creds.json",
-            "gcp_project": "test_project",
-            "gcp_region": "us-west-2b",
-            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-            "create_backend_bucket": True,
-        }
+        tf_types.CLIOptionsRoot(
+            **{
+                "backend": "gcs",
+                "backend_region": "us-central1",
+                "backend_bucket": "test_gcp_bucket",
+                "backend_prefix": "terraform/test-0002",
+                "backend_use_all_remotes": False,
+                "config_file": os.path.join(
+                    os.path.dirname(__file__), "fixtures", "gcp_test_config.yaml"
+                ),
+                "gcp_creds_path": str(gcp_creds_file),
+                "gcp_project": "test_project",
+                "gcp_region": "us-west-2b",
+                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+                "create_backend_bucket": True,
+            }
+        )
     )
     return result
 
 
 @pytest.fixture()
-def grootc_no_create_backend_bucket():
+def grootc_no_create_backend_bucket(gcp_creds_file):
     result = tfworker.commands.root.RootCommand(
-        args={
-            "backend": "gcs",
-            "backend_region": "us-central1",
-            "backend_bucket": "test_gcp_bucket",
-            "backend_prefix": "terraform/test-0002",
-            "backend_use_all_remotes": False,
-            "config_file": os.path.join(
-                os.path.dirname(__file__), "fixtures", "gcp_test_config.yaml"
-            ),
-            "gcp_creds_path": "/home/test/test-creds.json",
-            "gcp_project": "test_project",
-            "gcp_region": "us-west-2b",
-            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-            "create_backend_bucket": False,
-        }
+        tf_types.CLIOptionsRoot(
+            **{
+                "backend": "gcs",
+                "backend_region": "us-central1",
+                "backend_bucket": "test_gcp_bucket",
+                "backend_prefix": "terraform/test-0002",
+                "backend_use_all_remotes": False,
+                "config_file": os.path.join(
+                    os.path.dirname(__file__), "fixtures", "gcp_test_config.yaml"
+                ),
+                "gcp_creds_path": str(gcp_creds_file),
+                "gcp_project": "test_project",
+                "gcp_region": "us-west-2b",
+                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+                "create_backend_bucket": False,
+            }
+        )
     )
     return result
 
 
 @pytest.fixture(scope="function")
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def rootc(s3_client, dynamodb_client, sts_client, create_backend_bucket=True):
+def rootc(
+    s3_client, dynamodb_client, sts_client, gcp_creds_file, create_backend_bucket=True
+):
     result = tfworker.commands.root.RootCommand(
-        args={
-            "aws_access_key_id": "1234567890",
-            "aws_secret_access_key": "1234567890",
-            "aws_region": "us-west-2",
-            "backend": "s3",
-            "backend_region": "us-west-2",
-            "backend_bucket": "test_bucket",
-            "backend_prefix": "terraform/test-0001",
-            "backend_use_all_remotes": False,
-            "config_file": os.path.join(
-                os.path.dirname(__file__), "fixtures", "test_config.yaml"
-            ),
-            "gcp_creds_path": "/home/test/test-creds.json",
-            "gcp_project": "test_project",
-            "gcp_region": "us-west-2b",
-            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-            "create_backend_bucket": create_backend_bucket,
-        }
+        tf_types.CLIOptionsRoot(
+            **{
+                "aws_access_key_id": "1234567890",
+                "aws_secret_access_key": "1234567890",
+                "aws_region": "us-west-2",
+                "backend": "s3",
+                "backend_region": "us-west-2",
+                "backend_bucket": "test_bucket",
+                "backend_prefix": "terraform/test-0001",
+                "backend_use_all_remotes": False,
+                "config_file": os.path.join(
+                    os.path.dirname(__file__), "fixtures", "test_config.yaml"
+                ),
+                "gcp_creds_path": str(gcp_creds_file),
+                "gcp_project": "test_project",
+                "gcp_region": "us-west-2b",
+                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+                "create_backend_bucket": create_backend_bucket,
+            }
+        )
     )
     return result
 
 
 @pytest.fixture(scope="function")
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def rootc_no_create_backend_bucket(s3_client, dynamodb_client, sts_client):
+def rootc_no_create_backend_bucket(
+    s3_client, dynamodb_client, gcp_creds_file, sts_client
+):
     result = tfworker.commands.root.RootCommand(
-        args={
-            "aws_access_key_id": "1234567890",
-            "aws_secret_access_key": "1234567890",
-            "aws_region": "us-west-2",
-            "backend": "s3",
-            "backend_region": "us-west-2",
-            "backend_bucket": "test_bucket",
-            "backend_prefix": "terraform/test-0001",
-            "backend_use_all_remotes": False,
-            "config_file": os.path.join(
-                os.path.dirname(__file__), "fixtures", "test_config.yaml"
-            ),
-            "gcp_creds_path": "/home/test/test-creds.json",
-            "gcp_project": "test_project",
-            "gcp_region": "us-west-2b",
-            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-            "create_backend_bucket": False,
-        }
+        tf_types.CLIOptionsRoot(
+            **{
+                "aws_access_key_id": "1234567890",
+                "aws_secret_access_key": "1234567890",
+                "aws_region": "us-west-2",
+                "backend": "s3",
+                "backend_region": "us-west-2",
+                "backend_bucket": "test_bucket",
+                "backend_prefix": "terraform/test-0001",
+                "backend_use_all_remotes": False,
+                "config_file": os.path.join(
+                    os.path.dirname(__file__), "fixtures", "test_config.yaml"
+                ),
+                "gcp_creds_path": str(gcp_creds_file),
+                "gcp_project": "test_project",
+                "gcp_region": "us-west-2b",
+                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+                "create_backend_bucket": False,
+            }
+        )
     )
     return result
 
 
 @pytest.fixture(scope="function")
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def json_base_rootc(s3_client, dynamodb_client, sts_client):
+def json_base_rootc(s3_client, dynamodb_client, gcp_creds_file, sts_client):
     result = tfworker.commands.root.RootCommand(
-        args={
-            "aws_access_key_id": "1234567890",
-            "aws_secret_access_key": "1234567890",
-            "aws_region": "us-west-2",
-            "backend": "s3",
-            "backend_region": "us-west-2",
-            "backend_bucket": "test_bucket",
-            "backend_prefix": "terraform/test-0001",
-            "backend_use_all_remotes": False,
-            "config_file": os.path.join(
-                os.path.dirname(__file__), "fixtures", "base_config_test.json"
-            ),
-            "gcp_creds_path": "/home/test/test-creds.json",
-            "gcp_project": "test_project",
-            "gcp_region": "us-west-2b",
-            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-        }
+        tf_types.CLIOptionsRoot(
+            **{
+                "aws_access_key_id": "1234567890",
+                "aws_secret_access_key": "1234567890",
+                "aws_region": "us-west-2",
+                "backend": "s3",
+                "backend_region": "us-west-2",
+                "backend_bucket": "test_bucket",
+                "backend_prefix": "terraform/test-0001",
+                "backend_use_all_remotes": False,
+                "config_file": os.path.join(
+                    os.path.dirname(__file__), "fixtures", "base_config_test.json"
+                ),
+                "gcp_creds_path": str(gcp_creds_file),
+                "gcp_project": "test_project",
+                "gcp_region": "us-west-2b",
+                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+            }
+        )
     )
     return result
 
 
 @pytest.fixture(scope="function")
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def yaml_base_rootc(s3_client, dynamodb_client, sts_client):
+def yaml_base_rootc(s3_client, dynamodb_client, gcp_creds_file, sts_client):
     result = tfworker.commands.root.RootCommand(
-        args={
-            "aws_access_key_id": "1234567890",
-            "aws_secret_access_key": "1234567890",
-            "aws_region": "us-west-2",
-            "backend": "s3",
-            "backend_region": "us-west-2",
-            "backend_bucket": "test_bucket",
-            "backend_prefix": "terraform/test-0001",
-            "backend_use_all_remotes": False,
-            "config_file": os.path.join(
-                os.path.dirname(__file__), "fixtures", "base_config_test.yaml"
-            ),
-            "gcp_creds_path": "/home/test/test-creds.json",
-            "gcp_project": "test_project",
-            "gcp_region": "us-west-2b",
-            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-        }
+        tf_types.CLIOptionsRoot(
+            **{
+                "aws_access_key_id": "1234567890",
+                "aws_secret_access_key": "1234567890",
+                "aws_region": "us-west-2",
+                "backend": "s3",
+                "backend_region": "us-west-2",
+                "backend_bucket": "test_bucket",
+                "backend_prefix": "terraform/test-0001",
+                "backend_use_all_remotes": False,
+                "config_file": os.path.join(
+                    os.path.dirname(__file__), "fixtures", "base_config_test.yaml"
+                ),
+                "gcp_creds_path": str(gcp_creds_file),
+                "gcp_project": "test_project",
+                "gcp_region": "us-west-2b",
+                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+            }
+        )
     )
     return result
 
 
 @pytest.fixture(scope="function")
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def hcl_base_rootc(s3_client, dynamodb_client, sts_client):
+def hcl_base_rootc(s3_client, dynamodb_client, gcp_creds_file, sts_client):
     result = tfworker.commands.root.RootCommand(
-        args={
-            "aws_access_key_id": "1234567890",
-            "aws_secret_access_key": "1234567890",
-            "aws_region": "us-west-2",
-            "backend": "s3",
-            "backend_region": "us-west-2",
-            "backend_bucket": "test_bucket",
-            "backend_prefix": "terraform/test-0001",
-            "backend_use_all_remotes": False,
-            "config_file": os.path.join(
-                os.path.dirname(__file__), "fixtures", "base_config_test.hcl"
-            ),
-            "gcp_creds_path": "/home/test/test-creds.json",
-            "gcp_project": "test_project",
-            "gcp_region": "us-west-2b",
-            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-        }
+        tf_types.CLIOptionsRoot(
+            **{
+                "aws_access_key_id": "1234567890",
+                "aws_secret_access_key": "1234567890",
+                "aws_region": "us-west-2",
+                "backend": "s3",
+                "backend_region": "us-west-2",
+                "backend_bucket": "test_bucket",
+                "backend_prefix": "terraform/test-0001",
+                "backend_use_all_remotes": False,
+                "config_file": os.path.join(
+                    os.path.dirname(__file__), "fixtures", "base_config_test.hcl"
+                ),
+                "gcp_creds_path": str(gcp_creds_file),
+                "gcp_project": "test_project",
+                "gcp_region": "us-west-2b",
+                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+            }
+        )
     )
     return result
 
 
 @pytest.fixture(scope="function")
 @mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def rootc_options(s3_client, dynamodb_client, sts_client):
+def rootc_options(s3_client, dynamodb_client, gcp_creds_file, sts_client):
     result = tfworker.commands.root.RootCommand(
-        args={
-            "aws_region": "us-east-2",
-            "backend": "gcs",
-            "backend_region": "us-west-2",
-            "backend_bucket": "test_bucket",
-            "backend_prefix": "terraform/test-0001",
-            "backend_use_all_remotes": False,
-            "config_file": os.path.join(
-                os.path.dirname(__file__), "fixtures", "test_config_with_options.yaml"
-            ),
-            "gcp_creds_path": "/home/test/test-creds.json",
-            "gcp_project": "test_project",
-            "gcp_region": "us-west-2b",
-            "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-        }
+        tf_types.CLIOptionsRoot(
+            **{
+                "aws_region": "us-east-2",
+                "backend": "gcs",
+                "backend_region": "us-west-2",
+                "backend_bucket": "test_bucket",
+                "backend_prefix": "terraform/test-0001",
+                "backend_use_all_remotes": False,
+                "config_file": os.path.join(
+                    os.path.dirname(__file__),
+                    "fixtures",
+                    "test_config_with_options.yaml",
+                ),
+                "gcp_creds_path": str(gcp_creds_file),
+                "gcp_project": "test_project",
+                "gcp_region": "us-west-2b",
+                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
+            }
+        )
     )
     return result
 
