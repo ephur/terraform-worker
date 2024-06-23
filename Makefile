@@ -1,21 +1,28 @@
 init:
 	poetry install
 
+init-dev:
+	poetry install --with dev
+
 default: lint test
 
-lint: init
+lint: init-dev
 	poetry run flake8 --ignore E501,W503 tfworker tests
 
-format: init
+format: init-dev
 	poetry run black tfworker tests
-	poetry run seed-isort-config || echo "known_third_party setting changed. Please commit pyproject.toml"
+	@poetry run seed-isort-config || echo "known_third_party setting changed. Please commit pyproject.toml"
 	poetry run isort tfworker tests
 
-test: init
+test: init-dev
 	poetry run pytest -p no:warnings --disable-socket
 	poetry run coverage report --fail-under=60 -m --skip-empty
 
-dep-test: init
+ci-test: init-dev
+	poetry run pytest --disable-socket --junitxml=reports/junit.xml
+	poetry run coverage xml -o reports/coverage.xml
+
+dep-test: init-dev
 	poetry run pytest --disable-socket
 	poetry run coverage report --fail-under=60 -m --skip-empty
 

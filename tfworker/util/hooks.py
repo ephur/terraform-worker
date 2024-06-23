@@ -7,19 +7,20 @@ import json
 import os
 import re
 from enum import Enum
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
-import click
-
-from tfworker.backends import BaseBackend
+import tfworker.util.log as log
 from tfworker.constants import (
     TF_STATE_CACHE_NAME,
     WORKER_LOCALS_FILENAME,
     WORKER_TFVARS_FILENAME,
 )
 from tfworker.exceptions import HookError
-from tfworker.types import TerraformAction, TerraformStage
+from tfworker.types.terraform import TerraformAction, TerraformStage
 from tfworker.util.system import pipe_exec
+
+if TYPE_CHECKING:
+    from tfworker.backends.base import BaseBackend
 
 
 class TFHookVarType(Enum):
@@ -41,7 +42,7 @@ def get_state_item(
     terraform_bin: str,
     state: str,
     item: str,
-    backend: BaseBackend = None,
+    backend: "BaseBackend" = None,
 ) -> str:
     """
     General handler function for getting a state item. First tries to get the item from another definition's output,
@@ -62,12 +63,11 @@ def get_state_item(
     """
 
     try:
-        click.secho(f"Getting state item {state}.{item} from output", fg="blue")
+        log.trace(f"Getting state item {state}.{item} from output")
         return _get_state_item_from_output(working_dir, env, terraform_bin, state, item)
     except FileNotFoundError:
-        click.secho(
-            f"Remote state not setup, falling back to getting state item {state}.{item} from remote",
-            fg="blue",
+        log.trace(
+            "Remote state not setup, falling back to getting state item from remote"
         )
         return _get_state_item_from_remote(working_dir, env, terraform_bin, state, item)
 
@@ -109,7 +109,7 @@ def _get_state_item_from_output(
 
     if exit_code != 0:
         raise HookError(
-            f"Error reading remote state item {state}.{item}, details: {stderr}"
+            f"Error reading remote state item {state}.{item}, details: {stderr.decode()}"
         )
 
     if stdout is None:
@@ -144,7 +144,6 @@ def check_hooks(
     """
     hook_dir = f"{working_dir}/hooks"
     if not os.path.isdir(hook_dir):
-        # there is no hooks dir
         return False
     for f in os.listdir(hook_dir):
         if os.path.splitext(f)[0] == f"{phase}_{command}":
@@ -339,7 +338,12 @@ def _set_hook_env_var(
         key = key.replace(k, v)
 
     for k, v in val_replace_items.items():
-        value = value.replace(k, v)
+        if isinstance(value, str):
+            value = value.replace(k, v)
+        if isinstance(value, bytes):
+            value = value.decode().replace(k, v)
+        if isinstance(value, bool):
+            value = str(value).upper()
 
     if b64_encode:
         value = base64.b64encode(value.encode())
@@ -354,6 +358,7 @@ def _execute_hook_script(
     working_dir: str,
     local_env: Dict[str, str],
     debug: bool,
+    stream_output: bool = False,
 ) -> None:
     """
     Executes the hook script and handles its output.
@@ -371,16 +376,20 @@ def _execute_hook_script(
     """
     hook_dir = os.path.join(working_dir, "hooks")
     exit_code, stdout, stderr = pipe_exec(
-        f"{hook_script} {phase} {command}", cwd=hook_dir, env=local_env
+        f"{hook_script} {phase} {command}",
+        cwd=hook_dir,
+        env=local_env,
+        stream_output=stream_output,
     )
 
     if debug:
-        click.secho(f"Results from hook script: {hook_script}", fg="blue")
-        click.secho(f"exit code: {exit_code}", fg="blue")
-        for line in stdout.decode().splitlines():
-            click.secho(f"stdout: {line}", fg="blue")
-        for line in stderr.decode().splitlines():
-            click.secho(f"stderr: {line}", fg="red")
+        log.debug(f"Results from hook script: {hook_script}")
+        log.debug(f"exit code: {exit_code}")
+        if not stream_output:
+            for line in stdout.decode().splitlines():
+                log.debug(f"stdout: {line}")
+            for line in stderr.decode().splitlines():
+                log.debug(f"stderr: {line}")
 
     if exit_code != 0:
         raise HookError(

@@ -1,479 +1,193 @@
-# Copyright 2020-2023 Richard Maynard (richard.maynard@gmail.com)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import os
-import random
-import string
-from unittest import mock
+import sys
+from unittest.mock import MagicMock
 
 import boto3
+import click
 import pytest
 from moto import mock_aws
 
-import tfworker
-import tfworker.commands.base
-import tfworker.commands.root
-import tfworker.providers
-import tfworker.types as tf_types
+from tfworker.app_state import AppState
+from tfworker.authenticators import AuthenticatorsCollection
+from tfworker.cli_options import CLIOptionsClean, CLIOptionsRoot, CLIOptionsTerraform
+from tfworker.types.config_file import ConfigFile, GlobalVars
 
 
-@pytest.fixture
-def aws_access_key_id():
-    suffix = "".join(random.choices("RAX", k=16))
-    return f"AKIA{suffix}"
-
-
-@pytest.fixture
-def aws_secret_access_key():
-    return "".join(
-        random.choices(
-            string.ascii_uppercase + string.ascii_lowercase + string.digits, k=40
-        )
-    )
-
-
-@pytest.fixture()
-def gcp_creds_file(tmp_path):
-    creds_file = tmp_path / "creds.json"
-    creds_file.write_text(
-        """
-        {
-            "type": "service_account",
-            "project_id": "test_project",
-            "private_key_id": "test_key_id",
-            "private_key": "test_key",
-            "client_email": "
-            }"""
-    )
-    return creds_file
-
-
-@pytest.fixture
-def aws_role_arn(aws_account_id, aws_role_name):
-    return f"arn:aws:iam:{aws_account_id}:role/{aws_role_name}"
-
-
-@pytest.fixture
-def aws_role_name():
-    return "".join(random.choices(string.ascii_lowercase, k=8))
-
-
-@pytest.fixture
-def aws_account_id():
-    return "".join(random.choices(string.digits, k=12))
-
-
-@pytest.fixture(scope="class")
+@pytest.fixture(scope="function")
 def aws_credentials():
     """Mocked AWS Credentials for moto."""
     os.environ["AWS_ACCESS_KEY_ID"] = "testing"
     os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
     os.environ["AWS_SECURITY_TOKEN"] = "testing"
     os.environ["AWS_SESSION_TOKEN"] = "testing"
-
-
-@pytest.fixture(scope="class")
-def s3_client(aws_credentials):
-    with mock_aws():
-        yield boto3.client("s3", region_name="us-west-2")
-
-
-@pytest.fixture(scope="class")
-def dynamodb_client(aws_credentials):
-    with mock_aws():
-        yield boto3.client("dynamodb", region_name="us-west-2")
-
-
-@pytest.fixture(scope="class")
-def sts_client(aws_credentials):
-    with mock_aws():
-        yield boto3.client("sts", region_name="us-west-2")
-
-
-class MockAWSAuth:
-    """
-    This class is used to replace the AWS authenticator, moto is unable to
-    provide mock support for the complex authentication options we support
-    (cross account assumed roles, user identity, etc...)
-    """
-
-    @mock_aws
-    def __init__(self):
-        self._session = boto3.Session()
-        self._backend_session = self._session
-        self.bucket = "test_bucket"
-        self.prefix = "terraform/test-0001"
-
-    @property
-    def session(self):
-        return self._session
-
-    @property
-    def backend_session(self):
-        return self._backend_session
-
-
-@pytest.fixture()
-def grootc(gcp_creds_file):
-    result = tfworker.commands.root.RootCommand(
-        tf_types.CLIOptionsRoot(
-            **{
-                "backend": "gcs",
-                "backend_region": "us-central1",
-                "backend_bucket": "test_gcp_bucket",
-                "backend_prefix": "terraform/test-0002",
-                "backend_use_all_remotes": False,
-                "config_file": os.path.join(
-                    os.path.dirname(__file__), "fixtures", "gcp_test_config.yaml"
-                ),
-                "gcp_creds_path": str(gcp_creds_file),
-                "gcp_project": "test_project",
-                "gcp_region": "us-west-2b",
-                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-                "create_backend_bucket": True,
-            }
-        )
-    )
-    return result
-
-
-@pytest.fixture()
-def grootc_no_create_backend_bucket(gcp_creds_file):
-    result = tfworker.commands.root.RootCommand(
-        tf_types.CLIOptionsRoot(
-            **{
-                "backend": "gcs",
-                "backend_region": "us-central1",
-                "backend_bucket": "test_gcp_bucket",
-                "backend_prefix": "terraform/test-0002",
-                "backend_use_all_remotes": False,
-                "config_file": os.path.join(
-                    os.path.dirname(__file__), "fixtures", "gcp_test_config.yaml"
-                ),
-                "gcp_creds_path": str(gcp_creds_file),
-                "gcp_project": "test_project",
-                "gcp_region": "us-west-2b",
-                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-                "create_backend_bucket": False,
-            }
-        )
-    )
-    return result
+    os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
 
 @pytest.fixture(scope="function")
-@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def rootc(
-    s3_client, dynamodb_client, sts_client, gcp_creds_file, create_backend_bucket=True
+def empty_state():
+    """A Representation of a terraform state file with no resources"""
+    with open(f"{os.path.dirname(__file__)}/fixtures/states/empty.tfstate", "r") as f:
+        return f.read()
+
+
+@pytest.fixture(scope="function")
+def occupied_state():
+    """A Representation of a terraform state file with resources"""
+    with open(
+        f"{os.path.dirname(__file__)}/fixtures/states/occupied.tfstate", "r"
+    ) as f:
+        return f.read()
+
+
+@pytest.fixture(scope="function")
+def mock_cli_options_root():
+    """A mock CLIOptionsRoot object with default values"""
+    mock_root = MagicMock(spec=CLIOptionsRoot)
+    mock_root.region = "us-east-1"
+    mock_root.backend_region = "us-east-1"
+    mock_root.backend_bucket = "test-bucket"
+    mock_root.backend_plans = False
+    mock_root.backend_prefix = "prefix"
+    mock_root.create_backend_bucket = True
+    mock_root.config_var = {}
+    return mock_root
+
+
+@pytest.fixture(scope="function")
+def mock_cli_options_root_backend_west():
+    """A mock CLIOptionsRoot object with default values and backend in us-west-2"""
+    mock_root = MagicMock(spec=CLIOptionsRoot)
+    mock_root.region = "us-east-1"
+    mock_root.backend_region = "us-west-2"
+    mock_root.backend_bucket = "west-test-bucket"
+    mock_root.backend_plans = False
+    mock_root.backend_prefix = "prefix"
+    mock_root.create_backend_bucket = True
+    return mock_root
+
+
+@pytest.fixture(scope="function")
+def mock_cli_options_terraform():
+    """A mock CLIOptionsTerraform object with default values"""
+    mock_terraform = MagicMock(spec=CLIOptionsTerraform)
+    mock_terraform.apply = True
+    mock_terraform.destroy = False
+    mock_terraform.plan_file_path = None
+    return mock_terraform
+
+
+@pytest.fixture(scope="function")
+def mock_cli_options_clean():
+    """A mock CLIOptionsClean object with default values"""
+    mock_clean = MagicMock(spec=CLIOptionsClean)
+    return mock_clean
+
+
+@pytest.fixture(scope="function")
+@mock_aws
+def mock_authenticators(aws_credentials):
+    """A mock AuthenticatorsCollection object with default values"""
+    mock_auth = MagicMock(spec=AuthenticatorsCollection)
+    mock_auth["aws"].session = boto3.Session()
+    mock_auth["aws"].backend_session = mock_auth["aws"].session
+    mock_auth["aws"].bucket = "test-bucket"
+    mock_auth["aws"].prefix = "prefix"
+    mock_auth["aws"].region = "us-east-1"
+    mock_auth["aws"].backend_region = "us-east-1"
+    return mock_auth
+
+
+@pytest.fixture(scope="function")
+@mock_aws
+def mock_authenticators_backend_west(aws_credentials):
+    """A mock AuthenticatorsCollection object with default values and backend in us-west-2"""
+    mock_auth = MagicMock(spec=AuthenticatorsCollection)
+    mock_auth["aws"].session = boto3.Session()
+    mock_auth["aws"].backend_session = boto3.Session(region_name="us-west-2")
+    mock_auth["aws"].bucket = "west-test-bucket"
+    mock_auth["aws"].prefix = "prefix"
+    mock_auth["aws"].region = "us-east-1"
+    mock_auth["aws"].backend_region = "us-west-2"
+    return mock_auth
+
+
+@pytest.fixture
+def mock_loaded_config():
+    """A mock ConfigFile object with default values"""
+    mock_config = MagicMock(spec=ConfigFile)
+    return mock_config
+
+
+@pytest.fixture(scope="function")
+def mock_app_state(
+    mock_cli_options_root,
+    mock_cli_options_clean,
+    mock_cli_options_terraform,
+    mock_loaded_config,
+    mock_authenticators,
+    tmpdir,
 ):
-    result = tfworker.commands.root.RootCommand(
-        tf_types.CLIOptionsRoot(
-            **{
-                "aws_access_key_id": "1234567890",
-                "aws_secret_access_key": "1234567890",
-                "aws_region": "us-west-2",
-                "backend": "s3",
-                "backend_region": "us-west-2",
-                "backend_bucket": "test_bucket",
-                "backend_prefix": "terraform/test-0001",
-                "backend_use_all_remotes": False,
-                "config_file": os.path.join(
-                    os.path.dirname(__file__), "fixtures", "test_config.yaml"
-                ),
-                "gcp_creds_path": str(gcp_creds_file),
-                "gcp_project": "test_project",
-                "gcp_region": "us-west-2b",
-                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-                "create_backend_bucket": create_backend_bucket,
-            }
-        )
-    )
-    return result
+    """A mock AppState object with default values"""
+    mock_state = MagicMock(spec=AppState)
+    mock_state.authenticators = mock_authenticators
+    mock_state.root_options = mock_cli_options_root
+    mock_state.deployment = "test-deployment"
+    mock_state.clean_options = mock_cli_options_clean
+    mock_state.terraform_options = mock_cli_options_terraform
+    mock_state.loaded_config = mock_loaded_config
+    mock_state.loaded_config.providers = {}
+    mock_state.loaded_config.definitions = {}
+    mock_state.loaded_config.handlers = {}
+    mock_state.loaded_config.worker_options = {}
+    mock_state.loaded_config.global_vars = GlobalVars()
+    mock_state.working_dir = str(tmpdir)
+
+    return mock_state
 
 
 @pytest.fixture(scope="function")
-@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def rootc_no_create_backend_bucket(
-    s3_client, dynamodb_client, gcp_creds_file, sts_client
+def mock_app_state_backend_west(
+    mock_cli_options_root_backend_west,
+    mock_cli_options_terraform,
+    mock_cli_options_clean,
+    mock_loaded_config,
+    mock_authenticators,
+    tmpdir,
 ):
-    result = tfworker.commands.root.RootCommand(
-        tf_types.CLIOptionsRoot(
-            **{
-                "aws_access_key_id": "1234567890",
-                "aws_secret_access_key": "1234567890",
-                "aws_region": "us-west-2",
-                "backend": "s3",
-                "backend_region": "us-west-2",
-                "backend_bucket": "test_bucket",
-                "backend_prefix": "terraform/test-0001",
-                "backend_use_all_remotes": False,
-                "config_file": os.path.join(
-                    os.path.dirname(__file__), "fixtures", "test_config.yaml"
-                ),
-                "gcp_creds_path": str(gcp_creds_file),
-                "gcp_project": "test_project",
-                "gcp_region": "us-west-2b",
-                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-                "create_backend_bucket": False,
-            }
-        )
-    )
-    return result
+    """A mock AppState object with default values and backend in us-west-2"""
+    mock_state = MagicMock(spec=AppState)
+    mock_state.authenticators = mock_authenticators
+    mock_state.root_options = mock_cli_options_root_backend_west
+    mock_state.clean_options = mock_cli_options_clean
+    mock_state.terraform_options = mock_cli_options_terraform
+    mock_state.deployment = "test-deployment"
+    mock_state.loaded_config = mock_loaded_config
+    mock_state.loaded_config.providers = {}
+    mock_state.loaded_config.definitions = {}
+    mock_state.loaded_config.handlers = {}
+    mock_state.working_dir = str(tmpdir)
+    return mock_state
 
 
 @pytest.fixture(scope="function")
-@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def json_base_rootc(s3_client, dynamodb_client, gcp_creds_file, sts_client):
-    result = tfworker.commands.root.RootCommand(
-        tf_types.CLIOptionsRoot(
-            **{
-                "aws_access_key_id": "1234567890",
-                "aws_secret_access_key": "1234567890",
-                "aws_region": "us-west-2",
-                "backend": "s3",
-                "backend_region": "us-west-2",
-                "backend_bucket": "test_bucket",
-                "backend_prefix": "terraform/test-0001",
-                "backend_use_all_remotes": False,
-                "config_file": os.path.join(
-                    os.path.dirname(__file__), "fixtures", "base_config_test.json"
-                ),
-                "gcp_creds_path": str(gcp_creds_file),
-                "gcp_project": "test_project",
-                "gcp_region": "us-west-2b",
-                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-            }
-        )
-    )
-    return result
+def mock_click_context(mock_app_state):
+    """A mock click context object with default values"""
+    ctx = MagicMock(spec=click.Context)
+    ctx.obj = mock_app_state
+    ctx.exit = MagicMock(side_effect=sys.exit)
+    return ctx
 
 
 @pytest.fixture(scope="function")
-@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def yaml_base_rootc(s3_client, dynamodb_client, gcp_creds_file, sts_client):
-    result = tfworker.commands.root.RootCommand(
-        tf_types.CLIOptionsRoot(
-            **{
-                "aws_access_key_id": "1234567890",
-                "aws_secret_access_key": "1234567890",
-                "aws_region": "us-west-2",
-                "backend": "s3",
-                "backend_region": "us-west-2",
-                "backend_bucket": "test_bucket",
-                "backend_prefix": "terraform/test-0001",
-                "backend_use_all_remotes": False,
-                "config_file": os.path.join(
-                    os.path.dirname(__file__), "fixtures", "base_config_test.yaml"
-                ),
-                "gcp_creds_path": str(gcp_creds_file),
-                "gcp_project": "test_project",
-                "gcp_region": "us-west-2b",
-                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-            }
-        )
-    )
-    return result
+def mock_click_context_backend_west(mock_app_state_backend_west):
+    """A mock click context object with default values and backend in us-west-2"""
+    ctx = MagicMock(spec=click.Context)
+    ctx.obj = mock_app_state_backend_west
+    ctx.exit = MagicMock(side_effect=sys.exit)
+    return ctx
 
 
-@pytest.fixture(scope="function")
-@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def hcl_base_rootc(s3_client, dynamodb_client, gcp_creds_file, sts_client):
-    result = tfworker.commands.root.RootCommand(
-        tf_types.CLIOptionsRoot(
-            **{
-                "aws_access_key_id": "1234567890",
-                "aws_secret_access_key": "1234567890",
-                "aws_region": "us-west-2",
-                "backend": "s3",
-                "backend_region": "us-west-2",
-                "backend_bucket": "test_bucket",
-                "backend_prefix": "terraform/test-0001",
-                "backend_use_all_remotes": False,
-                "config_file": os.path.join(
-                    os.path.dirname(__file__), "fixtures", "base_config_test.hcl"
-                ),
-                "gcp_creds_path": str(gcp_creds_file),
-                "gcp_project": "test_project",
-                "gcp_region": "us-west-2b",
-                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-            }
-        )
-    )
-    return result
-
-
-@pytest.fixture(scope="function")
-@mock.patch("tfworker.authenticators.aws.AWSAuthenticator", new=MockAWSAuth)
-def rootc_options(s3_client, dynamodb_client, gcp_creds_file, sts_client):
-    result = tfworker.commands.root.RootCommand(
-        tf_types.CLIOptionsRoot(
-            **{
-                "aws_region": "us-east-2",
-                "backend": "gcs",
-                "backend_region": "us-west-2",
-                "backend_bucket": "test_bucket",
-                "backend_prefix": "terraform/test-0001",
-                "backend_use_all_remotes": False,
-                "config_file": os.path.join(
-                    os.path.dirname(__file__),
-                    "fixtures",
-                    "test_config_with_options.yaml",
-                ),
-                "gcp_creds_path": str(gcp_creds_file),
-                "gcp_project": "test_project",
-                "gcp_region": "us-west-2b",
-                "repository_path": os.path.join(os.path.dirname(__file__), "fixtures"),
-            }
-        )
-    )
-    return result
-
-
-@pytest.fixture
-def basec(rootc, s3_client):
-    with mock.patch(
-        "tfworker.commands.base.get_terraform_version",
-        side_effect=lambda x: (13, 3),
-    ):
-        with mock.patch(
-            "tfworker.commands.base.which",
-            side_effect=lambda x: "/usr/local/bin/terraform",
-        ):
-            return tfworker.commands.base.BaseCommand(
-                rootc, "test-0001", tf_version_major=13
-            )
-
-
-@pytest.fixture
-def gbasec(grootc):
-    with mock.patch(
-        "tfworker.commands.base.get_terraform_version",
-        side_effect=lambda x: (13, 3),
-    ):
-        with mock.patch(
-            "tfworker.commands.base.which",
-            side_effect=lambda x: "/usr/local/bin/terraform",
-        ):
-            with mock.patch(
-                "tfworker.backends.gcs.storage.Client.from_service_account_json"
-            ):
-                return tfworker.commands.base.BaseCommand(
-                    grootc, "test-0001", tf_version_major=13
-                )
-
-
-@pytest.fixture
-def tf_Xcmd(rootc):
-    return tfworker.commands.terraform.TerraformCommand(rootc, deployment="test-0001")
-
-
-@pytest.fixture
-def tf_15cmd(rootc):
-    with mock.patch(
-        "tfworker.util.terraform.get_terraform_version",
-        side_effect=lambda x: (15, 0),
-    ):
-        with mock.patch(
-            "tfworker.commands.base.which",
-            side_effect=lambda x: "/usr/local/bin/terraform",
-        ):
-            return tfworker.commands.terraform.TerraformCommand(
-                rootc, deployment="test-0001", tf_version=(15, 0)
-            )
-
-
-@pytest.fixture
-def tf_14cmd(rootc):
-    with mock.patch(
-        "tfworker.util.terraform.get_terraform_version",
-        side_effect=lambda x: (14, 5),
-    ):
-        with mock.patch(
-            "tfworker.commands.base.which",
-            side_effect=lambda x: "/usr/local/bin/terraform",
-        ):
-            return tfworker.commands.terraform.TerraformCommand(
-                rootc, deployment="test-0001", tf_version=(14, 5)
-            )
-
-
-@pytest.fixture
-def tf_13cmd(rootc):
-    with mock.patch(
-        "tfworker.util.terraform.get_terraform_version",
-        side_effect=lambda x: (13, 5),
-    ):
-        with mock.patch(
-            "tfworker.commands.base.which",
-            side_effect=lambda x: "/usr/local/bin/terraform",
-        ):
-            return tfworker.commands.terraform.TerraformCommand(
-                rootc, deployment="test-0001", tf_version=(13, 5)
-            )
-
-
-@pytest.fixture
-def tf_12cmd(rootc):
-    with mock.patch(
-        "tfworker.util.terraform.get_terraform_version",
-        side_effect=lambda x: (12, 27),
-    ):
-        with mock.patch(
-            "tfworker.commands.base.which",
-            side_effect=lambda x: "/usr/local/bin/terraform",
-        ):
-            return tfworker.commands.terraform.TerraformCommand(
-                rootc, deployment="test-0001", tf_version=(12, 27)
-            )
-
-
-@pytest.fixture
-def tf_13cmd_options(rootc_options):
-    with mock.patch(
-        "tfworker.util.terraform.get_terraform_version",
-        side_effect=lambda x: (13, 5),
-    ):
-        with mock.patch(
-            "tfworker.commands.base.which",
-            side_effect=lambda x: "/usr/local/bin/terraform",
-        ):
-            with mock.patch(
-                "tfworker.backends.gcs.storage.Client.from_service_account_json"
-            ):
-                return tfworker.commands.terraform.TerraformCommand(
-                    rootc_options,
-                    deployment="test-0001-options",
-                    tf_version=(13, 5),
-                    b64_encode=False,
-                )
-
-
-@pytest.fixture
-def definition_odict():
-    one_def = {
-        "test": dict(
-            {
-                "path": "/test",
-                "remote_vars": {"a": 1, "b": "two"},
-                "terraform_vars": {"c": 3, "d": "four"},
-                "template_vars": {"e": 5, "f": "six"},
-            }
-        )
-    }
-    return dict(one_def)
-
-
-@pytest.fixture
-def test_config_file():
-    return os.path.join(os.path.dirname(__file__), "fixtures", "test_config.yaml")
+@pytest.fixture(autouse=True)
+def setup_method(mocker, mock_click_context):
+    """A fixture to setup the click context which is used throughout"""
+    mocker.patch("click.get_current_context", return_value=mock_click_context)

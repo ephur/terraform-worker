@@ -1,93 +1,59 @@
 # This file contains functions primarily used by the "TerraformCommand" class
 # the goal of moving these functions here is to reduce the responsibility of
 # the TerraformCommand class, making it easier to test and maintain
-import pathlib
 import re
-import shutil
 from functools import lru_cache
 from typing import Dict, List, Union
 
 import click
 
+import tfworker.util.log as log
 import tfworker.util.terraform_helpers as tfhelpers
 from tfworker.constants import (
-    DEFAULT_REPOSITORY_PATH,
     TF_PROVIDER_DEFAULT_HOSTNAME,
     TF_PROVIDER_DEFAULT_NAMESPACE,
 )
-from tfworker.providers.providers_collection import ProvidersCollection
-from tfworker.types import ProviderGID
+from tfworker.exceptions import TFWorkerException
+from tfworker.providers import Provider, ProviderGID, ProvidersCollection
 from tfworker.util.system import pipe_exec
 
 
-def prep_modules(
-    module_path: str,
-    target_path: str,
-    ignore_patterns: list[str] = None,
-    required: bool = False,
-) -> None:
-    """This puts any terraform modules from the module path in place. By default
-    it will not generate an error if the module path is not found. If required
-    is set to True, it will raise an error if the module path is not found.
-
-    Args:
-        module_path (str): The path to the terraform modules directory
-        target_path (str): The path to the target directory, /terraform-modules will be appended
-        ignore_patterns (list(str)): A list of patterns to ignore
-        required (bool): If the terraform modules directory is required
-    """
-    if module_path == "":
-        module_path = f"{DEFAULT_REPOSITORY_PATH}/terraform-modules"
-
-    module_path = pathlib.Path(module_path)
-    target_path = pathlib.Path(f"{target_path}/terraform-modules".replace("//", "/"))
-
-    if not module_path.exists() and required:
-        click.secho(
-            f"The specified terraform-modules directory '{module_path}' does not exists",
-            fg="red",
-        )
-        raise SystemExit(1)
-
-    if not module_path.exists():
-        return
-
-    if ignore_patterns is None:
-        ignore_patterns = ["test", ".terraform", "terraform.tfstate*"]
-
-    click.secho(f"copying modules from {module_path} to {target_path}", fg="yellow")
-    shutil.copytree(
-        module_path,
-        target_path,
-        symlinks=True,
-        ignore=shutil.ignore_patterns(*ignore_patterns),
-    )
-
-
 @lru_cache
-def get_terraform_version(terraform_bin: str) -> tuple[int, int]:
+def get_terraform_version(terraform_bin: str, validation=False) -> tuple[int, int]:
     """
     Get the terraform version and return the major and minor version.
 
     Args:
         terraform_bin (str): The path to the terraform binary.
+        validation (bool, optional): A boolean indicating if the function should raise an error if the version cannot be determined. Defaults to False.
     """
+
+    # @TODO: instead of exiting, raise an error to handle it in the caller
+    def click_exit():
+        log.error(f"unable to get terraform version from {terraform_bin} version")
+        click.get_current_context().exit(1)
+
+    def validation_exit():
+        raise ValueError(
+            f"unable to get terraform version from {terraform_bin} version"
+        )
 
     (return_code, stdout, stderr) = pipe_exec(f"{terraform_bin} version")
     if return_code != 0:
-        click.secho(f"unable to get terraform version\n{stderr}", fg="red")
-        raise SystemExit(1)
+        if validation:
+            validation_exit()
+        click_exit()
     version = stdout.decode("UTF-8").split("\n")[0]
     version_search = re.search(r".*\s+v(\d+)\.(\d+)\.(\d+)", version)
     if version_search:
-        click.secho(
+        log.debug(
             f"Terraform Version Result: {version}, using major:{version_search.group(1)}, minor:{version_search.group(2)}",
-            fg="yellow",
         )
         return (int(version_search.group(1)), int(version_search.group(2)))
     else:
-        click.secho(f"unable to get terraform version\n{stderr}", fg="red")
-        raise SystemExit(1)
+        if validation:
+            validation_exit()
+        click_exit()
 
 
 def mirror_providers(
@@ -102,22 +68,20 @@ def mirror_providers(
         working_dir (str): The working directory.
         cache_dir (str): The cache directory.
     """
-    click.secho(f"Mirroring providers to {cache_dir}", fg="yellow")
-    tfhelpers._validate_cache_dir(cache_dir)
+    log.debug(f"Mirroring providers to {cache_dir}")
     try:
         with tfhelpers._write_mirror_configuration(
             providers, working_dir, cache_dir
         ) as temp_dir:
-            (return_code, stdout, stderr) = pipe_exec(
+            (return_code, _, stderr) = pipe_exec(
                 f"{terraform_bin} providers mirror {cache_dir}",
                 cwd=temp_dir,
                 stream_output=True,
             )
             if return_code != 0:
-                click.secho(f"Unable to mirror providers\n{stderr.decode()}", fg="red")
-                raise SystemExit(1)
+                raise TFWorkerException(f"Unable to mirror providers: {stderr}")
     except IndexError:
-        click.secho("All providers in cache", fg="yellow")
+        log.debug("All providers in cache")
 
 
 def generate_terraform_lockfile(
@@ -139,21 +103,32 @@ def generate_terraform_lockfile(
         Union[None, str]: The content of the .terraform.lock.hcl file or None if any required providers are not in the cache
     """
     lockfile = []
-    click.secho(
-        f"Generating lockfile for providers: {included_providers or [x.tag for x in providers]}",
-        fg="yellow",
+    provider: Provider
+
+    log.trace(
+        f"generating lockfile for providers: {included_providers or [x.name for x in providers.values()]}"
     )
-    for provider in providers:
-        if tfhelpers._not_in_cache(provider.gid, provider.version, cache_dir):
+    for provider in providers.values():
+        log.trace(f"checking provider {provider} / {provider.gid}")
+        if tfhelpers._not_in_cache(
+            provider.gid, provider.config.requirements.version, cache_dir
+        ):
+            log.trace(
+                f"Provider {provider.gid} not in cache, skipping lockfile generation"
+            )
             return None
-        if included_providers is not None and provider.tag not in included_providers:
+        if included_providers is not None and provider.name not in included_providers:
+            log.trace(
+                f"Provider {provider.gid} not in included_providers, not adding to lockfile"
+            )
             continue
+        log.trace(f"Provider {provider.gid} is in cache, adding to lockfile")
         lockfile.append(f'provider "{str(provider.gid)}" {{')
-        lockfile.append(f'  version     = "{provider.version}"')
-        lockfile.append(f'  constraints = "{provider.version}"')
+        lockfile.append(f'  version     = "{provider.config.requirements.version}"')
+        lockfile.append(f'  constraints = "{provider.config.requirements.version}"')
         lockfile.append("  hashes = [")
         for hash in tfhelpers._get_cached_hash(
-            provider.gid, provider.version, cache_dir
+            provider.gid, provider.config.requirements.version, cache_dir
         ):
             lockfile.append(f'    "{hash}",')
         lockfile.append("  ]")
@@ -197,10 +172,10 @@ def get_provider_gid_from_source(source: str) -> ProviderGID:
     return ProviderGID(hostname=hostname, namespace=namespace, type=ptype)
 
 
-@lru_cache
+# @lru_cache
 def find_required_providers(
     search_dir: str,
-) -> Union[None, Dict[str, [Dict[str, str]]]]:
+) -> Union[None, Dict[str, List[Dict[str, str]]]]:
     """
     Find all the required providers in the search directory.
 

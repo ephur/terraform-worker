@@ -1,63 +1,95 @@
-# Copyright 2020 Richard Maynard (richard.maynard@gmail.com)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 from abc import ABCMeta, abstractmethod
+from typing import TYPE_CHECKING
 
+from tfworker.exceptions import BackendError
 from tfworker.types import JSONType
 
-
-class BackendError(Exception):
-    # add custom "help" parameter to the exception
-    def __init__(self, message, help=None):
-        super().__init__(message)
-        self._help = help
-
-    @property
-    def help(self):
-        if self._help is None:
-            return "No help available"
-        return self._help
+if TYPE_CHECKING:
+    from tfworker.authenticators import (  # pragma: no cover  # noqa
+        AuthenticatorsCollection,
+    )
 
 
 class BaseBackend(metaclass=ABCMeta):
-    plan_storage = False
-    tag = "base"
+    """
+    The base backend is an abrastract class that defines the interface for backends
+
+    A backend provides the mechanisms and functions for interacting with a Terraform backend,
+
+    Attributes:
+        plan_storage (bool): A flag to indicate whether the backend supports plan storage
+        auth_tag(str): The tag of the authenticator that is required for this backend
+        tag (str): A unique identifier for the backend
+    """
+
+    auth_tag: str
+    tag: str
+    plan_storage: bool = False
 
     @abstractmethod
-    def hcl(self, name: str) -> str:
-        pass
+    def __init__(
+        self, authenticators: "AuthenticatorsCollection", deployment: str = None
+    ):
+        """
+        The __init__ method initializes the backend
+
+        Args:
+            authenticators (AuthenticatorsCollection): The collection of authenticators
+            deployment (str): The deployment name
+
+        Raises:
+            BackendError: If there is an error during initialization
+        """
+        pass  # pragma: no cover
 
     @abstractmethod
-    def data_hcl(self, exclude: list) -> str:
-        pass
+    def hcl(self, deployment: str) -> str:
+        """
+        The HCL method returns the configuration that belongs in the "terraform" configuration block
+
+        Args:
+            deployment (str): The deployment name
+
+        Returns:
+            str: The HCL configuration
+        """
+        pass  # pragma: no cover
 
     @abstractmethod
-    def clean(self, deployment: str, limit: tuple) -> str:
-        pass
+    def data_hcl(self, remotes: list) -> str:
+        """
+        The data_hcl method returns the configuration that is used to configure this backend as a remote
+        data source.
+
+        Args:
+            remotes (list): A list of remote sources to provide a configuration for
+
+        Returns:
+            str: The HCL configuration for the remote data source
+        """
+        pass  # pragma: no cover
 
     @abstractmethod
-    def remotes(self) -> list:
-        pass
+    def clean(self, deployment: str, limit: tuple) -> None:
+        """
+        Clean is called to remove any resources that are no longer needed
+
+        Args:
+            deployment (str): The deployment name
+            limit (tuple): A tuple with a list of resources to limit execution to
+        """
+        pass  # pragma: no cover
 
     @property
-    def handlers(self) -> dict:
-        return {}
+    @abstractmethod
+    def remotes(self) -> list:
+        """
+        Remotes returns a list of the remote data sources that may be configured for a deployment
 
-
-class Backends:
-    s3 = "s3"
-    gcs = "gcs"
+        Returns:
+            list: A list of remote data sources
+        """
+        pass  # pragma: no cover
 
 
 def validate_backend_empty(state: JSONType) -> bool:
@@ -72,4 +104,6 @@ def validate_backend_empty(state: JSONType) -> bool:
         else:
             return True
     except KeyError:
-        raise BackendError("resources key does not exist in state!")
+        raise BackendError("resources key does not exist in state")
+    except TypeError:
+        raise BackendError("state is not valid JSON")

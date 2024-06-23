@@ -1,18 +1,5 @@
-# Copyright 2020-2023 Richard Maynard (richard.maynard@gmail.com)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import json
+from typing import TYPE_CHECKING
 
 import click
 from google.api_core import page_iterator
@@ -20,16 +7,29 @@ from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import storage
 from google.cloud.exceptions import Conflict, NotFound
 
-from .base import BackendError, BaseBackend, validate_backend_empty
+import tfworker.util.log as log
+from tfworker.exceptions import BackendError
+
+from .base import BaseBackend, validate_backend_empty
+
+if TYPE_CHECKING:
+    from tfworker.authenticators import (  # pragma: no cover  # noqa
+        AuthenticatorsCollection,
+    )
 
 
 class GCSBackend(BaseBackend):
     tag = "gcs"
     auth_tag = "google"
 
-    def __init__(self, authenticators, definitions, deployment=None):
+    def __init__(
+        self, authenticators: "AuthenticatorsCollection", deployment: str = None
+    ):
+        log.warn(
+            "The GCS Backend has not been updated and tested in a long time; it may not work as expected."
+        )
+
         self._authenticator = authenticators[self.auth_tag]
-        self._definitions = definitions
         self._gcs_bucket = None
         self._gcs_prefix = None
 
@@ -99,6 +99,7 @@ class GCSBackend(BaseBackend):
             else:
                 raise BackendError(f"state file at: {b.name} is not empty")
 
+    @property
     def remotes(self) -> list:
         """this is unimplemented here"""
         raise NotImplementedError

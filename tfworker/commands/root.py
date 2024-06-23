@@ -1,284 +1,101 @@
-# Copyright 2020-2023 Richard Maynard (richard.maynard@gmail.com)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-import io
-import os
-import pathlib
 import tempfile
 from pathlib import Path
-from typing import Union
+from typing import Any, Dict
 
 import click
-import hcl2
-import jinja2
-import yaml
-from jinja2.runtime import StrictUndefined
 
-from tfworker.types import CLIOptionsRoot
+import tfworker.util.log as log
+from tfworker.cli_options import CLIOptionsRoot
+
+from .config import load_config, resolve_model_with_cli_options
 
 
 class RootCommand:
-    def __init__(self, options: CLIOptionsRoot):
+    """
+    The RootCommand class is the main entry point for the CLI.
+
+    It is only responsible for setting up the root/global options shared by
+    all sub-commands.
+    """
+
+    def __init__(self) -> None:
         """
-        Initialize the RootCommand with the given arguments.
+        Initliaze the RootCommand object; this is the main entry point for the CLI.
 
         Args:
             args (dict, optional): A dictionary of arguments to initialize the RootCommand with. Defaults to {}.
         """
+        log.trace("initializing root command object")
+        app_state = click.get_current_context().obj
+        options = app_state.root_options
+        app_state.working_dir = self._resolve_working_dir(options.working_dir)
+        log.debug(f"working directory: {app_state.working_dir}")
+        log.debug(f"loading config file: {options.config_file}")
+        app_state.loaded_config = load_config(
+            options.config_file, self._prepare_template_vars(options)
+        )
+        log.safe_trace(f"loaded config: {app_state.loaded_config}")
+        # update the app_config with configuration from the command line
+        resolve_model_with_cli_options(app_state)
+        log.trace("finished initializing root command object")
 
-        # To avoid refactoring everything all at once, take items from CLIOptionsRoot and assign them to self
-        # This is a temporary measure to allow for a gradual transition to the new CLIOptionsRoot class
-        self.working_dir = options.working_dir
-        self.clean = options.clean
-        self.config_file = options.config_file
-        self.tf = None
-
-        if self.working_dir is not None:
-            self.temp_dir = pathlib.Path(self.working_dir).resolve()
-        else:
-            self.temp_dir = tempfile.mkdtemp()
-
-        self.args = self.StateArgs()
-        self.add_args(options.dict())
-
-    def __del__(self):
+    @staticmethod
+    def _resolve_working_dir(working_dir: str | None) -> Path:
         """
-        Cleanup the temporary directory after execution.
-        """
-
-        # Temporary for refactoring
-        if not hasattr(self, "clean"):
-            if hasattr(self, "temp_dir"):
-                print(f"self.temp_dir: {self.temp_dir} may be abandoned!!!")
-            return
-
-        if self.clean:
-            # the affect of remove_top being true is removing the top level directory, for a temporary
-            # directory this is desirable however when a working-dir is specified it's likely a volume
-            # mount in a container, so empty the files if clean is desired but do not remove the top level
-            remove_top = True if self.working_dir is None else False
-
-            try:
-                rm_tree(self.temp_dir, inner=remove_top)
-            except FileNotFoundError:
-                pass
-
-    def add_args(self, args):
-        """
-        Add a dictionary of args.
+        Resolve the working directory.
 
         Args:
-            args (dict): A dictionary of arguments to add.
-        """
-        for k, v in args.items():
-            self.add_arg(k, v)
+            working_dir (str): The working directory.
 
-    def add_arg(self, k, v):
+        Returns:
+            pathlib.Path: The resolved working directory.
         """
-        Add an argument to the state args.
+        if working_dir is None:
+            log.trace("working directory not provided, using temporary directory")
+            return Path(tempfile.TemporaryDirectory().name)
+        log.trace(f"working directory provided: {working_dir}")
+        return Path(working_dir).resolve()
+
+    @staticmethod
+    def _prepare_template_vars(options: CLIOptionsRoot) -> Dict[str, Any]:
+        """
+        Prepare the template variables.
 
         Args:
-            k (str): The key of the argument.
-            v (any): The value of the argument.
+            options (CLIOptionsRoot): The root options.
+
+        Returns:
+            Dict[str, Any]: The template variables.
         """
-        setattr(self.args, k, v)
-        return None
+        template_items = {}
+        log.trace("preparing template items")
+        for k, v in options.model_dump().items():
 
-    def load_config(self):
-        """
-        Load the configuration file.
-        """
-        if not self.config_file:
-            return
+            if v is None:
+                log.trace(f"skipping {k} as it is None")
+                continue
 
-        self._config_file_exists()
-        rendered_config = self._process_template()
+            if isinstance(v, str):
+                log.trace(f"adding {k}={v}")
+                template_items[k] = v
+                continue
 
-        if self.config_file.endswith(".hcl"):
-            self.config = ordered_config_load_hcl(rendered_config)
-        else:
-            self.config = ordered_config_load(rendered_config)
+            if isinstance(v, list):
+                log.trace(f"attempting to add list of strings {k}={v}")
+                for i in v:
+                    if isinstance(i, str):
+                        subs = i.split("=")
+                        if len(subs) == 2:
+                            log.trace(f"adding list item {subs[0]}={subs[1]}")
+                            template_items[subs[0]] = subs[1]
+                        else:
+                            log.trace(
+                                f"skipping invalid list item {i}; not valid k=v pair"
+                            )
+                            continue
+                    else:
+                        log.trace(f"skipping {i} as it is not a string")
 
-        # Decorate the RootCommand with the config values
-        self.tf = self.config.get("terraform", dict())
-        self._pullup_keys()
-        self._merge_args()
-
-    def _config_file_exists(self):
-        """
-        Check if the configuration file exists.
-        """
-        if not os.path.exists(self.config_file):
-            click.secho(
-                f"configuration file does not exist: {self.config_file}", fg="red"
-            )
-            raise SystemExit(1)
-
-    def _process_template(self) -> str:
-        """
-        Process the Jinja2 template.
-        """
-        try:
-            template_reader = io.StringIO()
-            jinja_env = jinja2.Environment(
-                undefined=StrictUndefined,
-                loader=jinja2.FileSystemLoader(
-                    pathlib.Path(self.config_file).parents[0]
-                ),
-            )
-            template_config = jinja_env.get_template(
-                pathlib.Path(self.config_file).name
-            )
-            template_config.stream(
-                **self.args.template_items(return_as_dict=True, get_env=True)
-            ).dump(template_reader)
-        except jinja2.exceptions.UndefinedError as e:
-            click.secho(
-                f"configuration file contains invalid template substitutions: {e}",
-                fg="red",
-            )
-            raise SystemExit(1)
-
-        return template_reader.getvalue()
-
-    def _pullup_keys(self):
-        """
-        A utility function to place keys from the loaded config file directly on the RootCommand instance.
-        """
-        for k in [
-            "definitions",
-            "providers",
-            "handlers",
-            "remote_vars",
-            "template_vars",
-            "terraform_vars",
-            "worker_options",
-        ]:
-            if self.tf:
-                setattr(self, f"{k}_odict", self.tf.get(k, dict()))
-            else:
-                setattr(self, f"{k}_odict", None)
-
-    def _merge_args(self):
-        """
-        Merge the worker options from the config file with the command line arguments.
-        """
-        for k, v in self.worker_options_odict.items():
-            self.add_arg(k, v)
-
-    class StateArgs:
-        """
-        A class to hold arguments in the state for easier access.
-        """
-
-        def __iter__(self):
-            return iter(self.__dict__)
-
-        def __getitem__(self, name):
-            return self.__dict__[name]
-
-        def __repr__(self):
-            return str(self.__dict__)
-
-        def keys(self):
-            return self.__dict__.keys()
-
-        def items(self):
-            return self.__dict__.items()
-
-        def values(self):
-            return self.__dict__.values()
-
-        def template_items(self, return_as_dict=False, get_env=False):
-            rvals = {}
-            for k, v in self.__dict__.items():
-                if k == "config_var":
-                    try:
-                        rvals["var"] = get_config_var_dict(v)
-                    except ValueError as e:
-                        click.secho(
-                            f'Invalid config-var specified: "{e}" must be in format key=value',
-                            fg="red",
-                        )
-                        raise SystemExit(1)
-                else:
-                    rvals[k] = v
-            if get_env is True:
-                rvals["env"] = dict()
-                for k, v in os.environ.items():
-                    rvals["env"][k] = v
-            if return_as_dict:
-                return rvals
-            return rvals.items()
-
-
-def get_config_var_dict(config_vars):
-    """
-    Returns a dictionary of of key=value for each item provided as a command line substitution.
-
-    Args:
-        config_vars (list): A list of command line substitutions.
-
-    Returns:
-        dict: A dictionary of key=value pairs.
-    """
-    return_vars = dict()
-    for cv in config_vars:
-        try:
-            k, v = tuple(cv.split("="))
-            return_vars[k] = v
-        except ValueError:
-            raise ValueError(cv)
-    return return_vars
-
-
-def ordered_config_load_hcl(config: str) -> dict:
-    """
-    Load an hcl config, and replace templated items.
-    """
-    return hcl2.loads(config)
-
-
-def ordered_config_load(config: str) -> dict:
-    """
-    since python 3.7 the yaml loader is deterministic, so we can
-    use the standard yaml loader
-    """
-    try:
-        return yaml.load(config, Loader=yaml.FullLoader)
-    except yaml.YAMLError as e:
-        click.secho(f"error loading yaml/json: {e}", fg="red")
-        click.secho("the configuration that caused the error was\n:", fg="red")
-        for i, line in enumerate(config.split("\n")):
-            click.secho(f"{i + 1}: {line}", fg="red")
-        raise SystemExit(1)
-
-
-def rm_tree(base_path: Union[str, Path], inner: bool = False) -> None:
-    """
-    Recursively removes all files and directories.
-
-    Args:
-        base_path (Union[str, Path]): The base path to start removing files and directories from.
-        inner (bool, optional): Controls recrusion, if True only the inner files and directories are removed. Defaults to False.
-    """
-    parent: Path = Path(base_path)
-
-    for child in parent.glob("*"):
-        if child.is_file() or child.is_symlink():
-            child.unlink()
-        else:
-            rm_tree(child, inner=True)
-    if inner:
-        parent.rmdir()
+            log.trace(f"skipping {k} as it is not a string or list of strings")
+        log.trace(f"template_items: {template_items}")
+        return template_items
