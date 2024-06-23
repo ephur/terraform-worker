@@ -13,151 +13,219 @@
 # limitations under the License.
 
 import shlex
+from typing import Dict
 
 import boto3
+from botocore.credentials import Credentials
+from pydantic import field_validator, model_validator
 
+import tfworker.util.log as log
 from tfworker import constants as const
 
-from .base import BaseAuthenticator
+from .base import BaseAuthenticator, BaseAuthenticatorConfig
 
 
-class MissingArgumentException(Exception):
-    pass
+class AWSAuthenticatorConfig(BaseAuthenticatorConfig):
+    aws_region: str  # the AWS region to use
+    aws_access_key_id: str | None = None  # an aws access key id
+    aws_external_id: str | None = (
+        None  # a unique ID that can be used for cross account assumptions
+    )
+    aws_profile: str | None = None  # an aws profile
+    aws_role_arn: str | None = None  # if provided, the role to assume using other creds
+    aws_secret_access_key: str | None = None  # an aws secret access key
+    aws_session_token: str | None = None  # an aws session token
+    backend_region: str | None = (
+        None  # the AWS region for the TF backend (s3, dynamodb)
+    )
+    backend_role_arn: str | None = None  # the role to assume for the backend
+    duration: int | None = 3600  # the duration of an assumed role session
+    mfa_serial: str | None = (
+        None  # the serial number or ARN of an MFA device ; not yet implemented
+    )
+    session_name: str | None = "tfworker"  # the name of the assumed role session
+
+    @model_validator(mode="before")
+    @classmethod
+    def set_backend_region(cls, values):
+        if values.get("aws_region") and not values.get("backend_region"):
+            values["backend_region"] = values["aws_region"]
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
+    def check_valid_aws_auth(cls, values):
+        if not (
+            values.get("aws_access_key_id") and values.get("aws_secret_access_key")
+        ) and not values.get("aws_profile"):
+            raise ValueError(
+                "Either aws_access_key_id and aws_secret_access_key or profile must be provided"
+            )
+        return values
+
+    @field_validator("mfa_serial")
+    @classmethod
+    def validate_mfa_serial(cls, value):
+        if value is not None:
+            raise ValueError("MFA is not yet implemented")
 
 
 class AWSAuthenticator(BaseAuthenticator):
     tag = "aws"
+    config_model = AWSAuthenticatorConfig
 
-    def __init__(self, state_args, **kwargs):
-        super(AWSAuthenticator, self).__init__(state_args, **kwargs)
-        self.bucket = self._resolve_arg("backend_bucket")
-        if not self.bucket:
-            raise MissingArgumentException("backend_bucket is a required argument")
+    def __init__(self, auth_config: AWSAuthenticatorConfig):
+        """Initialize the AWS authenticator
 
-        self.access_key_id = self._resolve_arg("aws_access_key_id")
-        self.backend_region = self._resolve_arg("backend_region")
-        self.prefix = self._resolve_arg("backend_prefix")
-        self.profile = self._resolve_arg("aws_profile")
-        self.region = self._resolve_arg("aws_region")
-        self.role_arn = self._resolve_arg("aws_role_arn")
-        self.secret_access_key = self._resolve_arg("aws_secret_access_key")
-        self.session_token = self._resolve_arg("aws_session_token")
-        self.external_id = self._resolve_arg("aws_external_id")
+        Args:
+            auth_config (AWSAuthenticatorConfig): the configuration for the authenticator
+        """
+        self._backend_session: boto3.session = None
+        self._session: boto3.session = None
 
-        self.deployment = kwargs.get("deployment")
+        log.debug(f"authenticating to AWS, in region {auth_config.aws_region}")
+        init_session: boto3.session = boto3.Session(
+            region_name=auth_config.aws_region, **_get_init_session_args(auth_config)
+        )
 
-        self._account_id = None
-        self._backend_session = None
-        self._session = None
+        # Handle the primary session
+        if not auth_config.aws_role_arn:
+            self._session = init_session
+        else:
+            log.info(f"assuming role: {auth_config.aws_role_arn}")
+            self._session = self._assume_role_session(init_session, auth_config)
 
-        # If the default value is used, render the deployment name into it
-        if self.prefix == const.DEFAULT_BACKEND_PREFIX:
-            self.prefix = const.DEFAULT_BACKEND_PREFIX.format(
-                deployment=self.deployment
-            )
-
-        aws_is_active = (self.access_key_id and self.secret_access_key) or self.profile
-        if aws_is_active:
-            # Initialize the session objects
-            self._session = boto3.Session(
-                region_name=self.region, **self._session_state_args
-            )
-
-            if not self.role_arn:
-                # if a role was not provided, need to ensure credentials are set
-                # in the config, these will come from the session
-                creds = self._session.get_credentials()
-                self.access_key_id = creds.access_key
-                self.secret_access_key = creds.secret_key
-                self.session_token = creds.token
-
-                if self.backend_region == self.region:
-                    self._backend_session = self._session
-                else:
-                    self._backend_session = boto3.Session(
-                        region_name=self.backend_region, **self._session_state_args
-                    )
-            else:
-                (self.__session, creds) = AWSAuthenticator.get_assumed_role_session(
-                    self._session, self.role_arn, external_id=self.external_id
+        # Handle the backend session
+        if auth_config.aws_region == auth_config.backend_region:
+            self._backend_session = self._session
+            log.trace("backend session and regular session are the same")
+        else:
+            if auth_config.backend_role_arn:
+                log.info(f"assuming backend role: {auth_config.backend_role_arn}")
+                self._backend_session = self._assume_role_session(
+                    init_session, auth_config, backend=True
                 )
-                self.access_key_id = creds["AccessKeyId"]
-                self.secret_access_key = creds["SecretAccessKey"]
-                self.session_token = creds["SessionToken"]
-
-                if self.backend_region == self.region:
-                    self._backend_session = self._session
-                else:
-                    # Explicitly do NOT pass the profile here since the assumed role
-                    # has no local profile
-                    self._backend_session = boto3.Session(
-                        region_name=self.backend_region,
-                        aws_access_key_id=self.access_key_id,
-                        aws_secret_access_key=self.secret_access_key,
-                        aws_session_token=self.session_token,
-                    )
+            else:
+                log.debug(
+                    f"authenticating to AWS for backend session, in region {auth_config.backend_region}"
+                )
+                self._backend_session = boto3.Session(
+                    region_name=auth_config.backend_region,
+                    **_get_init_session_args(auth_config),
+                )
 
     @property
-    def _session_state_args(self):
-        state_args = dict()
-
-        if self.profile:
-            state_args["profile_name"] = self.profile
-
-        if self.access_key_id:
-            state_args["aws_access_key_id"] = self.access_key_id
-
-        if self.secret_access_key:
-            state_args["aws_secret_access_key"] = self.secret_access_key
-
-        if self.session_token is not None:
-            state_args["aws_session_token"] = self.session_token
-
-        return state_args
-
-    @property
-    def backend_session(self):
+    def backend_session(self) -> boto3.session:
+        log.trace(f"returning backend session from {__name__}")
         return self._backend_session
 
     @property
-    def session(self):
+    def backend_session_credentials(self) -> Dict[str, str]:
+        log.trace(f"returning backend session credentials from {__name__}")
+        if self._backend_session is None:
+            return None
+        return self._backend_session.get_credentials()
+
+    @property
+    def session(self) -> boto3.session:
+        log.trace(f"returning session from {__name__}")
         return self._session
 
-    def env(self):
+    @property
+    def session_credentials(self) -> Dict[str, str]:
+        log.trace(f"returning session credentials from {__name__}")
+        if self._session is None:
+            return None
+        return self._session.get_credentials()
+
+    def env(self, backend: bool = False) -> Dict[str, str]:
+        """
+        env returns a dictionary of environment variables that should be set
+        """
         result = {}
-        if self.access_key_id:
-            result["AWS_ACCESS_KEY_ID"] = shlex.quote(self.access_key_id)
-        if self.region:
-            result["AWS_DEFAULT_REGION"] = shlex.quote(self.region)
-        if self.secret_access_key:
-            result["AWS_SECRET_ACCESS_KEY"] = shlex.quote(self.secret_access_key)
-        if self.session_token:
-            result["AWS_SESSION_TOKEN"] = shlex.quote(self.session_token)
+
+        if backend:
+            session_ref = self.backend_session
+        else:
+            session_ref = self.session
+
+        creds: Credentials = session_ref.get_credentials()
+        result["AWS_DEFAULT_REGION"] = shlex.quote(session_ref.region_name)
+        result["AWS_ACCESS_KEY_ID"] = shlex.quote(creds.access_key)
+        result["AWS_SECRET_ACCESS_KEY"] = shlex.quote(creds.secret_key)
+
+        if creds.token:
+            result["AWS_SESSION_TOKEN"] = shlex(creds.token)
+
         return result
 
-    @staticmethod
-    def get_assumed_role_session(
-        session,
-        role_arn,
-        session_name="AssumedRoleSession1",
-        duration=3600,
-        external_id="",
-    ):
-        """get_assumed_role_session returns a boto3 session updated with assumed role credentials"""
-        sts_client = session.client("sts")
+
+def _get_init_session_args(auth_config: AWSAuthenticatorConfig) -> Dict[str, str]:
+    """
+    Returns a dictionary of arguments to pass to the initial boto3 session
+
+    Args:
+        auth_config (AWSAuthenticatorConfig): the configuration for the authenticator
+
+    Returns:
+        Dict[str, str]: the arguments to pass to the session
+    """
+    session_args = dict()
+
+    if auth_config.aws_profile is not None:
+        session_args["profile_name"] = auth_config.aws_profile
+
+    if auth_config.aws_access_key_id is not None:
+        session_args["aws_access_key_id"] = auth_config.aws_access_key_id
+
+    if auth_config.aws_secret_access_key is not None:
+        session_args["aws_secret_access_key"] = auth_config.aws_secret_access_key
+
+    if auth_config.aws_session_token is not None:
+        session_args["aws_session_token"] = auth_config.aws_session_token
+
+    return session_args
+
+
+def _assume_role_session(
+    session: boto3.session, auth_config: AWSAuthenticatorConfig, backend=False
+) -> boto3.session:
+    """
+    Uses the provided session to assume a role
+
+    Args:
+        session (boto3.session): the session to use for the assumption
+        backend (bool): whether this is for the backend
+
+    Returns:
+        boto3.session: the new session
+    """
+    sts_client = session.client("sts")
+
+    if backend:
         assume_args = {
-            "RoleArn": role_arn,
-            "RoleSessionName": session_name,
-            "DurationSeconds": duration,
+            "RoleArn": auth_config.aws_role_arn,
+            "RoleSessionName": auth_config.session_name,
+            "DurationSeconds": auth_config.duration,
         }
-        if external_id:
-            assume_args["ExternalId"] = external_id
-        role_creds = sts_client.assume_role(**assume_args)["Credentials"]
+        region = auth_config.aws_region
+    else:
+        assume_args = {
+            "RoleArn": auth_config.backend_role_arn,
+            "RoleSessionName": auth_config.session_name,
+            "DurationSeconds": auth_config.duration,
+        }
+        region = auth_config.backend_region
 
-        new_session = boto3.Session(
-            aws_access_key_id=role_creds["AccessKeyId"],
-            aws_secret_access_key=role_creds["SecretAccessKey"],
-            aws_session_token=role_creds["SessionToken"],
-        )
+    if external_id:
+        assume_args["ExternalId"] = external_id
 
-        return new_session, role_creds
+    role_creds = sts_client.assume_role(**assume_args)["Credentials"]
+    new_session = boto3.Session(
+        aws_access_key_id=role_creds["AccessKeyId"],
+        aws_secret_access_key=role_creds["SecretAccessKey"],
+        aws_session_token=role_creds["SessionToken"],
+        region_name=region,
+    )
+
+    return new_session

@@ -12,20 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from abc import ABC, abstractmethod, abstractproperty
 
-class BaseAuthenticator:
-    tag = "base"
+from pydantic import BaseModel, Field
 
-    def __init__(self, state_args, **kwargs):
-        self._args = state_args
-        self.clean = kwargs.get("clean")
-        self.create_backend_bucket = self._resolve_arg("create_backend_bucket")
 
-    def _resolve_arg(self, name):
-        return getattr(self._args, name) if hasattr(self._args, name) else None
+class BaseAuthenticatorConfig(BaseModel): ...
 
-    def env(self):
-        return {}
+
+class BaseAuthenticator(ABC):
+    tag: str
+    config_model: BaseAuthenticatorConfig
+
+    @abstractmethod
+    def __init__(self, auth_config: BaseAuthenticatorConfig): ...
+
+    @abstractmethod
+    def env(self): ...
 
 
 class UnknownAuthenticator(Exception):

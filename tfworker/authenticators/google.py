@@ -16,27 +16,25 @@ import shlex
 
 from tfworker import constants as const
 
-from .base import BaseAuthenticator
+from .base import BaseAuthenticator, BaseAuthenticatorConfig
+
+
+class GoogleAuthenticatorConfig(BaseAuthenticatorConfig):
+    gcp_creds_path: str
+    gcp_region: str
+    project: str
 
 
 class GoogleAuthenticator(BaseAuthenticator):
     tag = "google"
+    config_model = GoogleAuthenticatorConfig
 
     def __init__(self, state_args, **kwargs):
         super(GoogleAuthenticator, self).__init__(state_args, **kwargs)
 
-        self.bucket = self._resolve_arg("backend_bucket")
         self.creds_path = self._resolve_arg("gcp_creds_path")
-        self.prefix = self._resolve_arg("backend_prefix")
         self.project = self._resolve_arg("gcp_project")
         self.region = self._resolve_arg("gcp_region")
-
-        self.deployment = kwargs.get("deployment")
-
-        if self.prefix == const.DEFAULT_BACKEND_PREFIX:
-            self.prefix = const.DEFAULT_BACKEND_PREFIX.format(
-                deployment=self.deployment
-            )
 
     def env(self):
         result = {}

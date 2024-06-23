@@ -4,7 +4,7 @@ import pytest
 
 import tfworker.util.hooks as hooks
 from tfworker.exceptions import HookError
-from tfworker.types import TerraformAction, TerraformStage
+from tfworker.types.terraform import TerraformAction, TerraformStage
 
 
 # Fixture for a mock Terraform state file

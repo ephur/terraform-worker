@@ -19,7 +19,7 @@ from typing import List
 from tfworker.providers.generic import GenericProvider
 from tfworker.providers.google import GoogleProvider
 from tfworker.providers.google_beta import GoogleBetaProvider
-from tfworker.types import ProviderConfig
+from tfworker.types.provider import ProviderConfig
 
 NAMED_PROVIDERS = [GoogleProvider, GoogleBetaProvider]
 
@@ -29,7 +29,7 @@ class ProvidersCollection(collections.abc.Mapping):
         provider_map = dict([(prov.tag, prov) for prov in NAMED_PROVIDERS])
         self._providers = copy.deepcopy(providers_odict)
         for k, v in self._providers.items():
-            config = ProviderConfig.parse_obj(v)
+            config = ProviderConfig.model_validate(v)
 
             if k in provider_map:
                 self._providers[k] = provider_map[k](config)

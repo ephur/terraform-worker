@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from tfworker.providers.providers_collection import ProvidersCollection
-from tfworker.types import ProviderGID
+from tfworker.types.provider import ProviderGID
 from tfworker.util.system import get_platform
 from tfworker.util.terraform_helpers import (
     _create_mirror_configuration,

@@ -15,55 +15,28 @@
 
 
 import sys
+from typing import Any, Dict, Union
 
 import click
 from pydantic import ValidationError
 
-import tfworker.types as tf_types
-from tfworker.commands import (
-    CleanCommand,
-    EnvCommand,
-    RootCommand,
-    TerraformCommand,
-    VersionCommand,
+import tfworker.util.log as log
+from tfworker.commands.clean import CleanCommand
+from tfworker.commands.env import EnvCommand
+from tfworker.commands.root import RootCommand
+from tfworker.commands.terraform import TerraformCommand
+from tfworker.types.app_state import AppState
+from tfworker.types.cli_options import (
+    CLIOptionsClean,
+    CLIOptionsRoot,
+    CLIOptionsTerraform,
 )
-from tfworker.util.cli import pydantic_to_click
-from tfworker.util.system import get_platform
-
-
-def validate_deployment(ctx, deployment, name):
-    """Validate the deployment is no more than 32 characters."""
-    if len(name) > 32:
-        click.secho("deployment must be less than 32 characters", fg="red")
-        raise SystemExit(1)
-    if " " in name:
-        click.secho("deployment must not contain spaces", fg="red")
-        raise SystemExit(1)
-    return name
-
-
-def validate_host():
-    """Ensure that the script is being run on a supported platform."""
-    supported_opsys = ["darwin", "linux"]
-    supported_machine = ["amd64", "arm64"]
-
-    opsys, machine = get_platform()
-
-    if opsys not in supported_opsys:
-        click.secho(
-            f"running on {opsys} is not supported",
-            fg="red",
-        )
-        raise SystemExit(1)
-
-    if machine not in supported_machine:
-        click.secho(
-            f"running on {machine} machines is not supported",
-            fg="red",
-        )
-        raise SystemExit(1)
-
-    return True
+from tfworker.util.cli import (
+    handle_option_error,
+    pydantic_to_click,
+    validate_deployment,
+    validate_host,
+)
 
 
 class CSVType(click.types.StringParamType):
@@ -75,147 +48,79 @@ class CSVType(click.types.StringParamType):
 
 
 @click.group()
-@pydantic_to_click(tf_types.CLIOptionsRoot)
+@pydantic_to_click(CLIOptionsRoot)
+@click.version_option(package_name="terraform-worker")
 @click.pass_context
-def cli(ctx, **kwargs):
+def cli(ctx: click.Context, **kwargs):
     """CLI for the worker utility."""
     try:
-        options = tf_types.CLIOptionsRoot(**kwargs)
         validate_host()
-        ctx.obj = RootCommand(options)
-    except ValidationError as e:
-        click.echo(f"Error in options: {e}")
+    except NotImplementedError as e:
+        log.msg(str(e), log.LogLevel.ERROR)
         ctx.exit(1)
 
+    try:
+        options = CLIOptionsRoot.model_validate(kwargs)
+    except ValidationError as e:
+        handle_option_error(e, ctx)
+
+    log.log_level = log.LogLevel[options.log_level]
+    log.msg(f"set log level to {options.log_level}", log.LogLevel.DEBUG)
+    app_state=AppState(root_options=options)
+    ctx.obj = app_state
+    rc = RootCommand(ctx)
+    ctx.obj.root_command = rc
+    log.msg("finished intializing root command", log.LogLevel.TRACE)
+
 
 @cli.command()
-@click.option(
-    "--limit",
-    help="limit operations to a single definition",
-    envvar="WORKER_LIMIT",
-    multiple=True,
-    type=CSVType(),
-)
+@pydantic_to_click(CLIOptionsClean)
 @click.argument("deployment", callback=validate_deployment)
-@click.pass_obj
-def clean(rootc, *args, **kwargs):  # noqa: E501
+@click.pass_context
+def clean(ctx: click.Context, **kwargs):  # noqa: E501
     """clean up terraform state"""
     # clean just items if limit supplied, or everything if no limit
-    CleanCommand(rootc, *args, **kwargs).exec()
+    try:
+        options = CLIOptionsClean.model_validate(kwargs)
+    except ValidationError as e:
+        handle_option_error(e, ctx)
+
+    ctx.obj.clean_config = options
+    log.info(f"cleaning deployment {kwargs.get('deployment')}")
+    log.info(f"working in directory: {ctx.obj.root_config.working_dir}")
+    log.info(f"limiting to: {options.limit}")
+    # CleanCommand(rootc, *args, **kwargs).exec()
 
 
 @cli.command()
-def version():
-    """display program version"""
-    VersionCommand().exec()
-    sys.exit(0)
-
-
-@cli.command()
-@click.option(
-    "--plan-file-path",
-    default=None,
-    envvar="WORKER_PLAN_FILE_PATH",
-    help="path to plan files, with plan it will save to this location, apply will read from it",
-)
-@click.option(
-    "--apply/--no-apply",
-    "tf_apply",
-    envvar="WORKER_APPLY",
-    default=False,
-    help="apply the terraform configuration",
-)
-@click.option(
-    "--plan/--no-plan",
-    "tf_plan",
-    envvar="WORKER_PLAN",
-    type=bool,
-    default=True,
-    help="toggle running a plan, plan will still be skipped if using a saved plan file with apply",
-)
-@click.option(
-    "--force/--no-force",
-    "force",
-    default=False,
-    envvar="WORKER_FORCE",
-    help="force apply/destroy without plan change",
-)
-@click.option(
-    "--destroy/--no-destroy",
-    default=False,
-    envvar="WORKER_DESTROY",
-    help="destroy a deployment instead of create it",
-)
-@click.option(
-    "--show-output/--no-show-output",
-    default=True,
-    envvar="WORKER_SHOW_OUTPUT",
-    help="show output from terraform commands",
-)
-@click.option(
-    "--terraform-bin",
-    envvar="WORKER_TERRAFORM_BIN",
-    help="The complate location of the terraform binary",
-)
-@click.option(
-    "--b64-encode-hook-values/--no--b64-encode-hook-values",
-    "b64_encode",
-    default=False,
-    envvar="WORKER_B64_ENCODE_HOOK_VALUES",
-    help=(
-        "Terraform variables and outputs can be complex data structures, setting this"
-        " open will base64 encode the values for use in hook scripts"
-    ),
-)
-@click.option(
-    "--terraform-modules-dir",
-    envvar="WORKER_TERRAFORM_MODULES_DIR",
-    default="",
-    help=(
-        "Absolute path to the directory where terraform modules will be stored."
-        "If this is not set it will be relative to the repository path at ./terraform-modules"
-    ),
-)
-@click.option(
-    "--limit",
-    help="limit operations to a single definition",
-    envvar="WORKER_LIMIT",
-    multiple=True,
-    type=CSVType(),
-)
-@click.option(
-    "--provider-cache",
-    envvar="WORKER_PROVIDER_CACHE",
-    default=None,
-    help="if provided this directory will be used as a cache for provider plugins",
-)
-@click.option(
-    "--stream-output/--no-stream-output",
-    help="stream the output from terraform command",
-    envvar="WORKER_STREAM_OUTPUT",
-    default=True,
-)
-@click.option(
-    "--color/--no-color",
-    help="colorize the output from terraform command",
-    envvar="WORKER_COLOR",
-    default=False,
-)
+@pydantic_to_click(CLIOptionsTerraform)
 @click.argument("deployment", envvar="WORKER_DEPLOYMENT", callback=validate_deployment)
-@click.pass_obj
-def terraform(rootc, *args, **kwargs):
+@click.pass_context
+def terraform(ctx: click.Context, deployment: str, **kwargs):
     """execute terraform orchestration"""
     try:
-        tfc = TerraformCommand(rootc, *args, **kwargs)
-    except FileNotFoundError as e:
-        click.secho(f"terraform binary not found: {e.filename}", fg="red", err=True)
-        raise SystemExit(1)
+        options = CLIOptionsTerraform.model_validate(kwargs)
+    except ValidationError as e:
+        handle_option_error(e, ctx)
 
-    click.secho(f"building deployment {kwargs.get('deployment')}", fg="green")
-    click.secho(f"working in directory: {tfc.temp_dir}", fg="yellow")
+    ctx.obj.terraform_options = options
+    tfc = TerraformCommand(ctx, deployment=deployment)
 
-    tfc.exec()
-    sys.exit(0)
+
+    # make it through init refactoring first....
+    # tfc.exec()
+
+    # try:
+    #     tfc = TerraformCommand(rootc, *args, **kwargs)
+    # except FileNotFoundError as e:
+    #     click.secho(f"terraform binary not found: {e.filename}", fg="red", err=True)
+    #     raise SystemExit(1)
+
+    # click.secho(f"building deployment {kwargs.get('deployment')}", fg="green")
+    # click.secho(f"working in directory: {tfc.temp_dir}", fg="yellow")
+
+    # tfc.exec()
+    # sys.exit(0)
 
 
 @cli.command()

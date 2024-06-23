@@ -14,7 +14,7 @@
 
 import click
 
-from tfworker.authenticators import AuthenticatorsCollection
+from tfworker.authenticators.collection import AuthenticatorsCollection
 from tfworker.commands.base import BaseCommand
 
 

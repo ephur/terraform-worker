@@ -11,14 +11,14 @@ from typing import Any, Dict
 
 import click
 
-from tfworker.backends import BaseBackend
+from tfworker.backends.base import BaseBackend
 from tfworker.constants import (
     TF_STATE_CACHE_NAME,
     WORKER_LOCALS_FILENAME,
     WORKER_TFVARS_FILENAME,
 )
 from tfworker.exceptions import HookError
-from tfworker.types import TerraformAction, TerraformStage
+from tfworker.types.terraform import TerraformAction, TerraformStage
 from tfworker.util.system import pipe_exec
 
 

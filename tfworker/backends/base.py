@@ -14,20 +14,7 @@
 
 from abc import ABCMeta, abstractmethod
 
-from tfworker.types import JSONType
-
-
-class BackendError(Exception):
-    # add custom "help" parameter to the exception
-    def __init__(self, message, help=None):
-        super().__init__(message)
-        self._help = help
-
-    @property
-    def help(self):
-        if self._help is None:
-            return "No help available"
-        return self._help
+from tfworker.types.json import JSONType
 
 
 class BaseBackend(metaclass=ABCMeta):

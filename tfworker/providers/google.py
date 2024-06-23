@@ -12,9 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from tfworker.authenticators import AuthenticatorsCollection
 from tfworker.providers.base import BaseProvider
-from tfworker.types import ProviderConfig
+from tfworker.types.provider import ProviderConfig
 
 
 class GoogleProvider(BaseProvider):
@@ -26,7 +25,9 @@ class GoogleProvider(BaseProvider):
 
         self._authenticator = None
 
-    def add_authenticators(self, authenticators: AuthenticatorsCollection):
+    def add_authenticators(self, authenticators: "AuthenticatorsCollection"):
+        from tfworker.authenticators.collection import AuthenticatorsCollection
+
         self._authenticator = authenticators.get(self.tag)
 
         # if there is a creds file, tuck it into the provider vars

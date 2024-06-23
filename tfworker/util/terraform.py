@@ -16,7 +16,7 @@ from tfworker.constants import (
     TF_PROVIDER_DEFAULT_NAMESPACE,
 )
 from tfworker.providers.providers_collection import ProvidersCollection
-from tfworker.types import ProviderGID
+from tfworker.types.provider import ProviderGID
 from tfworker.util.system import pipe_exec
 
 

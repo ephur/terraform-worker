@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from tfworker.providers.base import BaseProvider
-from tfworker.types import ProviderConfig
+from tfworker.types.provider import ProviderConfig
 
 
 class GenericProvider(BaseProvider):

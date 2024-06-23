@@ -154,45 +154,6 @@ def pipe_exec(
     return (returncode, stdout, stderr)
 
 
-def which(program: str) -> Union[str, None]:
-    """
-    A function to mimic the behavior of the `which` command in Unix-like systems.
-
-    Args:
-        program (str): The program to search for in the PATH.
-
-    Returns:
-        str: The full path to the program if found, otherwise None.
-    """
-
-    def is_exe(fpath):
-        return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
-
-    fpath, fname = os.path.split(program)
-    if fpath:
-        if is_exe(program):
-            return program
-    else:
-        for path in os.environ["PATH"].split(os.pathsep):
-            exe_file = os.path.join(path, program)
-            if is_exe(exe_file):
-                return exe_file
-    return None
-
-
-def get_version() -> str:
-    """
-    Get the version of the current package
-
-    Returns:
-        str: The version of the package
-    """
-    try:
-        return importlib.metadata.version("terraform-worker")
-    except importlib.metadata.PackageNotFoundError:
-        return "unknown"
-
-
 def get_platform() -> Tuple[str, str]:
     """
     Returns a formatted operating system / architecture tuple that is consistent with common distribution creation tools.
