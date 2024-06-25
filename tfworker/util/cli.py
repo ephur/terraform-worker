@@ -28,7 +28,9 @@ def handle_option_error(e: ValidationError, ctx: click.Context) -> None:
             f"{error['loc'][0]}: {error['msg'].split(',', 1)[1].strip()}"
         )
 
-    log.msg(f"{'\n  '.join(error_message)}", log.LogLevel.ERROR)
+    # use .format to work around python f-string limitation of not being able to use \n
+    #log.msg(f"{'\\n  '.join(error_message)}", log.LogLevel.ERROR)
+    log.error("{}".format("\\n  ".join(error_message)))
     ctx.abort()
 
 
