@@ -1,21 +1,27 @@
 import collections
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
 import tfworker.util.log as log
-from tfworker.types.cli_options import CLIOptionsRoot
 
 from .aws import AWSAuthenticator  # noqa
 from .base import UnknownAuthenticator  # noqa
 from .base import BaseAuthenticator, BaseAuthenticatorConfig
 from .google import GoogleAuthenticator, GoogleBetaAuthenticator  # noqa
 
+# from tfworker.types.cli_options import CLIOptionsRoot
+
+
+if TYPE_CHECKING:
+    from tfworker.types.cli_options import CLIOptionsRoot
+
 # ALL = [AWSAuthenticator, GoogleAuthenticator, GoogleBetaAuthenticator]
 ALL = [AWSAuthenticator, GoogleAuthenticator, GoogleBetaAuthenticator]
 
 
 class AuthenticatorsCollection(collections.abc.Mapping):
-    def __init__(self, root_args: CLIOptionsRoot):
+    def __init__(self, root_args: "CLIOptionsRoot"):
         # create a collection of all authenticators that have an appropriate configuration
         # supplied for their model
         # self._authenticators = dict(
@@ -28,7 +34,7 @@ class AuthenticatorsCollection(collections.abc.Mapping):
                 self._authenticators[auth.tag] = auth(config)
                 log.debug(f"authenticator {auth.tag} created")
             except ValidationError as e:
-                log.debug(
+                log.trace(
                     f"authenticator {auth.tag} not created, configuration not supplied"
                 )
 

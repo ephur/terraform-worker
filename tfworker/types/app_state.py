@@ -1,12 +1,18 @@
+from pathlib import Path
 from typing import Any, Dict
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-import tfworker.types.cli_options as cli_types
-from tfworker.commands.root import RootCommand
+from tfworker.authenticators.collection import AuthenticatorsCollection
+from tfworker.definitions import DefinitionsCollection
+from tfworker.providers.collection import ProvidersCollection
+
+from . import cli_options
+from .config_file import ConfigFile
 
 
 class AppState(BaseModel):
+    deployment: str = Field("undefined", description="The deployment name.")
     model_config = ConfigDict(
         {
             "extra": "forbid",
@@ -14,8 +20,25 @@ class AppState(BaseModel):
         }
     )
 
-    root_options: cli_types.CLIOptionsRoot | None = None
-    root_command: RootCommand | None = None
-    clean_options: cli_types.CLIOptionsClean | None = None
-    terraform_options: cli_types.CLIOptionsTerraform | None = None
-    loaded_config: Dict[str, Any] | None = {}
+    root_options: cli_options.CLIOptionsRoot | None = Field(
+        None, description="The root options."
+    )
+    clean_options: cli_options.CLIOptionsClean | None = Field(
+        None, description="The clean options."
+    )
+    terraform_options: cli_options.CLIOptionsTerraform | None = Field(
+        None, description="The terraform options."
+    )
+    loaded_config: ConfigFile | None = Field(
+        {}, description="The loaded configuration file."
+    )
+    working_dir: Path | None = Field(None, description="The working directory.")
+    providers: ProvidersCollection | None = Field(
+        None, description="The provider configurations."
+    )
+    authenticators: AuthenticatorsCollection | None = Field(
+        None, description="The authenticator configurations."
+    )
+    definitions: DefinitionsCollection | None = Field(
+        None, description="The definition configurations."
+    )

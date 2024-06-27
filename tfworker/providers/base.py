@@ -1,11 +1,17 @@
-from tfworker.types.provider import ProviderConfig, ProviderGID
+from typing import TYPE_CHECKING
+
+from pydantic import GetCoreSchemaHandler
+from pydantic_core import CoreSchema, core_schema
+
+if TYPE_CHECKING:
+    from tfworker.types.provider import ProviderConfig, ProviderGID
 
 
 class BaseProvider:
     tag = None
     requires_auth = False
 
-    def __init__(self, config: ProviderConfig) -> None:
+    def __init__(self, config: "ProviderConfig") -> None:
         self.vars = config.vars or {}
         self.config_blocks = config.config_blocks or {}
         self.version = config.requirements.version
@@ -16,7 +22,7 @@ class BaseProvider:
         return self.tag
 
     @property
-    def gid(self) -> ProviderGID:
+    def gid(self) -> "ProviderGID":
         from tfworker.util.terraform import get_provider_gid_from_source
 
         return get_provider_gid_from_source(self.source)
@@ -102,6 +108,15 @@ class BaseProvider:
             raise TypeError(f"Expected string, list or dict, got {type(s)}")
 
         return "\n".join(result)
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, _, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        """
+        Allow this class to be used as a Pydantic model type
+        """
+        return core_schema.is_instance_schema(cls)
 
 
 def validate_backend_region(state):

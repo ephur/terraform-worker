@@ -15,6 +15,7 @@ class LogLevel(Enum):
     WARN = 3
     ERROR = 4
 
+
 log_level = LogLevel.ERROR
 
 
@@ -46,7 +47,9 @@ def log(
     return
 
 
-def redact_items_token(items: Union[Dict[str, Any], str], redact: List[str] = REDACTED_ITEMS) -> Union[Dict[str, Any], str]:
+def redact_items_token(
+    items: Union[Dict[str, Any], str], redact: List[str] = REDACTED_ITEMS
+) -> Union[Dict[str, Any], str]:
     """
     Redact items from a dictionary or string using tokenization
 
@@ -77,16 +80,16 @@ def redact_items_token(items: Union[Dict[str, Any], str], redact: List[str] = RE
             found = False
             for key in redact:
                 # check if the key is in the items
-                if items[i:i+len(key)] == key:
+                if items[i : i + len(key)] == key:
                     found = True
                     result.append(key)
                     i += len(key)
                     # Include delimiters after the key (spaces, tabs, colons, equals signs)
-                    while i < len(items) and items[i] in ' \t=:':
+                    while i < len(items) and items[i] in " \t=:":
                         result.append(items[i])
                         i += 1
                     # Check if the value is enclosed in quotes
-                    if i < len(items) and items[i] in '"\'':
+                    if i < len(items) and items[i] in "\"'":
                         # handle quoted values
                         quote = items[i]
                         result.append(quote)
@@ -95,7 +98,7 @@ def redact_items_token(items: Union[Dict[str, Any], str], redact: List[str] = RE
                         # skip chars until the closing quote
                         while i < len(items) and items[i] != quote:
                             i += 1
-                        result.append('REDACTED')
+                        result.append("REDACTED")
                         # include the closing quote if present
                         if i < len(items) and items[i] == quote:
                             result.append(quote)
@@ -103,14 +106,14 @@ def redact_items_token(items: Union[Dict[str, Any], str], redact: List[str] = RE
                     else:
                         # handle unquoted values
                         start = i
-                        while i < len(items) and items[i] not in ' \t,:;\n':
+                        while i < len(items) and items[i] not in " \t,:;\n":
                             i += 1
-                        result.append('REDACTED')
+                        result.append("REDACTED")
             if not found:
                 # the token was not in the redact list
                 result.append(items[i])
                 i += 1
-        return ''.join(result)
+        return "".join(result)
 
     elif isinstance(items, dict):
         for k, v in items.items():
@@ -125,7 +128,10 @@ def redact_items_token(items: Union[Dict[str, Any], str], redact: List[str] = RE
     else:
         raise ValueError("Items must be a dictionary or a string")
 
-def redact_items_re(items: Union[Dict[str, Any], str], redact: List[str] = REDACTED_ITEMS) -> Union[Dict[str, Any], str]:
+
+def redact_items_re(
+    items: Union[Dict[str, Any], str], redact: List[str] = REDACTED_ITEMS
+) -> Union[Dict[str, Any], str]:
     """
     Redact items from a dictionary or string using regex
 
@@ -157,10 +163,12 @@ def redact_items_re(items: Union[Dict[str, Any], str], redact: List[str] = REDAC
         #
         # The 'pattern.sub(r'\1\2\3REDACTED\5', items)' call replaces the matched value with 'REDACTED', preserving the key, delimiter, and quote style. The replacement string uses backreferences (\1, \2, \3, \5) to reconstruct the original text around 'REDACTED'.
         pattern = re.compile(
-            r'(' + '|'.join(re.escape(key) for key in redact) + r')(\s*[:=]\s*|\s+)(["\']?)(.*?)(\3)(?=\s|$)',
-            re.IGNORECASE
+            r"("
+            + "|".join(re.escape(key) for key in redact)
+            + r')(\s*[:=]\s*|\s+)(["\']?)(.*?)(\3)(?=\s|$)',
+            re.IGNORECASE,
         )
-        return pattern.sub(r'\1\2\3REDACTED\5', items)
+        return pattern.sub(r"\1\2\3REDACTED\5", items)
 
     elif isinstance(items, dict):
         for k, v in items.items():

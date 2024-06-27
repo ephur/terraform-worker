@@ -1,28 +1,20 @@
-import pathlib
+from typing import TYPE_CHECKING, Any, Dict
 
 import click
+from pydantic import ValidationError
 
 import tfworker.commands.config as c
 import tfworker.util.log as log
 from tfworker.authenticators.collection import AuthenticatorsCollection
-
-# handle migration to new command structure
-# from tfworker.commands.root import RootCommand
-# from tfworker.definitions import DefinitionsCollection
-
-# from tfworker.backends import BackendError, select_backend
-# from tfworker.exceptions import BackendError
-# from tfworker.handlers import HandlersCollection
-# from tfworker.handlers.exceptions import HandlerError, UnknownHandler
+from tfworker.definitions import DefinitionsCollection
 
 # from tfworker.plugins import PluginsCollection
-from tfworker.providers.providers_collection import ProvidersCollection
+from tfworker.providers.collection import ProvidersCollection
+from tfworker.types.app_state import AppState
+from tfworker.util.cli import handle_config_error
 
-# from tfworker.util.terraform import get_terraform_version
-
-
-class MissingDependencyException(Exception):
-    pass
+if TYPE_CHECKING:
+    from tfworker.types import CLIOptionsRoot
 
 
 class BaseCommand:
@@ -51,86 +43,86 @@ class BaseCommand:
     the __init__ method!
     """
 
-    _authenticators = None
-    _backend = None
-    _providers = None
-    _definitions = None
-    _handlers = None
+    def __init__(self, deployment: str | None = None):
+        """
+        initialize the base command with the deployment
+        """
+        app_state: AppState = click.get_current_context().obj
+        log.info(f"Handling Deployment: {deployment}")
+        app_state.deployment = deployment
+        c.resolve_model_with_cli_options(app_state)
 
-    def __init__(self, ctx: click.Context, deployment="undefined"):
-        app_state: AppState = ctx.obj
-        c.resolve_model_with_cli_options(ctx, c.get_cli_options_model_classes())
-
-        self._authenticators = AuthenticatorsCollection(app_state.root_options)
-        log.debug(
-            f"initialized authentiactors {[x.tag for x in self._authenticators.keys()]}",
+        app_state.authenticators = self._init_authenticators(app_state.root_options)
+        app_state.providers = self._init_providers(
+            app_state.loaded_config.providers, app_state.authenticators
+        )
+        app_state.definitions = self._init_definitions(
+            app_state.loaded_config.definitions
         )
 
-        self._providers = ProvidersCollection(
-            app_state.loaded_config["providers"], self._authenticators
-        )
-        log.debug(
-            f"initialized providers {[x for x in self._providers.keys()]}",
-        )
-
-        # process configuration options to resolve config file with CLI options
-
-        self._definitions = DefinitionsCollection(
-            rootc.definitions_odict,
-            deployment,
-            limit,
-            self._plan_for,
-            self._providers,
-            self._repository_path,
-            rootc,
-            self._temp_dir,
-            self._tf_version_major,
-            provider_cache=self._provider_cache,
-        )
-
-        return
-        ##### REFACTOR #####
-
-        # load the providers
-        # load the definitions
-        # load the backend
-        # load the plugins/providers
         # load the handlers
+        # configure a backend to put on the app_state
+        return
 
-        # self._authenticators = AuthenticatorsCollection(
-        #     rootc.args, deployment=deployment, **kwargs
-        # )
+    @staticmethod
+    def _init_authenticators(
+        root_options: "CLIOptionsRoot",
+    ) -> AuthenticatorsCollection:
+        """
+        Initialize the authenticators collection for the application state
 
-        # temporarily in place while migrating to new command structure
-        # called with legacy param instead of app_state
-        # if isinstance(app_state, RootCommand):
-        #     self._rootc = app_state
-        #     rootc = self._rootc
-        # else:
-        #     # called with new app_state
-        #     self._rootc = app_state.root_command
-        #     rootc = self._rootc
+        Args:
+            root_options (CLIOptionsRoot): The root options object
 
-        # for all of the items named _config on the app_state, set
-        # them as attributes on the BaseCommand instance
-        # self._args_dict = dict()
-        # click.secho(f"app_state.model_dump(): {app_state.model_dump()}", fg="green")
-        # for k, v in app_state.model_dump().items():
-        #     if k.endswith("_config") and v is not None:
-        #         self._args_dict.update(v)
-        # self._args_dict.update(self._rootc.args.__dict__)
+        Returns:
+            AuthenticatorsCollection: The initialized authenticators collection
+        """
+        authenticators = AuthenticatorsCollection(root_options)
+        log.debug(
+            f"initialized authentiactors {[x.tag for x in authenticators.keys()]}",
+        )
+        return authenticators
 
-        # self._providers = None
-        # self._definitions = None
-        # self._backend = None
-        # # self._plugins = None
-        # self._terraform_vars = dict()
-        # self._remote_vars = dict()
-        # self._temp_dir = rootc.temp_dir
-        # self._repository_path = rootc.args.repository_path
+    @staticmethod
+    def _init_providers(
+        providers_config: ProvidersCollection, authenticators: AuthenticatorsCollection
+    ) -> ProvidersCollection:
+        """
+        Initialize the providers collection based on the provided configuration, it will
+        add information for providers that require authentication configurations
 
-        # rootc.add_arg("deployment", deployment)
-        # rootc.load_config()
+        Args:
+            providers_config (ProvidersCollection): The providers configuration
+            authenticators (AuthenticatorsCollection): The authenticators collection
+
+        Returns:
+            ProvidersCollection: The initialized providers collection
+        """
+        try:
+            providers = ProvidersCollection(providers_config, authenticators)
+        except ValidationError as e:
+            handle_config_error(e)
+        log.debug(
+            f"initialized providers {[x for x in providers.keys()]}",
+        )
+        return providers
+
+    @staticmethod
+    def _init_definitions(definitions_config: Dict[str, Any]) -> DefinitionsCollection:
+        """
+        Initialize the definitions collection based on the provided configuration,
+
+        Args:
+            definitions_config (Dict[str, Any]): The definitions configuration
+        """
+        definitions = DefinitionsCollection(definitions_config)
+        log.debug(
+            f"initialized definitions {[x for x in definitions.keys()]}",
+        )
+        return definitions
+
+        ##### REFACTOR #####
+        # load the handlers
 
         # self._provider_cache = self._resolve_arg("provider_cache")
         # if self._provider_cache is not None:

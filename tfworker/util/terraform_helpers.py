@@ -2,18 +2,21 @@ import json
 import os
 import pathlib
 from tempfile import TemporaryDirectory
-from typing import Dict, List, Union
+from typing import TYPE_CHECKING, Dict, List, Union
 
 import click
 import hcl2
 from lark.exceptions import UnexpectedToken
 
-from tfworker.providers.providers_collection import ProvidersCollection
-from tfworker.types.provider import ProviderGID
 from tfworker.util.system import get_platform
 
+if TYPE_CHECKING:
+    from tfworker.providers.collection import ProvidersCollection
 
-def _not_in_cache(gid: ProviderGID, version: str, cache_dir: str) -> bool:
+from tfworker.types.provider import ProviderGID
+
+
+def _not_in_cache(gid: "ProviderGID", version: str, cache_dir: str) -> bool:
     """
     Check if the provider is not in the cache directory.
 
@@ -40,7 +43,7 @@ def _not_in_cache(gid: ProviderGID, version: str, cache_dir: str) -> bool:
     return False
 
 
-def _get_cached_hash(gid: ProviderGID, version: str, cache_dir: str) -> str:
+def _get_cached_hash(gid: "ProviderGID", version: str, cache_dir: str) -> str:
     """
     Get the hash of the cached provider.
 
@@ -65,7 +68,7 @@ def _get_cached_hash(gid: ProviderGID, version: str, cache_dir: str) -> str:
 
 
 def _write_mirror_configuration(
-    providers: ProvidersCollection, working_dir: str, cache_dir: str
+    providers: "ProvidersCollection", working_dir: str, cache_dir: str
 ) -> TemporaryDirectory:
     """
     Write the mirror configuration to a temporary directory in the working directory.
@@ -95,7 +98,7 @@ def _write_mirror_configuration(
 
 
 def _create_mirror_configuration(
-    providers: ProvidersCollection, includes: List[str] = []
+    providers: "ProvidersCollection", includes: List[str] = []
 ) -> str:
     """
     Generate a terraform configuration file with all of the providers
@@ -133,7 +136,7 @@ def _validate_cache_dir(cache_dir: str) -> None:
         raise SystemExit(1)
 
 
-def _get_provider_cache_dir(gid: ProviderGID, cache_dir: str) -> str:
+def _get_provider_cache_dir(gid: "ProviderGID", cache_dir: str) -> str:
     """
     Get the cache directory for a provider.
 

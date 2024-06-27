@@ -1,3 +1,11 @@
+class TFWorkerException(Exception):
+    pass
+
+
+class MissingDependencyException(Exception):
+    pass
+
+
 class BackendError(Exception):
     # add custom "help" parameter to the exception
     def __init__(self, message, help=None):

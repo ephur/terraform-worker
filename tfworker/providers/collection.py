@@ -1,28 +1,41 @@
-import collections
 import copy
-from typing import List
+from collections.abc import Mapping
+from typing import Dict, List
+
+from pydantic import GetCoreSchemaHandler, ValidationError
+from pydantic_core import CoreSchema, core_schema
 
 from tfworker.providers.generic import GenericProvider
 from tfworker.providers.google import GoogleProvider
 from tfworker.providers.google_beta import GoogleBetaProvider
-from tfworker.types.provider import ProviderConfig
+
+# from tfworker.types.provider import ProviderConfig, Provider
 
 NAMED_PROVIDERS = [GoogleProvider, GoogleBetaProvider]
 
 
-class ProvidersCollection(collections.abc.Mapping):
-    def __init__(self, providers_odict, authenticators):
+class ProvidersCollection(Mapping):
+    def __init__(self, providers_odict, authenticators: Dict = dict()):
+        from tfworker.types.provider import Provider, ProviderConfig
+
         provider_map = dict([(prov.tag, prov) for prov in NAMED_PROVIDERS])
         self._providers = copy.deepcopy(providers_odict)
         for k, v in self._providers.items():
-            config = ProviderConfig.model_validate(v)
+            try:
+                config = ProviderConfig.model_validate(v)
+            except ValidationError as e:
+                e.ctx = ("provider", k)
+                raise e
 
             if k in provider_map:
-                self._providers[k] = provider_map[k](config)
-                if self._providers[k].requires_auth:
-                    self._providers[k].add_authenticators(authenticators)
+                obj = provider_map[k](config)
             else:
-                self._providers[k] = GenericProvider(config, tag=k)
+                obj = GenericProvider(config, tag=k)
+
+            if obj.requires_auth:
+                obj.add_authenticators(authenticators)
+
+            self._providers[k] = Provider(name=k, obj=obj, config=config)
 
     def __len__(self):
         return len(self._providers)
@@ -37,6 +50,12 @@ class ProvidersCollection(collections.abc.Mapping):
 
     def __str__(self):
         return str([f"{x.tag}: {str(x.gid)}" for x in self._providers.values()])
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, _, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        return core_schema.no_info_after_validator_function(cls, handler(dict))
 
     def keys(self):
         return self._providers.keys()

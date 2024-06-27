@@ -15,7 +15,7 @@ from tfworker.constants import (
     TF_PROVIDER_DEFAULT_HOSTNAME,
     TF_PROVIDER_DEFAULT_NAMESPACE,
 )
-from tfworker.providers.providers_collection import ProvidersCollection
+from tfworker.providers.collection import ProvidersCollection
 from tfworker.types.provider import ProviderGID
 from tfworker.util.system import pipe_exec
 
@@ -200,7 +200,7 @@ def get_provider_gid_from_source(source: str) -> ProviderGID:
 @lru_cache
 def find_required_providers(
     search_dir: str,
-) -> Union[None, Dict[str, [Dict[str, str]]]]:
+) -> Union[None, Dict[str, List[Dict[str, str]]]]:
     """
     Find all the required providers in the search directory.
 

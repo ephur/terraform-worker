@@ -1,17 +1,17 @@
-import io
-import json
-import os
-import pathlib
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, Union
 
 import click
 
-
 import tfworker.util.log as log
-from tfworker.commands.config import load_config, template_items, resolve_model_with_cli_options, get_cli_options_model_classes
-from tfworker.types.cli_options import CLIOptionsRoot, CLIOptionsTerraform
+from tfworker.commands.config import (
+    get_cli_options_model_classes,
+    load_config,
+    resolve_model_with_cli_options,
+    template_items,
+)
+from tfworker.types.cli_options import CLIOptionsRoot
 
 
 class RootCommand:
@@ -28,23 +28,27 @@ class RootCommand:
     should be refactored into the BaseCommand object with all sub-commands should inherit from
 
     """
-    def __init__(self, ctx: click.Context):
+
+    def __init__(self) -> None:
         """
         Initliaze the RootCommand object; this is the main entry point for the CLI.
 
         Args:
             args (dict, optional): A dictionary of arguments to initialize the RootCommand with. Defaults to {}.
         """
-        options = ctx.obj.root_options
         log.trace("initializing root command object")
-        self.working_dir = self._resolve_working_dir(options.working_dir)
-        log.debug(f"working directory: {self.working_dir}")
+        app_state = click.get_current_context().obj
+        options = app_state.root_options
+        app_state.working_dir = self._resolve_working_dir(options.working_dir)
+        log.debug(f"working directory: {app_state.working_dir}")
         log.debug(f"loading config file: {options.config_file}")
-        ctx.obj.loaded_config = load_config(options.config_file, self._prepare_template_vars(options))
-        log.trace(f"loaded config: {ctx.obj.loaded_config}")
-        resolve_model_with_cli_options(ctx, get_cli_options_model_classes())
+        app_state.loaded_config = load_config(
+            options.config_file, self._prepare_template_vars(options)
+        )
+        log.safe_trace(f"loaded config: {app_state.loaded_config}")
+        # update the app_config with configuration from the command line
+        resolve_model_with_cli_options(app_state)
         log.trace("finished initializing root command object")
-
 
     @staticmethod
     def _resolve_working_dir(working_dir: str | None) -> Path:
@@ -96,7 +100,9 @@ class RootCommand:
                             log.trace(f"adding list item {subs[0]}={subs[1]}")
                             template_items[subs[0]] = subs[1]
                         else:
-                            log.trace(f"skipping invalid list item {i}; not valid k=v pair")
+                            log.trace(
+                                f"skipping invalid list item {i}; not valid k=v pair"
+                            )
                             continue
                     else:
                         log.trace(f"skipping {i} as it is not a string")

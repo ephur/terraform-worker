@@ -8,7 +8,7 @@ import tfworker.util.log as log
 from tfworker.util.system import get_platform
 
 
-def handle_option_error(e: ValidationError, ctx: click.Context) -> None:
+def handle_option_error(e: ValidationError) -> None:
     """Handle a Pydantic validation error.
 
     Rather than raising a click.BackOptionUsage, this function will capture and report
@@ -16,7 +16,6 @@ def handle_option_error(e: ValidationError, ctx: click.Context) -> None:
 
     Args:
         e: Pydantic validation error.
-        ctx: Click context.
 
     Raises:
         click.ClickBadOption: Pydantic validation error.
@@ -29,9 +28,39 @@ def handle_option_error(e: ValidationError, ctx: click.Context) -> None:
         )
 
     # use .format to work around python f-string limitation of not being able to use \n
-    #log.msg(f"{'\\n  '.join(error_message)}", log.LogLevel.ERROR)
+    # log.msg(f"{'\\n  '.join(error_message)}", log.LogLevel.ERROR)
     log.error("{}".format("\\n  ".join(error_message)))
-    ctx.abort()
+    click.get_current_context().exit(1)
+
+
+def handle_config_error(e: ValidationError) -> None:
+    """Handle a Pydantic validation error.
+
+    Args:
+        e: Pydantic validation error.
+
+    Raises:
+        click.ClickBadOption: Pydantic validation error.
+    """
+    if e.error_count() == 1:
+        error_message = ["config error:"]
+    else:
+        error_message = ["config errors:"]
+
+    if hasattr(e, "ctx"):
+        error_message.append(
+            f"validation error while loading {e.ctx[0]} named {e.ctx[1]}"
+        )
+    for error in e.errors():
+        error_message.append("  Details:")
+        error_message.append(f"    Error Type: {error['type']}")
+        error_message.append(f"    Error Loc: {error['loc']}")
+        error_message.append(f"    Error Msg: {error['msg']}")
+        error_message.append(f"    Input Value: {error['input']}")
+
+    # use .format to work around python f-string limitation of not being able to use \n
+    log.error("{}".format("\n  ".join(error_message)))
+    click.get_current_context().exit(1)
 
 
 def pydantic_to_click(pydantic_model: t.Type[BaseModel]) -> click.Command:
