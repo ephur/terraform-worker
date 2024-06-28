@@ -79,8 +79,8 @@ class RootCommand:
             Dict[str, Any]: The template variables.
         """
         template_items = {}
+        log.trace("preparing template items")
         for k, v in options.model_dump().items():
-            log.trace(f"model_dump: {k}={v} ({type(v)})")
 
             if v is None:
                 log.trace(f"skipping {k} as it is None")

@@ -14,6 +14,7 @@ from tfworker.types.app_state import AppState
 from tfworker.util.cli import handle_config_error
 
 if TYPE_CHECKING:
+    from tfworker.backends.base import BaseBackend
     from tfworker.types import CLIOptionsRoot
 
 
@@ -48,9 +49,11 @@ class BaseCommand:
         initialize the base command with the deployment
         """
         app_state: AppState = click.get_current_context().obj
-        log.info(f"Handling Deployment: {deployment}")
         app_state.deployment = deployment
         c.resolve_model_with_cli_options(app_state)
+        # if logging level is changed via config, it won't affect stuff before this, but
+        # can at least adjust it now
+        log.log_level = log.LogLevel[app_state.root_options.log_level]
 
         app_state.authenticators = self._init_authenticators(app_state.root_options)
         app_state.providers = self._init_providers(
@@ -59,6 +62,7 @@ class BaseCommand:
         app_state.definitions = self._init_definitions(
             app_state.loaded_config.definitions
         )
+        app_state.backend = self._init_backend_(app_state)
 
         # load the handlers
         # configure a backend to put on the app_state
@@ -115,81 +119,43 @@ class BaseCommand:
         Args:
             definitions_config (Dict[str, Any]): The definitions configuration
         """
-        definitions = DefinitionsCollection(definitions_config)
+        # look for any limit options on the app_state
+        definitions = DefinitionsCollection(
+            definitions_config, limiter=c.find_limiter()
+        )
         log.debug(
             f"initialized definitions {[x for x in definitions.keys()]}",
         )
         return definitions
 
-        ##### REFACTOR #####
-        # load the handlers
+    @staticmethod
+    def _init_backend_(app_state: AppState) -> "BaseBackend":
+        """
+        returns the initialized backend
+        """
+        from tfworker.backends import select_backend
 
-        # self._provider_cache = self._resolve_arg("provider_cache")
-        # if self._provider_cache is not None:
-        #     self._provider_cache = pathlib.Path(self._provider_cache).resolve()
+        try:
+            be = select_backend(
+                app_state.loaded_config.worker_options["backend"],
+                app_state.deployment,
+                app_state.authenticators,
+                app_state.definitions,
+            )
+        except BackendError as e:
+            log.error(e)
+            log.error(e.help)
+            click.get_current_context().exit(1)
+        log.debug(f"initialized backend {be.tag}")
 
-        # (self._tf_version_major, self._tf_version_minor) = self._resolve_arg(
-        #     "tf_version"
-        # ) or (None, None)
-
-        # self._terraform_bin = self._resolve_arg("terraform_bin") or which("terraform")
-        # if not self._terraform_bin:
-        #     raise MissingDependencyException(
-        #         "Cannot find terraform in arguments or on PATH"
-        #     )
-        # if self._tf_version_major is None or self._tf_version_minor is None:
-        #     (
-        #         self._tf_version_major,
-        #         self._tf_version_minor,
-        #     ) = get_terraform_version(self._terraform_bin)
-
-        # self._authenticators = AuthenticatorsCollection(
-        #     rootc.args, deployment=deployment, **kwargs
-        # )
-        # self._providers = ProvidersCollection(
-        #     rootc.providers_odict, self._authenticators
-        # )
-        # self._plan_for = "destroy" if self._resolve_arg("destroy") else "apply"
-        # self._definitions = DefinitionsCollection(
-        #     rootc.definitions_odict,
-        #     deployment,
-        #     limit,
-        #     self._plan_for,
-        #     self._providers,
-        #     self._repository_path,
-        #     rootc,
-        #     self._temp_dir,
-        #     self._tf_version_major,
-        #     provider_cache=self._provider_cache,
-        # )
-        # # plugins_odict = dict()
-        # for provider in rootc.providers_odict:
-        #     try:
-        #         raw_version = rootc.providers_odict[provider]["requirements"]["version"]
-        #     except KeyError:
-        #         click.secho(
-        #             "providers must have a version constraint specified", fg="red"
-        #         )
-        #         raise SystemExit()
-        #     version = raw_version.split(" ")[-1]
-        #     vals = {"version": version}
-        #     base_url = rootc.providers_odict[provider].get("baseURL")
-        #     if base_url:
-        #         vals["baseURL"] = base_url
-        #     source = rootc.providers_odict[provider].get("source")
-        #     if source:
-        #         vals["source"] = source
-        # try:
-        #     self._backend = select_backend(
-        #         self._resolve_arg("backend"),
-        #         deployment,
-        #         self._authenticators,
-        #         self._definitions,
-        #     )
-        # except BackendError as e:
-        #     click.secho(e, fg="red")
-        #     click.secho(e.help, fg="red")
-        #     raise SystemExit(1)
+        # if backend_plans is requested, check if backend supports it
+        backend_plans = app_state.root_options.backend_plans
+        if backend_plans:
+            log.trace(f"backend_plans requested, checking if {be.tag} supports it")
+            if not be.plan_storage:
+                log.error(f"backend {be.tag} does not support backend_plans")
+                click.get_current_context().exit(1)
+        return be
 
         # # if backend_plans is requested, check if backend supports it
         # self._backend_plans = self._resolve_arg("backend_plans")

@@ -47,36 +47,34 @@ def load_config(config_file: str, config_vars: Dict[str, str]) -> ConfigFile:
     return parsed_config
 
 
-# def resolve_model_with_cli_options(ctx: click.Context, model_classes: list[type[BaseModel]]):
-#     """
-#     Resolve the model with the CLI options.
+def find_limiter() -> List[str] | None:
+    """
+    Find if any of the CLIOptions have a limit option.
 
-#     Args:
-#         ctx (click.Context): The click context.
-#         model_classes (list[type[BaseModel]]): The model classes to resolve.
-#     """
-#     if not hasattr(ctx.obj, "loaded_config") or ctx.obj.loaded_config is None:
-#         raise ValueError("loaded_config is not set on the AppState object")
+    Returns:
+        List[str] | None: The limiter if found, otherwise None
+    """
+    model_classes = get_cli_options_model_classes()
+    available_classes = []
 
-#     # for each field check if it's any of the model classes
-#     skip_param_sources = [click.core.ParameterSource.ENVIRONMENT, click.core.ParameterSource.COMMANDLINE]
-#     log.trace(f"not overwriting param sources: {skip_param_sources}")
-#     for field in ctx.obj.model_fields_set:
-#         log.trace(f"checking field: {field}")
-#         model = getattr(ctx.obj, field)
-#         if not any(isinstance(model, model_class) for model_class in model_classes):
-#             continue
+    for model_class in model_classes:
+        log.trace(f"checking model class: {model_class.__name__} for limit")
+        if model_class.model_fields.get("limit", None) is None:
+            continue
+        available_classes.append(model_class.__name__)
 
-#         for model_class in model_classes:
-#             if isinstance(model, model_class):
-#                 log.trace(f"model {field}: matches model_class {model_class.__name__}")
-#                 for k, v in ctx.obj.loaded_config["worker_options"].items():
-#                     if k in model.model_fields:
-#                         print(f"CTX Param Source {ctx.get_parameter_source(k)}")
-#                         if ctx.get_parameter_source(k) in skip_param_sources:
-#                             continue
-#                         print(f"Setting {k} to {v} on {field}")
-#                         setattr(model, k, v)
+    app_state = click.get_current_context().obj
+    for field in app_state.model_fields_set:
+        model = getattr(app_state, field)
+        if model.__class__.__name__ in available_classes:
+            return model.limit
+
+
+def log_limiter() -> None:
+    """Log the limiter."""
+    limiter = find_limiter()
+    if limiter:
+        log.info(f"limiting to {', '.join(limiter)}")
 
 
 def get_cli_options_model_classes() -> List[Type[BaseModel]]:
@@ -125,6 +123,23 @@ def resolve_model_with_cli_options(
             app_state, model_classes, field, model, skip_param_sources
         )
 
+    # another pass is needed to place all the CLI options onto
+    # app_state.loaded_config.worker_options, this should iterate
+    # over all the CLIOptions classes and set the values on the
+    # loaded_config.worker_options if they are not already set
+    # for model in app_state.model_fields_set:
+    #     log.trace(f"checking model: {model}")
+    #     log.trace(type(model))
+
+    # for model_class in model_classes:
+    #     log.trace(f"checking model class: {model_class.__name__} for additional worker options")
+    #     for field in model_class.model_fields:
+    #         log.trace(f"checking field: {field}")
+    #         log.trace(f"worker options: {app_state.loaded_config.worker_options}")
+    #         log.trace(f"{dir(model_class)}")
+    #         if field not in app_state.loaded_config.worker_options:
+    #             app_state.loaded_config.worker_options[field] = getattr(model_class, field)
+
 
 def _update_model_if_match(
     app_state: AppState,
@@ -167,15 +182,20 @@ def _set_model_parameters(
         skip_param_sources (List[click.core.ParameterSource]): List of parameter sources to skip.
     """
     ctx = click.get_current_context()
-
-    log.trace(f"{app_state.loaded_config.worker_options}")
     for k, v in app_state.loaded_config.worker_options.items():
         if k in model.model_fields:
-            log.trace(f"CTX Param Source {ctx.get_parameter_source(k)}")
             if ctx.get_parameter_source(k) in skip_param_sources:
                 continue
             log.trace(f"Setting {k} to {v} on {field}")
             setattr(model, k, v)
+    # Also need to add all unset model options to the worker_options
+    for k in model.model_fields.keys():
+        if k not in app_state.loaded_config.worker_options:
+            value = getattr(model, k)
+            log.trace(
+                f"adding {k}={value} to worker_options via {model.__class__.__name__}"
+            )
+            app_state.loaded_config.worker_options[k] = value
 
 
 def _process_template(config_file: str, config_vars: Dict[str, str]) -> str:

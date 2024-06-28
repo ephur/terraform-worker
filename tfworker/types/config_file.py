@@ -36,6 +36,6 @@ class ConfigFile(BaseModel):
         {}, description="Global variables that are used in the configuration file."
     )
     providers: Dict[str, Any] = Field({}, description="The provider configurations.")
-    worker_options: Dict[str, str] = Field(
+    worker_options: Dict[str, str | bool] = Field(
         {}, description="The base worker options, overlaps with command line options"
     )

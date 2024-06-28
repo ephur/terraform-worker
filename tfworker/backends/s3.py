@@ -9,8 +9,11 @@ import boto3
 import botocore
 import click
 
+import tfworker.util.log as log
+from tfworker.exceptions import BackendError
+
 from ..handlers import BaseHandler, HandlerError
-from .base import BackendError, BaseBackend, validate_backend_empty
+from .base import BaseBackend, validate_backend_empty
 
 
 class S3Backend(BaseBackend):
@@ -22,6 +25,7 @@ class S3Backend(BaseBackend):
         # print the module name for debugging
         self._definitions = definitions
         self._authenticator = authenticators[self.auth_tag]
+
         if not self._authenticator.session:
             raise BackendError(
                 "AWS session not available",
@@ -125,17 +129,13 @@ class S3Backend(BaseBackend):
         """
         # get dynamodb client from backend session
         locking_table_name = f"terraform-{self._deployment}"
-
-        # Check locking table for aws backend
-        click.secho(
-            f"Checking backend locking table: {locking_table_name}", fg="yellow"
-        )
+        log.debug(f"checking for locking table: {locking_table_name}")
 
         if self._check_table_exists(locking_table_name):
-            click.secho("DynamoDB lock table found, continuing.", fg="yellow")
+            log.debug(f"DynamoDB lock table {locking_table_name} found, continuing.")
         else:
-            click.secho(
-                "DynamoDB lock table not found, creating, please wait...", fg="yellow"
+            log.info(
+                f"DynamoDB lock table {locking_table_name} not found, creating, please wait..."
             )
             self._create_table(locking_table_name)
 
@@ -174,15 +174,17 @@ class S3Backend(BaseBackend):
         creates it if it doesn't exist, along with setting the appropriate bucket
         permissions
         """
-        bucket_present = self._check_bucket_exists(self._authenticator.bucket)
+        bucket = click.get_current_context().obj.root_options.backend_bucket
+        create_bucket = (
+            click.get_current_context().obj.root_options.create_backend_bucket
+        )
+        bucket_present = self._check_bucket_exists(bucket)
 
         if bucket_present:
-            click.secho(
-                f"Backend bucket: {self._authenticator.bucket} found", fg="yellow"
-            )
+            log.debug(f"backend bucket {bucket} found")
             return
 
-        if not self._authenticator.create_backend_bucket and not bucket_present:
+        if not create_bucket:
             raise BackendError(
                 "Backend bucket not found and --no-create-backend-bucket specified."
             )
@@ -196,7 +198,7 @@ class S3Backend(BaseBackend):
         _create_bucket creates a new s3 bucket
         """
         try:
-            click.secho(f"Creating backend bucket: {name}", fg="yellow")
+            log.info(f"Creating backend bucket: {name}")
             self._s3_client.create_bucket(
                 Bucket=name,
                 CreateBucketConfiguration={
@@ -207,22 +209,21 @@ class S3Backend(BaseBackend):
         except botocore.exceptions.ClientError as err:
             err_str = str(err)
             if "InvalidLocationConstraint" in err_str:
-                click.secho(
+                log.error(
                     "InvalidLocationConstraint raised when trying to create a bucket. "
                     "Verify the AWS backend region passed to the worker matches the "
                     "backend AWS region in the profile.",
-                    fg="red",
                 )
-                raise SystemExit(1)
+                click.get_current_context().exit(1)
             elif "BucketAlreadyExists" in err_str:
                 # Ignore when testing
                 if "PYTEST_CURRENT_TEST" not in os.environ:
-                    click.secho(
-                        f"Bucket {name} already exists, this is not expected since a moment ago it did not",
-                        fg="red",
+                    log.error(
+                        f"Bucket {name} already exists, this is not expected since a moment ago it did not"
                     )
-                    raise SystemExit(1)
+                click.get_current_context().exit(1)
             elif "BucketAlreadyOwnedByYou" not in err_str:
+                # throw unknown errors
                 raise err
 
     def _create_bucket_versioning(self, name: str) -> None:
@@ -267,9 +268,11 @@ class S3Backend(BaseBackend):
         _get_bucket_files returns a set of the keys in the bucket
         """
         bucket_files = set()
+        root_options = click.get_current_context().obj.root_options
+        bucket = root_options.backend_bucket
+        prefix = root_options.backend_prefix
         s3_paginator = self._s3_client.get_paginator("list_objects_v2").paginate(
-            Bucket=self._authenticator.bucket,
-            Prefix=self._authenticator.prefix,
+            Bucket=bucket, Prefix=prefix
         )
 
         for page in s3_paginator:

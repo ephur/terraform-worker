@@ -9,6 +9,7 @@ from typing import Dict, List, Union
 
 import click
 
+import tfworker.util.log as log
 import tfworker.util.terraform_helpers as tfhelpers
 from tfworker.constants import (
     DEFAULT_REPOSITORY_PATH,
@@ -72,22 +73,21 @@ def get_terraform_version(terraform_bin: str) -> tuple[int, int]:
     Args:
         terraform_bin (str): The path to the terraform binary.
     """
-
+    # @TODO: instead of exiting, raise an error to handle it in the caller
     (return_code, stdout, stderr) = pipe_exec(f"{terraform_bin} version")
     if return_code != 0:
-        click.secho(f"unable to get terraform version\n{stderr}", fg="red")
-        raise SystemExit(1)
+        log.error(f"unable to get terraform version\n{stderr}")
+        click.get_current_context().exit(1)
     version = stdout.decode("UTF-8").split("\n")[0]
     version_search = re.search(r".*\s+v(\d+)\.(\d+)\.(\d+)", version)
     if version_search:
-        click.secho(
+        log.debug(
             f"Terraform Version Result: {version}, using major:{version_search.group(1)}, minor:{version_search.group(2)}",
-            fg="yellow",
         )
         return (int(version_search.group(1)), int(version_search.group(2)))
     else:
-        click.secho(f"unable to get terraform version\n{stderr}", fg="red")
-        raise SystemExit(1)
+        log.error(f"unable to get terraform version from output {stdout}")
+        click.get_current_context().exit(1)
 
 
 def mirror_providers(

@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import Dict
+from typing import Dict, List
 
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import CoreSchema, core_schema
@@ -10,10 +10,15 @@ from tfworker.types.definition import Definition
 
 
 class DefinitionsCollection(Mapping):
-    def __init__(self, definitions: Dict[str, Definition]) -> None:
+    def __init__(
+        self, definitions: Dict[str, Definition], limiter: List[str] | None = None
+    ) -> None:
         log.trace("initializing DefinitionsCollection")
         self._definitions = {}
         for definition, body in definitions.items():
+            if limiter and definition not in limiter:
+                log.trace(f"definition {definition} not in limiter, skipping")
+                continue
             log.trace(f"validating definition: {definition}")
             self._definitions[definition] = Definition.model_validate(body)
 

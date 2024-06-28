@@ -6,6 +6,7 @@ import click
 from pydantic import ValidationError
 
 import tfworker.util.log as log
+from tfworker.commands.config import log_limiter
 
 # from tfworker.commands.clean import CleanCommand
 from tfworker.commands.env import EnvCommand
@@ -50,23 +51,23 @@ def cli(ctx: click.Context, **kwargs):
     log.trace("finished intializing root command")
 
 
-# @cli.command()
-# @pydantic_to_click(CLIOptionsClean)
-# @click.argument("deployment", callback=validate_deployment)
-# @click.pass_context
-# def clean(ctx: click.Context, **kwargs):  # noqa: E501
-#     """clean up terraform state"""
-#     # clean just items if limit supplied, or everything if no limit
-#     try:
-#         options = CLIOptionsClean.model_validate(kwargs)
-#     except ValidationError as e:
-#         handle_option_error(e)
+@cli.command()
+@pydantic_to_click(CLIOptionsClean)
+@click.argument("deployment", callback=validate_deployment)
+@click.pass_context
+def clean(ctx: click.Context, **kwargs):  # noqa: E501
+    """clean up terraform state"""
+    # clean just items if limit supplied, or everything if no limit
+    try:
+        options = CLIOptionsClean.model_validate(kwargs)
+    except ValidationError as e:
+        handle_option_error(e)
 
-#     ctx.obj.clean_config = options
-#     log.info(f"cleaning deployment {kwargs.get('deployment')}")
-#     log.info(f"working in directory: {ctx.obj.root_config.working_dir}")
-#     log.info(f"limiting to: {options.limit}")
-#     # CleanCommand(rootc, *args, **kwargs).exec()
+    ctx.obj.clean_options = options
+    log.info(f"cleaning deployment {kwargs.get('deployment')}")
+    log.info(f"working in directory: {ctx.obj.root_options.working_dir}")
+    log_limiter()
+    # CleanCommand(rootc, *args, **kwargs).exec()
 
 
 @cli.command()
@@ -81,6 +82,8 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
         handle_option_error(e)
 
     ctx.obj.terraform_options = options
+    log.info(f"building Deployment: {deployment}")
+    log_limiter()
     tfc = TerraformCommand(deployment=deployment)
 
     # make it through init refactoring first....

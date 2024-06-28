@@ -6,7 +6,9 @@ from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import storage
 from google.cloud.exceptions import Conflict, NotFound
 
-from .base import BackendError, BaseBackend, validate_backend_empty
+from tfworker.exceptions import BackendError
+
+from .base import BaseBackend, validate_backend_empty
 
 
 class GCSBackend(BaseBackend):

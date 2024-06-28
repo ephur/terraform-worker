@@ -239,18 +239,7 @@ class CLIOptionsClean(BaseModel):
 
     @model_validator(mode="before")
     def validate_limit(cls, values):
-        if values.get("limit") is None:
-            return values
-
-        new_items = []
-        for item in values["limit"]:
-            if "," in item:
-                new_items.extend(item.split(","))
-            else:
-                new_items.append(item)
-
-        values["limit"] = new_items
-        return values
+        return validate_limit(values)
 
 
 # @click.option(
@@ -429,12 +418,27 @@ class CLIOptionsTerraform(BaseModel):
         """
         if fpath is None:
             fpath = shutil.which("terraform")
-
-        print("VALIDATION", fpath)
         if not os.path.isabs(fpath):
             fpath = os.path.abspath(fpath)
         if os.path.isfile(fpath):
-            (major, minor) = get_terraform_version(fpath)
+            get_terraform_version(fpath)
         return fpath
 
-        raise ValueError(f"Path {fpath} is not a file!")
+    @model_validator(mode="before")
+    def validate_limit(cls, values):
+        return validate_limit(values)
+
+
+def validate_limit(values):
+    if values.get("limit") is None:
+        return values
+
+    new_items = []
+    for item in values["limit"]:
+        if "," in item:
+            new_items.extend(item.split(","))
+        else:
+            new_items.append(item)
+
+    values["limit"] = new_items
+    return values

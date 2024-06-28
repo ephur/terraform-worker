@@ -4,6 +4,7 @@ from typing import Any, Dict
 from pydantic import BaseModel, ConfigDict, Field
 
 from tfworker.authenticators.collection import AuthenticatorsCollection
+from tfworker.backends.base import BaseBackend
 from tfworker.definitions import DefinitionsCollection
 from tfworker.providers.collection import ProvidersCollection
 
@@ -42,3 +43,4 @@ class AppState(BaseModel):
     definitions: DefinitionsCollection | None = Field(
         None, description="The definition configurations."
     )
+    backend: BaseBackend | None = Field(None, description="The backend configuration.")
