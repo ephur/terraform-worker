@@ -1,18 +1,21 @@
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import CoreSchema, core_schema
 
 import tfworker.util.log as log
-from tfworker.types.definition import Definition
+
+if TYPE_CHECKING:
+    from tfworker.types.definition import Definition
 
 
 class DefinitionsCollection(Mapping):
     def __init__(
-        self, definitions: Dict[str, Definition], limiter: List[str] | None = None
+        self, definitions: Dict[str, "Definition"], limiter: List[str] | None = None
     ) -> None:
+        from tfworker.types.definition import Definition
         log.trace("initializing DefinitionsCollection")
         self._definitions = {}
         for definition, body in definitions.items():

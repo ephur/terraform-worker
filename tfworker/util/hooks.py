@@ -7,11 +7,10 @@ import json
 import os
 import re
 from enum import Enum
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING
 
 import click
 
-from tfworker.backends.base import BaseBackend
 from tfworker.constants import (
     TF_STATE_CACHE_NAME,
     WORKER_LOCALS_FILENAME,
@@ -20,6 +19,9 @@ from tfworker.constants import (
 from tfworker.exceptions import HookError
 from tfworker.types.terraform import TerraformAction, TerraformStage
 from tfworker.util.system import pipe_exec
+
+if TYPE_CHECKING:
+    from tfworker.backends.base import BaseBackend
 
 
 class TFHookVarType(Enum):
@@ -41,7 +43,7 @@ def get_state_item(
     terraform_bin: str,
     state: str,
     item: str,
-    backend: BaseBackend = None,
+    backend: "BaseBackend" = None,
 ) -> str:
     """
     General handler function for getting a state item. First tries to get the item from another definition's output,

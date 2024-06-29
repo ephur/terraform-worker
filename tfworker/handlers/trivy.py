@@ -1,47 +1,51 @@
 import os
 from pathlib import Path
+from typing import Callable
 
 import click
+from pydantic import BaseModel
+
+from tfworker.exceptions import HandlerError
 
 from ..util.system import pipe_exec, strip_ansi
 from .base import BaseHandler
-from .exceptions import HandlerError
+from .registry import HandlerRegistry
 
 
+class TrivyConfig(BaseModel):
+    args: dict = {}
+    cache_dir: str = "/tmp/trivy_cache"
+    debug: bool = False
+    exit_code: str = "1"
+    format: str = None
+    handler_debug: bool = False
+    path: str = "/usr/bin/trivy"
+    quiet: bool = True
+    required: bool = False
+    severity: str = "HIGH,CRITICAL"
+    skip_dirs: list = ["**/examples"]
+    template: str = (
+        '\'ERRORS: {{ range . }}{{ range .Misconfigurations}}{{ .Severity }} - {{ .ID }} - {{ .AVDID }} - {{ .Title -}} - {{ .Description }} - {{ .Message }} - {{ .Resolution }} - {{ .PrimaryURL }} - {{ range .References }}{{ . }}{{ end }}{{ "\\n" }}{{ end }}{{ "\\n" }}{{ end }}{{ "\\n" }}\''
+    )
+    skip_planfile: bool = False
+    skip_definition: bool = False
+    stream_output: bool = True
+
+
+@HandlerRegistry.register("trivy")
 class TrivyHandler(BaseHandler):
     """
     The TrivyHandler will execute a trivy scan on a specified terraform plan file
     """
 
     actions = ["plan"]
+    config_model = TrivyConfig
+    ready = False
 
-    defaults = {
-        "args": {},
-        "cache_dir": "/tmp/trivy_cache",
-        "debug": False,
-        "exit_code": "1",
-        "format": None,
-        "handler_debug": False,
-        "path": "/usr/bin/trivy",
-        "quiet": True,
-        "required": False,
-        "severity": "HIGH,CRITICAL",
-        "skip_dirs": ["**/examples"],
-        "template": '\'ERRORS: {{ range . }}{{ range .Misconfigurations}}{{ .Severity }} - {{ .ID }} - {{ .AVDID }} - {{ .Title -}} - {{ .Description }} - {{ .Message }} - {{ .Resolution }} - {{ .PrimaryURL }} - {{ range .References }}{{ . }}{{ end }}{{ "\\n" }}{{ end }}{{ "\\n" }}{{ end }}{{ "\\n" }}\'',
-        "skip_planfile": False,
-        "skip_definition": False,
-        "stream_output": True,
-    }
-
-    def __init__(self, kwargs):
-        self._ready = False
-
+    def __init__(self, config: BaseModel) -> None:
         # configure the handler
-        for k in self.defaults:
-            if k in kwargs:
-                setattr(self, f"_{k}", kwargs[k])
-            else:
-                setattr(self, f"_{k}", self.defaults[k])
+        for k in config.model_fields:
+            setattr(self, f"_{k}", getattr(config, k))
 
         # ensure trivy is runnable
         if not self._trivy_runable(self._path):

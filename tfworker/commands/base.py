@@ -1,60 +1,42 @@
 from typing import TYPE_CHECKING, Any, Dict
 
 import click
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 import tfworker.commands.config as c
 import tfworker.util.log as log
-from tfworker.authenticators.collection import AuthenticatorsCollection
-from tfworker.definitions import DefinitionsCollection
-
-# from tfworker.plugins import PluginsCollection
-from tfworker.providers.collection import ProvidersCollection
-from tfworker.types.app_state import AppState
+from tfworker.exceptions import BackendError, HandlerError
 from tfworker.util.cli import handle_config_error
 
 if TYPE_CHECKING:
-    from tfworker.backends.base import BaseBackend
-    from tfworker.types import CLIOptionsRoot
+    from tfworker.authenticators.collection import AuthenticatorsCollection  # pragma: no cover
+    from tfworker.definitions import DefinitionsCollection  # pragma: no cover
+    from tfworker.handlers.collection import HandlersCollection  # pragma: no cover
+    from tfworker.backends.base import BaseBackend  # pragma: no cover
+    from tfworker.providers.collection import ProvidersCollection  # pragma: no cover
+    from tfworker.types import CLIOptionsRoot  # pragma: no cover
+    from tfworker.types.app_state import AppState  # pragma: no cover
 
 
 class BaseCommand:
     """
-    BaseCommand is the base class for all commands in the worker utility,
-    it primarily handles configuration file loading and validation
-
-    Loading Configuration includes:
-    - Loading the configuration file
-        - proper options objects
-        - dictionary representing the config file
-    - Loading the providers (100% config file)
-    - Loading the backend
-    - Loading the handlers
-    - Loading the plugins/providers
-    - Loading global substitution vars
-    - Loading / handling
-        - template_vars
-        - remote_vars
-        - terraform_vars
-
-    Move definitions to the terraform command, it has options/configurations required
-    for definitions.
-
-    GOAL: Do not require the TerraformCommand or other sub-commands to override
-    the __init__ method!
+    Base command class that initializes the application state
     """
 
-    def __init__(self, deployment: str | None = None):
+    def __init__(self, deployment: str | None = None) -> None:
         """
         initialize the base command with the deployment
+
+        Args:
+            deployment (str | None): The deployment name
+
         """
-        app_state: AppState = click.get_current_context().obj
+        app_state: "AppState" = click.get_current_context().obj
         app_state.deployment = deployment
         c.resolve_model_with_cli_options(app_state)
         # if logging level is changed via config, it won't affect stuff before this, but
         # can at least adjust it now
         log.log_level = log.LogLevel[app_state.root_options.log_level]
-
         app_state.authenticators = self._init_authenticators(app_state.root_options)
         app_state.providers = self._init_providers(
             app_state.loaded_config.providers, app_state.authenticators
@@ -63,15 +45,13 @@ class BaseCommand:
             app_state.loaded_config.definitions
         )
         app_state.backend = self._init_backend_(app_state)
-
-        # load the handlers
-        # configure a backend to put on the app_state
-        return
+        app_state.handlers = self._init_handlers(app_state.loaded_config.handlers)
 
     @staticmethod
     def _init_authenticators(
         root_options: "CLIOptionsRoot",
-    ) -> AuthenticatorsCollection:
+    ) -> "AuthenticatorsCollection":
+        from tfworker.authenticators.collection import AuthenticatorsCollection
         """
         Initialize the authenticators collection for the application state
 
@@ -89,8 +69,8 @@ class BaseCommand:
 
     @staticmethod
     def _init_providers(
-        providers_config: ProvidersCollection, authenticators: AuthenticatorsCollection
-    ) -> ProvidersCollection:
+        providers_config: "ProvidersCollection", authenticators: "AuthenticatorsCollection"
+    ) -> "ProvidersCollection":
         """
         Initialize the providers collection based on the provided configuration, it will
         add information for providers that require authentication configurations
@@ -102,6 +82,7 @@ class BaseCommand:
         Returns:
             ProvidersCollection: The initialized providers collection
         """
+        from tfworker.providers.collection import ProvidersCollection
         try:
             providers = ProvidersCollection(providers_config, authenticators)
         except ValidationError as e:
@@ -112,7 +93,7 @@ class BaseCommand:
         return providers
 
     @staticmethod
-    def _init_definitions(definitions_config: Dict[str, Any]) -> DefinitionsCollection:
+    def _init_definitions(definitions_config: Dict[str, Any]) -> "DefinitionsCollection":
         """
         Initialize the definitions collection based on the provided configuration,
 
@@ -120,6 +101,8 @@ class BaseCommand:
             definitions_config (Dict[str, Any]): The definitions configuration
         """
         # look for any limit options on the app_state
+        from tfworker.definitions import DefinitionsCollection
+
         definitions = DefinitionsCollection(
             definitions_config, limiter=c.find_limiter()
         )
@@ -129,102 +112,197 @@ class BaseCommand:
         return definitions
 
     @staticmethod
-    def _init_backend_(app_state: AppState) -> "BaseBackend":
+    def _init_backend_(app_state: "AppState") -> "BaseBackend":
         """
-        returns the initialized backend
+        Returns the initialized backend.
+
+        Args:
+            app_state (AppState): The current application state.
+
+        Returns:
+            BaseBackend: The initialized backend.
+
+        """
+        backend_config = app_state.loaded_config.worker_options["backend"]
+
+        be = BaseCommand._select_backend(
+            backend_config,
+            app_state.deployment,
+            app_state.authenticators,
+            app_state.definitions,
+        )
+
+        BaseCommand._check_backend_plans(app_state.root_options.backend_plans, be)
+
+        log.debug(f"initialized backend {be.tag}")
+        return be
+
+    @staticmethod
+    def _select_backend(
+        backend_config, deployment, authenticators, definitions
+    ) -> "BaseBackend":
+        """
+        Selects and initializes the backend.
+
+        Args:
+            backend_config (dict): Configuration for the backend.
+            deployment (str): The deployment name.
+            authenticators (AuthenticatorsCollection): The authenticators collection.
+            definitions (DefinitionsCollection): The definitions collection.
+
+        Returns:
+            BaseBackend: The initialized backend.
+
+        Raises:
+            BackendError: If there is an error selecting the backend.
         """
         from tfworker.backends import select_backend
 
         try:
-            be = select_backend(
-                app_state.loaded_config.worker_options["backend"],
-                app_state.deployment,
-                app_state.authenticators,
-                app_state.definitions,
+            return select_backend(
+                backend_config,
+                deployment,
+                authenticators,
+                definitions,
             )
         except BackendError as e:
             log.error(e)
             log.error(e.help)
             click.get_current_context().exit(1)
-        log.debug(f"initialized backend {be.tag}")
 
-        # if backend_plans is requested, check if backend supports it
-        backend_plans = app_state.root_options.backend_plans
+    @staticmethod
+    def _check_backend_plans(backend_plans, backend) -> None:
+        """
+        Checks if backend plans are supported by the backend.
+
+        Args:
+            backend_plans (bool): Flag indicating if backend plans are requested.
+            backend (BaseBackend): The initialized backend.
+
+        """
         if backend_plans:
-            log.trace(f"backend_plans requested, checking if {be.tag} supports it")
-            if not be.plan_storage:
-                log.error(f"backend {be.tag} does not support backend_plans")
+            log.trace(f"backend_plans requested, checking if {backend.tag} supports it")
+            if not backend.plan_storage:
+                log.error(f"backend {backend.tag} does not support backend_plans")
                 click.get_current_context().exit(1)
-        return be
 
-        # # if backend_plans is requested, check if backend supports it
-        # self._backend_plans = self._resolve_arg("backend_plans")
-        # if self._backend_plans:
-        #     if not self._backend.plan_storage:
-        #         click.secho(
-        #             f"backend {self._backend.tag} does not support backend_plans",
-        #             fg="red",
-        #         )
-        #         raise SystemExit(1)
+    @staticmethod
+    def _init_handlers(handlers_config: Dict[str, Any]) -> "HandlersCollection":
+        """
+        Initialize the handlers collection based on the provided configuration.
 
-        # # initialize handlers collection
-        # click.secho("Initializing handlers", fg="green")
-        # try:
-        #     self._handlers = HandlersCollection(rootc.handlers_odict)
-        # except (UnknownHandler, HandlerError, TypeError) as e:
-        #     click.secho(e, fg="red")
-        #     raise SystemExit(1)
+        Args:
+            handlers_config (Dict[str, Any]): Configuration for the handlers.
 
-        # # allow a backend to implement handlers as well since they already control the provider session
-        # if self._backend.handlers and self._backend_plans:
-        #     self._handlers.update(self._backend.handlers)
+        Returns:
+            HandlersCollection: The initialized handlers collection.
 
-        # # list enabled handlers
-        # click.secho("Enabled handlers:", fg="green")
-        # for h in self._handlers:
-        #     click.secho(f"  {h}", fg="green")
+        """
+        from tfworker.handlers.collection import HandlersCollection
+        parsed_handlers = BaseCommand._parse_handlers(handlers_config)
+        BaseCommand._add_universal_handlers(parsed_handlers)
 
-    # @property
-    # def authenticators(self):
-    #     return self._authenticators
+        log.trace(f"parsed handlers {parsed_handlers}")
 
-    # @property
-    # def backend(self):
-    #     return self._backend
+        handlers = HandlersCollection(parsed_handlers)
+        log.debug(f"initialized handlers {[x for x in handlers.keys()]}")
 
-    # @property
-    # def providers(self):
-    #     return self._providers
+        BaseCommand._check_handlers_ready(handlers)
+        return handlers
 
-    # @property
-    # def definitions(self):
-    #     return self._definitions
+    @staticmethod
+    def _parse_handlers(handlers_config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Parses the handlers configuration into handler instances.
 
-    # @property
-    # def plugins(self):
-    #     return self._plugins
+        Args:
+            handlers_config (Dict[str, Any]): Configuration for the handlers.
 
-    # @property
-    # def temp_dir(self):
-    #     return self._temp_dir
+        Returns:
+            Dict[str, Any]: Parsed handler instances.
 
-    # @property
-    # def repository_path(self):
-    #     return self._repository_path
+        """
+        parsed_handlers = {}
+        for k, v in handlers_config.items():
+            log.trace(f"initializing handler {k}")
+            log.trace(f"handler config: {v}")
+            config = BaseCommand._validate_handler_config(k, v)
+            parsed_handlers[k] = BaseCommand._initialize_handler(k, config)
+        return parsed_handlers
 
-    # def _execute_handlers(self, action, stage, **kwargs):
-    #     """Execute all ready handlers for supported actions"""
-    #     for h in self._handlers:
-    #         if action in h.actions and h.is_ready():
-    #             h.execute(action, stage, **kwargs)
+    @staticmethod
+    def _validate_handler_config(
+        handler_name: str, handler_config: Dict[str, Any]
+    ) -> BaseModel:
+        """
+        Validates the configuration for a handler.
 
-    # def _resolve_arg(self, name):
-    #     """Resolve argument in order of precedence:
-    #     1) CLI argument
-    #     2) Config file
-    #     """
-    #     if name in self._args_dict and self._args_dict[name] is not None:
-    #         return self._args_dict[name]
-    #     if name in self._rootc.worker_options_odict:
-    #         return self._rootc.worker_options_odict[name]
-    #     return None
+        Args:
+            handler_name (str): The name of the handler.
+            handler_config (Dict[str, Any]): The configuration for the handler.
+
+        Returns:
+            BaseModel: The validated configuration model.
+
+        Raises:
+            ValidationError: If the configuration is invalid.
+        """
+        from tfworker.handlers.registry import HandlerRegistry as hr
+        try:
+            return hr.get_handler_config_model(handler_name).model_validate(
+                handler_config
+            )
+        except ValidationError as e:
+            handle_config_error(e)
+
+    @staticmethod
+    def _initialize_handler(handler_name: str, config: BaseModel) -> Any:
+        """
+        Initializes a handler with the given configuration.
+
+        Args:
+            handler_name (str): The name of the handler.
+            config (BaseModel): The validated configuration model.
+
+        Returns:
+            Any: The initialized handler.
+
+        Raises:
+            HandlerError: If there is an error initializing the handler.
+        """
+        from tfworker.handlers.registry import HandlerRegistry as hr
+        try:
+            return hr.get_handler(handler_name)(config)
+        except HandlerError as e:
+            log.error(e)
+            click.get_current_context().exit(1)
+
+    @staticmethod
+    def _add_universal_handlers(parsed_handlers: Dict[str, Any]):
+        """
+        Adds universal handlers to the parsed handlers.
+
+        Args:
+            parsed_handlers (Dict[str, Any]): The parsed handlers.
+
+        """
+        from tfworker.handlers.registry import HandlerRegistry as hr
+        for h in hr.list_universal_handlers():
+            log.trace(f"initializing universal handler {h}")
+            if h not in parsed_handlers.keys():
+                parsed_handlers[h] = hr.get_handler(h)
+
+    @staticmethod
+    def _check_handlers_ready(handlers: "HandlersCollection"):
+        """
+        Checks if all handlers are ready.
+
+        Args:
+            handlers (HandlersCollection): The handlers collection.
+
+        """
+        for h, v in handlers.items():
+            log.trace(f"checking if handler {h} is ready")
+            if not v.is_ready:
+                log.debug(f"handler {h} is not ready, removing it")
+                handlers.pop(h)

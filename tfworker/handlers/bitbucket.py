@@ -1,11 +1,27 @@
 import os
 
 from atlassian.bitbucket import Cloud
+from pydantic import BaseModel
+
+from tfworker.exceptions import HandlerError
 
 from .base import BaseHandler
-from .exceptions import HandlerError
+from .registry import HandlerRegistry
 
 
+class BitbucketConfig(BaseModel):
+    username: str
+    password: str
+    workspace: str
+    project: str
+    repository: str
+    pull_request: dict
+    pr_text: str = (
+        "Terraform Plan Output for {deployment} / {definition} \n---\n\n```\n{text}\n```"
+    )
+
+
+@HandlerRegistry.register("bitbucket")
 class BitbucketHandler(BaseHandler):
     """
     The BitbucketHandler class is meant to interact with bitbucket cloud.
@@ -15,22 +31,10 @@ class BitbucketHandler(BaseHandler):
 
     # define supported actions
     actions = ["plan"]
-    # define required variables / since different handlers may have different requirements we must rely on kwargs
-    required_vars = [
-        "username",
-        "password",
-        "workspace",
-        "project",
-        "repository",
-        "pull_request",
-    ]
-    # define the text to be added to the pull request
-    pr_text = "Terraform Plan Output for {deployment} / {definition} \n---\n\n```\n{text}\n```"
+    config_model = BitbucketConfig
+    ready = False
 
-    def __init__(self, kwargs):
-        # set ready to false until we are able to successfully get the pull request
-        self._ready = False
-
+    def __init__(self, config: BaseModel) -> None:
         # ensure all of the required variables are set
         for var in self.required_vars:
             if var not in kwargs:

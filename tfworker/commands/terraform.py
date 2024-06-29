@@ -7,8 +7,7 @@ import tfworker.util.hooks as hooks
 import tfworker.util.log as log
 import tfworker.util.terraform as tf_util
 from tfworker.commands.base import BaseCommand
-from tfworker.exceptions import HookError, PlanChange, TerraformError
-from tfworker.handlers.exceptions import HandlerError
+from tfworker.exceptions import HandlerError, HookError, PlanChange, TerraformError
 from tfworker.types.app_state import AppState
 from tfworker.types.definition import Definition
 from tfworker.util.system import pipe_exec, strip_ansi

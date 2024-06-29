@@ -1,12 +1,6 @@
-import os
-import re
-import shutil
-import tempfile
-from abc import ABCMeta, abstractmethod, abstractstaticmethod
-from pathlib import Path
 from typing import Callable
 
-from tfworker.util.system import pipe_exec
+from .copier import Copier
 
 
 class CopyFactory:

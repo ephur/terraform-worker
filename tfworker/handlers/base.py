@@ -1,11 +1,21 @@
 from abc import ABCMeta, abstractmethod
 
+from pydantic import BaseModel
+
+
+class BaseConfig(BaseModel): ...
+
 
 class BaseHandler(metaclass=ABCMeta):
     """The base handler class should be extended by all handler classes."""
 
     actions = []
-    required_vars = []
+    config_model = BaseConfig
+    ready = False
+
+    @abstractmethod
+    def __init__(self, config: BaseModel) -> None:
+        pass
 
     def is_ready(self):  # pragma: no cover
         """is_ready is called to determine if a handler is ready to be executed"""

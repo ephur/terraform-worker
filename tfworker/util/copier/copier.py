@@ -23,8 +23,8 @@ class Copier(metaclass=ABCMeta):
             if type(self._conflicts) is not list:
                 raise ValueError("Conflicts must be a list of filenames to disallow")
 
-    @abstractmethod
     @staticmethod
+    @abstractmethod
     def type_match(source: str, **kwargs) -> bool:  # pragma: no cover
         """type_match determins if the source is supported/handled by a copier"""
         pass

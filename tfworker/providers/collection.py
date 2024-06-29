@@ -5,20 +5,20 @@ from typing import Dict, List
 from pydantic import GetCoreSchemaHandler, ValidationError
 from pydantic_core import CoreSchema, core_schema
 
-from tfworker.providers.generic import GenericProvider
-from tfworker.providers.google import GoogleProvider
-from tfworker.providers.google_beta import GoogleBetaProvider
-
-# from tfworker.types.provider import ProviderConfig, Provider
-
-NAMED_PROVIDERS = [GoogleProvider, GoogleBetaProvider]
-
 
 class ProvidersCollection(Mapping):
+    @classmethod
+    def get_named_providers(cls):
+        from tfworker.providers.google import GoogleProvider
+        from tfworker.providers.google_beta import GoogleBetaProvider
+        NAMED_PROVIDERS = [GoogleProvider, GoogleBetaProvider]
+        return NAMED_PROVIDERS
+
     def __init__(self, providers_odict, authenticators: Dict = dict()):
         from tfworker.types.provider import Provider, ProviderConfig
+        from tfworker.providers.generic import GenericProvider
 
-        provider_map = dict([(prov.tag, prov) for prov in NAMED_PROVIDERS])
+        provider_map = dict([(prov.tag, prov) for prov in ProvidersCollection.get_named_providers()])
         self._providers = copy.deepcopy(providers_odict)
         for k, v in self._providers.items():
             try:

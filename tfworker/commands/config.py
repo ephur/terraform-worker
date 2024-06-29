@@ -123,23 +123,6 @@ def resolve_model_with_cli_options(
             app_state, model_classes, field, model, skip_param_sources
         )
 
-    # another pass is needed to place all the CLI options onto
-    # app_state.loaded_config.worker_options, this should iterate
-    # over all the CLIOptions classes and set the values on the
-    # loaded_config.worker_options if they are not already set
-    # for model in app_state.model_fields_set:
-    #     log.trace(f"checking model: {model}")
-    #     log.trace(type(model))
-
-    # for model_class in model_classes:
-    #     log.trace(f"checking model class: {model_class.__name__} for additional worker options")
-    #     for field in model_class.model_fields:
-    #         log.trace(f"checking field: {field}")
-    #         log.trace(f"worker options: {app_state.loaded_config.worker_options}")
-    #         log.trace(f"{dir(model_class)}")
-    #         if field not in app_state.loaded_config.worker_options:
-    #             app_state.loaded_config.worker_options[field] = getattr(model_class, field)
-
 
 def _update_model_if_match(
     app_state: AppState,
@@ -216,30 +199,6 @@ def _process_template(config_file: str, config_vars: Dict[str, str]) -> str:
         raise SystemExit(1)
 
     return template_reader.getvalue()
-
-
-def template_items(config_vars: Dict[str, str], return_as_dict=False, get_env=True):
-    rvals = {}
-    click.secho(f"Debbuging self.__dict__ {self.__dict__.items()}", fg="red")
-    for k, v in self.__dict__.items():
-        if k == "config_var":
-            try:
-                rvals["var"] = get_config_var_dict(v)
-            except ValueError as e:
-                click.secho(
-                    f'Invalid config-var specified: "{e}" must be in format key=value',
-                    fg="red",
-                )
-                raise SystemExit(1)
-        else:
-            rvals[k] = v
-    if get_env is True:
-        rvals["env"] = dict()
-        for k, v in os.environ.items():
-            rvals["env"][k] = v
-    if return_as_dict:
-        return rvals
-    return rvals.items()
 
 
 def _get_full_config_vars(config_vars: Dict[str, str]) -> Dict[str, Any]:

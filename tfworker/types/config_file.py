@@ -39,3 +39,4 @@ class ConfigFile(BaseModel):
     worker_options: Dict[str, str | bool] = Field(
         {}, description="The base worker options, overlaps with command line options"
     )
+    handlers: Dict[str, Any] = Field({}, description="The handler configurations.")

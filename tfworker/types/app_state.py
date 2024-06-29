@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from tfworker.authenticators.collection import AuthenticatorsCollection
 from tfworker.backends.base import BaseBackend
 from tfworker.definitions import DefinitionsCollection
+from tfworker.handlers.collection import HandlersCollection
 from tfworker.providers.collection import ProvidersCollection
 
 from . import cli_options
@@ -44,3 +45,4 @@ class AppState(BaseModel):
         None, description="The definition configurations."
     )
     backend: BaseBackend | None = Field(None, description="The backend configuration.")
+    handlers: HandlersCollection | None = Field(None, description="The handlers.")

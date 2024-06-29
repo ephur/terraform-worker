@@ -5,12 +5,7 @@ from typing import Any, Dict, Union
 import click
 
 import tfworker.util.log as log
-from tfworker.commands.config import (
-    get_cli_options_model_classes,
-    load_config,
-    resolve_model_with_cli_options,
-    template_items,
-)
+from tfworker.commands.config import load_config, resolve_model_with_cli_options
 from tfworker.types.cli_options import CLIOptionsRoot
 
 
@@ -20,13 +15,6 @@ class RootCommand:
 
     It is only responsible for setting up the root/global options shared by
     all sub-commands.
-
-    REFACTORING: This class should only serve as the entry point; functionality that:
-    - loads the configuration file
-    - handles the temporary directory
-    - handles the cleanup of the temporary directory
-    should be refactored into the BaseCommand object with all sub-commands should inherit from
-
     """
 
     def __init__(self) -> None:

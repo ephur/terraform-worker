@@ -1,12 +1,16 @@
 class TFWorkerException(Exception):
+    """
+    All exceptions raised by tfworker should inherit from this class.
+    """
+
     pass
 
 
-class MissingDependencyException(Exception):
+class MissingDependencyException(TFWorkerException):
     pass
 
 
-class BackendError(Exception):
+class BackendError(TFWorkerException):
     # add custom "help" parameter to the exception
     def __init__(self, message, help=None):
         super().__init__(message)
@@ -19,7 +23,7 @@ class BackendError(Exception):
         return self._help
 
 
-class HookError(Exception):
+class HookError(TFWorkerException):
     """
     Exception is raised when a hook fails, or has execution issues.
     """
@@ -27,7 +31,7 @@ class HookError(Exception):
     pass
 
 
-class PlanChange(Exception):
+class PlanChange(TFWorkerException):
     """
     Exception is raised when a terraform plan has changes.
     """
@@ -43,12 +47,12 @@ class PlanChange(Exception):
 #     pass
 
 
-class UnknownProvider(Exception):
+class UnknownProvider(TFWorkerException):
     def __init__(self, provider):
         super().__init__(f"{provider} is not a known value.")
 
 
-class ReservedFileError(Exception):
+class ReservedFileError(TFWorkerException):
     """
     Exception is raised when a reserved file is found in the repository;
 
@@ -59,9 +63,34 @@ class ReservedFileError(Exception):
     pass
 
 
-class TerraformError(Exception):
+class TerraformError(TFWorkerException):
     """
     Exception is raised when a terraform command fails.
     """
 
     pass
+
+
+class UnknownHandler(TFWorkerException):
+    """
+    This is an excpetion that indicates configuration was attempted for a handler that is not supported.
+    """
+
+    def __init__(self, provider: str) -> None:
+        self.provider = provider
+
+    def __str__(self) -> str:
+        return f"Unknown handler: {self.provider}"
+
+
+class HandlerError(TFWorkerException):
+    """
+    This is an exception that indicates an error occurred while attempting to execute a handler.
+    """
+
+    def __init__(self, message: str, terminate: bool = True) -> None:
+        self.message = message
+        self.terminate = terminate
+
+    def __str__(self) -> str:
+        return f"Handler error: {self.message}"

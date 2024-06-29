@@ -107,6 +107,7 @@ def pydantic_to_click(pydantic_model: t.Type[BaseModel]) -> click.Command:
                 multiple = True
                 if default is PydanticUndefined:
                     default = []
+
             else:
                 print(fname, fdata)
                 raise ValueError(f"Unsupported type {model_types[fname]}")

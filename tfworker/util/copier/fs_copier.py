@@ -2,8 +2,6 @@ import os
 import re
 import shutil
 
-from tfworker.util.system import pipe_exec
-
 from .copier import Copier
 from .factory import CopyFactory
 

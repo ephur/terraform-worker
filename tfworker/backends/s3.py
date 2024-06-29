@@ -2,18 +2,24 @@ import json
 import os
 from contextlib import closing
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 from zipfile import ZipFile
 
 import boto3
 import botocore
 import click
+from pydantic import BaseModel
 
 import tfworker.util.log as log
-from tfworker.exceptions import BackendError
+from tfworker.exceptions import BackendError, HandlerError
+from tfworker.handlers.base import BaseHandler
+from tfworker.handlers.registry import HandlerRegistry as hr
 
-from ..handlers import BaseHandler, HandlerError
 from .base import BaseBackend, validate_backend_empty
+
+if TYPE_CHECKING:
+    from tfworker.types.app_state import AppState
 
 
 class S3Backend(BaseBackend):
@@ -375,6 +381,7 @@ class S3Backend(BaseBackend):
             pass
 
 
+@hr.register("s3", always=True)
 class S3Handler(BaseHandler):
     """The S3Handler class is a handler for the s3 backend"""
 
@@ -382,7 +389,9 @@ class S3Handler(BaseHandler):
     required_vars = []
     _is_ready = False
 
-    def __init__(self, authenticator):
+    def __init__(self, _: BaseModel):
+        app_state = click.get_current_context().obj
+        self._authenticator = app_state.authenticators["aws"]
         try:
             self.execution_functions = {
                 "plan": {
@@ -394,7 +403,6 @@ class S3Handler(BaseHandler):
                 },
             }
 
-            self._authenticator = authenticator
             self._s3_client = self._authenticator.backend_session.client("s3")
 
         except Exception as e:
