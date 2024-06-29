@@ -19,6 +19,7 @@ from tfworker.constants import (
 from tfworker.providers.collection import ProvidersCollection
 from tfworker.types.provider import ProviderGID
 from tfworker.util.system import pipe_exec
+from tfworker.exceptions import TFWorkerException
 
 
 def prep_modules(
@@ -66,7 +67,7 @@ def prep_modules(
 
 
 @lru_cache
-def get_terraform_version(terraform_bin: str) -> tuple[int, int]:
+def get_terraform_version(terraform_bin: str, validation=False) -> tuple[int, int]:
     """
     Get the terraform version and return the major and minor version.
 
@@ -74,10 +75,18 @@ def get_terraform_version(terraform_bin: str) -> tuple[int, int]:
         terraform_bin (str): The path to the terraform binary.
     """
     # @TODO: instead of exiting, raise an error to handle it in the caller
+    def click_exit():
+        log.error(f"unable to get terraform version from {terraform_bin} version")
+        click.get_current_context().exit(1)
+
+    def validation_exit():
+        raise ValueError(f"unable to get terraform version from {terraform_bin} version")
+
     (return_code, stdout, stderr) = pipe_exec(f"{terraform_bin} version")
     if return_code != 0:
-        log.error(f"unable to get terraform version\n{stderr}")
-        click.get_current_context().exit(1)
+        if validation:
+            validation_exit()
+        click_exit()
     version = stdout.decode("UTF-8").split("\n")[0]
     version_search = re.search(r".*\s+v(\d+)\.(\d+)\.(\d+)", version)
     if version_search:
@@ -86,9 +95,9 @@ def get_terraform_version(terraform_bin: str) -> tuple[int, int]:
         )
         return (int(version_search.group(1)), int(version_search.group(2)))
     else:
-        log.error(f"unable to get terraform version from output {stdout}")
-        click.get_current_context().exit(1)
-
+        if validation:
+            validation_exit()
+        click_exit()
 
 def mirror_providers(
     providers: ProvidersCollection, terraform_bin: str, working_dir: str, cache_dir: str
@@ -102,22 +111,20 @@ def mirror_providers(
         working_dir (str): The working directory.
         cache_dir (str): The cache directory.
     """
-    click.secho(f"Mirroring providers to {cache_dir}", fg="yellow")
-    tfhelpers._validate_cache_dir(cache_dir)
+    log.debug(f"Mirroring providers to {cache_dir}")
     try:
         with tfhelpers._write_mirror_configuration(
             providers, working_dir, cache_dir
         ) as temp_dir:
-            (return_code, stdout, stderr) = pipe_exec(
+            (return_code, _, stderr) = pipe_exec(
                 f"{terraform_bin} providers mirror {cache_dir}",
                 cwd=temp_dir,
                 stream_output=True,
             )
             if return_code != 0:
-                click.secho(f"Unable to mirror providers\n{stderr.decode()}", fg="red")
-                raise SystemExit(1)
+                raise  TFWorkerException(f"Unable to mirror providers: {stderr}")
     except IndexError:
-        click.secho("All providers in cache", fg="yellow")
+        log.debug("All providers in cache")
 
 
 def generate_terraform_lockfile(

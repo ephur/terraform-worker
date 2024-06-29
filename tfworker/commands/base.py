@@ -103,12 +103,16 @@ class BaseCommand:
         # look for any limit options on the app_state
         from tfworker.definitions import DefinitionsCollection
 
-        definitions = DefinitionsCollection(
-            definitions_config, limiter=c.find_limiter()
-        )
-        log.debug(
-            f"initialized definitions {[x for x in definitions.keys()]}",
-        )
+        try:
+            definitions = DefinitionsCollection(
+                definitions_config, limiter=c.find_limiter()
+            )
+            log.debug(
+                f"initialized definitions {[x for x in definitions.keys()]}",
+            )
+        except ValueError as e:
+            log.error(e)
+            click.get_current_context().exit(1)
         return definitions
 
     @staticmethod

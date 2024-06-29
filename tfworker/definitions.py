@@ -2,10 +2,11 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Dict, List, TYPE_CHECKING
 
-from pydantic import GetCoreSchemaHandler
+from pydantic import GetCoreSchemaHandler, ValidationError
 from pydantic_core import CoreSchema, core_schema
 
 import tfworker.util.log as log
+from tfworker.util.cli import handle_config_error
 
 if TYPE_CHECKING:
     from tfworker.types.definition import Definition
@@ -19,11 +20,24 @@ class DefinitionsCollection(Mapping):
         log.trace("initializing DefinitionsCollection")
         self._definitions = {}
         for definition, body in definitions.items():
-            if limiter and definition not in limiter:
+            # disallow commas in definition names
+            if "," in definition:
+                raise ValueError(f"definition {definition} contains a comma, and commas are not allowed, aborting")
+            # validation the definition regardless of inclusion
+            try:
+                log.trace(f"validating definition: {definition}")
+                config = Definition.model_validate(body)
+            except ValidationError as e:
+                handle_config_error(e)
+
+            if config.always_apply or config.always_include:
+                log.trace(f"definition {definition} is set to always_[apply|include]")
+            elif definition not in limiter:
                 log.trace(f"definition {definition} not in limiter, skipping")
                 continue
-            log.trace(f"validating definition: {definition}")
-            self._definitions[definition] = Definition.model_validate(body)
+
+            log.trace(f"adding definition {definition} to definitions")
+            self._definitions[definition] = config
 
     def __len__(self):
         return len(self._definitions)

@@ -170,7 +170,10 @@ def _set_model_parameters(
             if ctx.get_parameter_source(k) in skip_param_sources:
                 continue
             log.trace(f"Setting {k} to {v} on {field}")
-            setattr(model, k, v)
+            try:
+                setattr(model, k, v)
+            except ValidationError as e:
+                handle_config_error(e)
     # Also need to add all unset model options to the worker_options
     for k in model.model_fields.keys():
         if k not in app_state.loaded_config.worker_options:

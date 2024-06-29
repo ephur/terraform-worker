@@ -16,6 +16,8 @@ class Definition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: str
+    always_apply: bool = False
+    always_include: bool = False
     remote_path_options: Optional[DefinitionRemoteOptions] = None
     ignore_global_terraform_vars: Optional[List[str]] = Field(
         [], description="List of global vars to ignore."

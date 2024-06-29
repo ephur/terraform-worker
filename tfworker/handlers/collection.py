@@ -1,39 +1,38 @@
-# Use the registry instead of the collection to register handlers
-
 from collections.abc import Mapping
-from typing import Dict, KeysView
+from typing import Dict, TYPE_CHECKING, Union
 
 import tfworker.util.log as log
-from tfworker.exceptions import UnknownHandler
+from tfworker.exceptions import UnknownHandler, HandlerError
 
-# Make all of the handlers available from the handlers module
-from .base import BaseHandler  # noqa: F401
-from .bitbucket import BitbucketHandler  # noqa: F401
-from .trivy import TrivyHandler  # noqa: F401
+# @TODO: Find a better way to do this; the modules need
+# imported in order to register themselves, but the whole
+# point of decorating them is to try and reduce the number
+# of touch points when adding a new handler
+#
+# they can't be imported in the registry itself due to
+# circular import issues
+from .trivy import TrivyHandler # noqa: F401
+from .bitbucket import BitbucketHandler # noqa: F401
+
+
+if TYPE_CHECKING:
+    from .base import BaseHandler  # noqa: F401
+    from tfworker.types import TerraformAction, TerraformStage
 
 
 class HandlersCollection(Mapping):
     """
-    The HandlersCollection class is a collection of handlers. It is meant to be used as a singleton.
+    The HandlersCollection class is a collection of handlers that are active in a various execution
     """
 
-    def __init__(self, handlers: Dict[str, BaseHandler | None]):
+    def __init__(self, handlers: Dict[str, Union["BaseHandler", None]]):
         """
         Initialize the HandlersCollection object, only add handlers which have a provider key in the handlers_config dict.
         """
-        self._handlers = dict()
 
-        # for k in handlers_config:
-        #     if k in self._handlers.keys():
-        #         raise TypeError(f"Duplicate handler: {k}")
-        #     if k == "bitbucket":
-        #         self._handlers["bitbucket"] = BitbucketHandler(handlers_config[k])
-        #     elif k == "trivy":
-        #         self._handlers["trivy"] = TrivyHandler(handlers_config[k])
-        #     else:
-        #         raise UnknownHandler(provider=k)
+        self._handlers = dict()
         for k, v in handlers.items():
-            log.debug(f"Adding handler {k} to handlers collection")
+            log.trace(f"Adding handler {k} to handlers collection")
             log.trace(f"Handler cls: {v}")
             self._handlers[k] = v
 
@@ -65,3 +64,16 @@ class HandlersCollection(Mapping):
             return self[value]
         except Exception:
             raise UnknownHandler(provider=value)
+
+    def exec_handlers(self, action: "TerraformAction", stage: "TerraformStage", **kwargs):
+        """
+        exec_handlers is used to execute a specific action on all handlers
+        """
+        from tfworker.types import TerraformAction, TerraformStage
+        if action not in TerraformAction:
+            raise HandlerError(f"Invalid action {action}")
+        if stage not in TerraformStage:
+            raise HandlerError(f"Invalid stage {stage}")
+        for handler in self._handlers.values():
+            if handler is not None:
+                handler.exec_action(action, stage, **kwargs)

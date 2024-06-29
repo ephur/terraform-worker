@@ -3,7 +3,11 @@ import shutil
 from pathlib import Path
 from typing import List, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+import click
+
+from pydantic import BaseModel, Field, field_validator, model_validator, ValidationError, ConfigDict
+from pydantic_core import InitErrorDetails
+
 
 import tfworker.util.log as log
 from tfworker import constants as const
@@ -14,6 +18,7 @@ class CLIOptionsRoot(BaseModel):
     """
     CLIOptionsRoot is a Pydantic model that represents the root options for the CLI.
     """
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     aws_access_key_id: Optional[str] = Field(
         None,
@@ -207,30 +212,12 @@ class CLIOptionsRoot(BaseModel):
     @field_validator("working_dir")
     @classmethod
     def validate_working_dir(cls, fpath: Union[str, None]) -> Union[str, None]:
-        """Validate the working directory path.
-
-        Args:
-            fpath: Path to the working directory.
-
-        Returns:
-            Path to the working directory.
-
-        Raises:
-            ValueError: If the path does not exist, is not a directory, or is not empty.
-        """
-        if fpath is None:
-            return
-        with Path(fpath) as wpath:
-            if not wpath.exists():
-                raise ValueError(f"Working path {fpath} does not exist!")
-            if not wpath.is_dir():
-                raise ValueError(f"Working path {fpath} is not a directory!")
-            if any(wpath.iterdir()):
-                raise ValueError(f"Working path {fpath} must be empty!")
-        return fpath
+        return validate_existing_dir(fpath, empty=True)
 
 
 class CLIOptionsClean(BaseModel):
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
     limit: Optional[List[str]] = Field(
         [],
         description="limit operations to a single definition, multiple values allowed, or separate with commas",
@@ -335,6 +322,7 @@ class CLIOptionsTerraform(BaseModel):
     """
     CLIOptionsTerraform is a Pydantic model that represents the options for the terraform command.
     """
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     apply: bool = Field(
         False,
@@ -417,23 +405,78 @@ class CLIOptionsTerraform(BaseModel):
             ValueError: If the path does not exist or is not a file.
         """
         if fpath is None:
+            config = click.get_current_context().obj.loaded_config
+            if config is not None:
+                fpath = config.worker_options.get("terraform_bin")
+                log.trace(f"Using terraform binary from config: {fpath}")
+        else:
+            log.trace(f"Using terraform binary from CLI: {fpath}")
+        if fpath is None:
             fpath = shutil.which("terraform")
+            log.trace(f"Using terraform binary from PATH: {fpath}")
+        if fpath is None:
+            raise ValueError("Terraform binary not found in PATH, specify in config or with --terraform-bin")
         if not os.path.isabs(fpath):
             fpath = os.path.abspath(fpath)
-        if os.path.isfile(fpath):
-            get_terraform_version(fpath)
+        if not os.path.isfile(fpath):
+            raise ValueError(f"Terraform binary {fpath} does not exist!")
+        if not os.access(fpath, os.X_OK):
+            raise ValueError(f"Terraform binary {fpath} is not executable!")
+        get_terraform_version(fpath, validation=True)
+        log.trace(f"Terraform binary path validated: {fpath}")
         return fpath
+
+    @field_validator("provider_cache")
+    @classmethod
+    def validate_provider_cache(cls, fpath: Union[str, None]) -> Union[str, None]:
+        return validate_existing_dir(fpath)
+
+    @field_validator("plan_file_path")
+    @classmethod
+    def validate_plan_file_path(cls, fpath: Union[str, None]) -> Union[str, None]:
+        return validate_existing_dir(fpath)
 
     @model_validator(mode="before")
     def validate_limit(cls, values):
         return validate_limit(values)
 
+def validate_existing_dir(fpath: Union[str, None], empty=False) -> Union[str, None]:
+    """
+    validate_existing_dir is called by multiple validators, it ensures
+    a writable directory exists at the provided path, and optionally that
+    it is empty
+
+    Args:
+        fpath (str): The path to the directory
+        empty (bool): If the directory must be empty
+
+    Returns:
+        str: The absolute path to the directory
+
+    Raises:
+        ValueError: If the directory does not exist, is not a directory, is not writeable, or is not empty
+    """
+    if fpath is None:
+        return
+    if not os.path.isabs(fpath):
+        fpath = os.path.abspath(fpath)
+    if not os.path.isdir(fpath):
+        raise ValueError(f"path {fpath} does not exist!")
+    if not os.access(fpath, os.W_OK):
+        raise ValueError(f"Ppath {fpath} is not writeable!")
+    if empty and any(os.listdir(fpath)):
+        raise ValueError(f"path {fpath} must be empty!")
+    return fpath
 
 def validate_limit(values):
+    """
+    validate_limit is called by multiple CLIOptions models to validate the limit field
+    """
     if values.get("limit") is None:
         return values
 
     new_items = []
+    # accept comma separated values and convert to list, same as passing --limit item_one --limit item_two
     for item in values["limit"]:
         if "," in item:
             new_items.extend(item.split(","))
@@ -441,4 +484,13 @@ def validate_limit(values):
             new_items.append(item)
 
     values["limit"] = new_items
+
+    errors = []
+    config = click.get_current_context().obj.loaded_config
+    if config is not None:
+        for item in values["limit"]:
+            if item not in config.definitions.keys():
+                 errors.append(InitErrorDetails(loc=("--limit", "--limit"), input=item, ctx={"error": f"definition {item} not found in config"}, type="value_error"))
+    if errors:
+        raise ValidationError.from_exception_data("invalid_limit", errors)
     return values

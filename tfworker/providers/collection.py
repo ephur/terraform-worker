@@ -1,10 +1,16 @@
 import copy
 from collections.abc import Mapping
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
 from pydantic import GetCoreSchemaHandler, ValidationError
 from pydantic_core import CoreSchema, core_schema
 
+
+from tfworker.exceptions import TFWorkerException
+import tfworker.util.log as log
+
+if TYPE_CHECKING:
+    from tfworker.types.provider import Provider
 
 class ProvidersCollection(Mapping):
     @classmethod
@@ -35,18 +41,18 @@ class ProvidersCollection(Mapping):
             if obj.requires_auth:
                 obj.add_authenticators(authenticators)
 
-            self._providers[k] = Provider(name=k, obj=obj, config=config)
+            log.trace(f"Adding provider {k} to providers collection")
+            self._providers[k] = Provider.model_validate({"name":k, "obj":obj, "config": config})
+            log.trace(f"Provider Attributes: Name:{self._providers[k].name}, GID:{self._providers[k].gid}, Class:{type(self._providers[k].obj)}, Config:{self._providers[k].config}")
 
     def __len__(self):
         return len(self._providers)
 
-    def __getitem__(self, value):
-        if type(value) is int:
-            return self._providers[list(self._providers.keys())[value]]
-        return self._providers[value]
+    def __getitem__(self, key: str) -> "Provider":
+        return self._providers[key]
 
     def __iter__(self):
-        return iter(self._providers.values())
+        return iter(self._providers)
 
     def __str__(self):
         return str([f"{x.tag}: {str(x.gid)}" for x in self._providers.values()])
@@ -56,6 +62,9 @@ class ProvidersCollection(Mapping):
         cls, _, handler: GetCoreSchemaHandler
     ) -> CoreSchema:
         return core_schema.no_info_after_validator_function(cls, handler(dict))
+
+    def items(self):
+        return self._providers.items()
 
     def keys(self):
         return self._providers.keys()
@@ -98,7 +107,7 @@ class ProvidersCollection(Mapping):
 
         return_str = "  required_providers {\n"
         return_str += "\n".join(
-            [prov.required() for k, prov in self._providers.items() if k in includes]
+            [prov.obj.required() for k, prov in self._providers.items() if k in includes]
         )
         return_str += "\n  }"
         return return_str

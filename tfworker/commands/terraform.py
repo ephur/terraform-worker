@@ -7,7 +7,7 @@ import tfworker.util.hooks as hooks
 import tfworker.util.log as log
 import tfworker.util.terraform as tf_util
 from tfworker.commands.base import BaseCommand
-from tfworker.exceptions import HandlerError, HookError, PlanChange, TerraformError
+from tfworker.exceptions import HandlerError, HookError, PlanChange, TerraformError, TFWorkerException
 from tfworker.types.app_state import AppState
 from tfworker.types.definition import Definition
 from tfworker.util.system import pipe_exec, strip_ansi
@@ -60,7 +60,6 @@ class TerraformCommand(BaseCommand):
     # self._use_colors = True if self._resolve_arg("color") else False
     # self._terraform_modules_dir = self._resolve_arg("terraform_modules_dir")
     # self._terraform_output = dict()
-
     ##############
     # Properties #
     ##############
@@ -76,6 +75,28 @@ class TerraformCommand(BaseCommand):
     ##################
     # Public methods #
     ##################
+    def prep_providers(self) -> None:
+        """
+        Prepare / Mirror the providers
+        """
+        ctx: click.Context = click.get_current_context()
+        app_state: AppState = ctx.obj
+        if app_state.terraform_options.provider_cache is None:
+            log.trace("no provider cache specified, skipping provider mirroring")
+            return
+
+        log.trace(f"using provider cache path: {app_state.terraform_options.provider_cache}")
+        try:
+            tf_util.mirror_providers(
+                app_state.providers,
+                app_state.terraform_options.terraform_bin,
+                app_state.root_options.working_dir,
+                app_state.terraform_options.provider_cache,
+            )
+        except TFWorkerException as e:
+            log.error(f"error mirroring providers: {e}")
+            ctx.exit(1)
+
     def exec(self) -> None:
         """exec handles running the terraform chain, it the primary method called by the CLI
 
@@ -89,14 +110,6 @@ class TerraformCommand(BaseCommand):
         except ValueError as e:
             click.secho(f"Error with supplied limit: {e}", fg="red")
             raise SystemExit(1)
-
-        if self._provider_cache is not None:
-            tf_util.mirror_providers(
-                self._providers,
-                self._terraform_bin,
-                self._temp_dir,
-                self._provider_cache,
-            )
 
         # prepare the modules, they are required if the modules dir is specified, otherwise they are optional
         tf_util.prep_modules(

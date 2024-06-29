@@ -86,6 +86,9 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
     log_limiter()
     tfc = TerraformCommand(deployment=deployment)
 
+    # Prepare the provider cache
+    tfc.prep_providers()
+
     # make it through init refactoring first....
     # tfc.exec()
 

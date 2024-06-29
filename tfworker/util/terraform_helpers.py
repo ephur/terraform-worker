@@ -9,6 +9,7 @@ import hcl2
 from lark.exceptions import UnexpectedToken
 
 from tfworker.util.system import get_platform
+import tfworker.util.log as log
 
 if TYPE_CHECKING:
     from tfworker.providers.collection import ProvidersCollection
@@ -83,7 +84,9 @@ def _write_mirror_configuration(
     Raises:
         IndexError: If there are no providers to mirror.
     """
-    includes = [x.tag for x in providers if _not_in_cache(x.gid, x.version, cache_dir)]
+    includes = [x.name for x in providers.values() if _not_in_cache(x.gid, x.config.requirements.version, cache_dir)]
+    log.trace(f"Providers to mirror: {includes}")
+
     if len(includes) == 0:
         raise IndexError("No providers to mirror")
 
@@ -109,31 +112,6 @@ def _create_mirror_configuration(
     tf_string.append(providers.required_hcl(includes=includes))
     tf_string.append("}")
     return "\n".join(tf_string)
-
-
-def _validate_cache_dir(cache_dir: str) -> None:
-    """
-    Validate the cache directory, it should exist and be writable.
-
-    Args:
-        cache_dir (str): The cache directory.
-    """
-    cache_dir = pathlib.Path(cache_dir)
-    if not cache_dir.exists():
-        click.secho(f"Cache directory {cache_dir} does not exist", fg="red")
-        raise SystemExit(1)
-    if not cache_dir.is_dir():
-        click.secho(f"Cache directory {cache_dir} is not a directory", fg="red")
-        raise SystemExit(1)
-    if not os.access(cache_dir, os.W_OK):
-        click.secho(f"Cache directory {cache_dir} is not writable", fg="red")
-        raise SystemExit(1)
-    if not os.access(cache_dir, os.R_OK):
-        click.secho(f"Cache directory {cache_dir} is not readable", fg="red")
-        raise SystemExit(1)
-    if not os.access(cache_dir, os.X_OK):
-        click.secho(f"Cache directory {cache_dir} is not executable", fg="red")
-        raise SystemExit(1)
 
 
 def _get_provider_cache_dir(gid: "ProviderGID", cache_dir: str) -> str:
@@ -178,7 +156,7 @@ def _find_required_providers(search_dir: str) -> Dict[str, [Dict[str, str]]]:
                     try:
                         content = hcl2.load(f)
                     except UnexpectedToken as e:
-                        click.secho(f"skipping {root}/{file}: {e}", fg="blue")
+                        log.debug(f"skipping {root}/{file}: {e}")
                         continue
                     new_providers = _parse_required_providers(content)
                     if new_providers is not None:
