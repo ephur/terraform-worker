@@ -124,7 +124,7 @@ class CLIOptionsRoot(BaseModel):
     repository_path: str = Field(
         const.DEFAULT_REPOSITORY_PATH,
         json_schema_extra={"env": "WORKER_REPOSITORY_PATH"},
-        description="The path to the terraform module repository",
+        description="The root repository/working path, any relative paths will be resolved from here",
     )
     working_dir: Optional[str] = Field(
         None,
@@ -213,6 +213,11 @@ class CLIOptionsRoot(BaseModel):
             return level.upper()
         except KeyError:
             raise ValueError("Invalid log level")
+
+    @field_validator("repository_path")
+    @classmethod
+    def validate_repository_path(cls, fpath: str) -> str:
+        return validate_existing_dir(fpath)
 
     @field_validator("working_dir")
     @classmethod

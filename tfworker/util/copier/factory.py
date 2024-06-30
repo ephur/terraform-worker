@@ -2,7 +2,6 @@ from typing import Callable
 
 from .copier import Copier
 
-
 class CopyFactory:
     """The factory class for creating copiers"""
 

@@ -107,8 +107,7 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
     tfc.prep_providers()
     # @TODO: Determine how much of this should be executed here, versus
     # orchestrated in the TerraformCommand classes .exec method
-    # tfc.prep_modules()
-    # tfc.terraform_init()
+    tfc.terraform_init()
     # tfc.terraform_plan()
     # tfc.terraform_apply_or_destroy()
 

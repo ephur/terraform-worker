@@ -5,6 +5,8 @@ import shutil
 from .copier import Copier
 from .factory import CopyFactory
 
+import tfworker.util.log as log
+
 
 @CopyFactory.register("fs")
 class FileSystemCopier(Copier):
@@ -41,6 +43,7 @@ class FileSystemCopier(Copier):
     @staticmethod
     def type_match(source: str, **kwargs) -> bool:
         # check if the source was provided as an absolute path
+        log.trace(f"type_matching fs copier for {source}")
         if os.path.isdir(source) or os.path.isfile(source):
             return True
 

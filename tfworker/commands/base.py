@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 import click
 from pydantic import BaseModel, ValidationError
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
         AuthenticatorsCollection,
     )
     from tfworker.backends.base import BaseBackend  # pragma: no cover
-    from tfworker.definitions import DefinitionsCollection  # pragma: no cover
+    from tfworker.definitions.collection import DefinitionsCollection  # pragma: no cover
     from tfworker.handlers.collection import HandlersCollection  # pragma: no cover
     from tfworker.providers.collection import ProvidersCollection  # pragma: no cover
 
@@ -109,7 +109,7 @@ class BaseCommand:
             definitions_config (Dict[str, Any]): The definitions configuration
         """
         # look for any limit options on the app_state
-        from tfworker.definitions import DefinitionsCollection
+        from tfworker.definitions.collection import DefinitionsCollection
 
         try:
             definitions = DefinitionsCollection(
@@ -322,3 +322,15 @@ class BaseCommand:
             if not v.is_ready:
                 log.debug(f"handler {h} is not ready, removing it")
                 handlers.pop(h)
+
+    @staticmethod
+    def _get_state() -> Tuple[click.Context, "AppState"]:
+        """
+        A small helper method to make it easier to get the click context and the application state.
+
+        Returns:
+            Tuple[click.Context, AppState]: The click context and the application state.
+        """
+        ctx: click.Context = click.get_current_context()
+        app_state: "AppState" = ctx.obj
+        return ctx, app_state

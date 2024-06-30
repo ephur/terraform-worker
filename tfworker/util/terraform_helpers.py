@@ -4,7 +4,6 @@ import pathlib
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Dict, List, Union
 
-import click
 import hcl2
 from lark.exceptions import UnexpectedToken
 
@@ -13,8 +12,7 @@ from tfworker.util.system import get_platform
 
 if TYPE_CHECKING:
     from tfworker.providers.collection import ProvidersCollection
-
-from tfworker.types.provider import ProviderGID
+    from tfworker.types.provider import ProviderGID
 
 
 def _not_in_cache(gid: "ProviderGID", version: str, cache_dir: str) -> bool:
@@ -94,6 +92,7 @@ def _write_mirror_configuration(
     if len(includes) == 0:
         raise IndexError("No providers to mirror")
 
+    log.info(f"mirroring providers: {', '.join(includes)}")
     mirror_configuration = _create_mirror_configuration(
         providers=providers, includes=includes
     )

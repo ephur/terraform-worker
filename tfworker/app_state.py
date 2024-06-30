@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from tfworker.authenticators.collection import AuthenticatorsCollection
 from tfworker.backends.base import BaseBackend
 from tfworker.commands import cli_options
-from tfworker.definitions import DefinitionsCollection
+from tfworker.definitions.collection import DefinitionsCollection
 from tfworker.handlers.collection import HandlersCollection
 from tfworker.providers.collection import ProvidersCollection
 from tfworker.types.config_file import ConfigFile

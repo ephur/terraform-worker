@@ -1,12 +1,13 @@
 import os
 import pathlib
+from typing import TYPE_CHECKING
+
 
 import click
 
 import tfworker.util.hooks as hooks
 import tfworker.util.log as log
 import tfworker.util.terraform as tf_util
-from tfworker.app_state import AppState
 from tfworker.commands.base import BaseCommand
 from tfworker.exceptions import (
     HandlerError,
@@ -17,6 +18,9 @@ from tfworker.exceptions import (
 )
 from tfworker.types.definition import Definition
 from tfworker.util.system import pipe_exec, strip_ansi
+
+if TYPE_CHECKING:
+    from tfworker.app_state import AppState
 
 
 class TerraformCommand(BaseCommand):
@@ -41,8 +45,7 @@ class TerraformCommand(BaseCommand):
         """
         Prepare / Mirror the providers
         """
-        ctx: click.Context = click.get_current_context()
-        app_state: AppState = ctx.obj
+        ctx, app_state = self._get_state()
         if app_state.terraform_options.provider_cache is None:
             log.trace("no provider cache specified, skipping provider mirroring")
             return
@@ -61,39 +64,26 @@ class TerraformCommand(BaseCommand):
             log.error(f"error mirroring providers: {e}")
             ctx.exit(1)
 
-    def exec(self) -> None:
-        """exec handles running the terraform chain, it the primary method called by the CLI
+    # def terraform_init(self) -> None:
+    #     """
+    #     Handle execution of terraform init for all of the definitions
+    #     """
+    #     # generate an iterator for the specified definitions (or all if no limit is specified)
+    #     ctx, app_state = self._get_state()
 
-        Returns:
-            None
-        """
-        # generate an iterator for the specified definitions (or all if no limit is specified)
-        try:
-            # convert the definitions iterator to a list to allow reusing the iterator
-            def_iter = list(self.definitions.limited())
-        except ValueError as e:
-            click.secho(f"Error with supplied limit: {e}", fg="red")
-            raise SystemExit(1)
+    #     # prepare the definitions and run terraform init
+    #     log.trace("preparing definitions and running terraform init")
+    #     self._prep_and_init(list(app_state.definitions))
 
-        # prepare the modules, they are required if the modules dir is specified, otherwise they are optional
-        tf_util.prep_modules(
-            self._terraform_modules_dir,
-            self._temp_dir,
-            required=(self._terraform_modules_dir != ""),
-        )
+    #     # for definition in def_iter:
+    #     #     # Execute plan if needed
+    #     #     changes = (
+    #     #         self._exec_plan(definition) if self._check_plan(definition) else None
+    #     #     )
 
-        # prepare the definitions and run terraform init
-        self._prep_and_init(def_iter)
-
-        for definition in def_iter:
-            # Execute plan if needed
-            changes = (
-                self._exec_plan(definition) if self._check_plan(definition) else None
-            )
-
-            # execute apply or destroy if needed
-            if self._check_apply_or_destroy(changes, definition):
-                self._exec_apply_or_destroy(definition)
+    #     #     # execute apply or destroy if needed
+    #     #     if self._check_apply_or_destroy(changes, definition):
+    #     #         self._exec_apply_or_destroy(definition)
 
     ###################
     # Private methods #
@@ -102,24 +92,29 @@ class TerraformCommand(BaseCommand):
     ###########################################
     # Methods for dealing with terraform init #
     ###########################################
-    def _prep_and_init(self, def_iter: list[Definition]) -> None:
-        """Prepares the definition and runs terraform init
+    def terraform_init(self) -> None:
+        from tfworker.definitions.prepare import prepare
+        ctx: click.Context
+        app_state: "AppState"
+        ctx, app_state = self._get_state()
 
-        Args:
-            def_iter: an iterator of definitions to prepare
+        for name, definition in app_state.definitions.items():
+            print(name)
+            print(definition)
+            log.info(f"preparing definition: {name}")
+            prepare(
+                name=name,
+                definition=definition,
+                backend=app_state.backend,
+                working_path=app_state.root_options.working_dir,
+                repo_path=app_state.root_options.repository_path,
+            )
 
-        Returns:
-            None
-        """
-        for definition in def_iter:
-            click.secho(f"preparing definition: {definition.tag}", fg="green")
-            definition.prep(self._backend)
-
-            try:
-                self._run(definition, "init", debug=self._show_output)
-            except TerraformError:
-                click.secho("error running terraform init", fg="red")
-                raise SystemExit(1)
+            # try:
+            #     self._run(definition, "init", debug=self._show_output)
+            # except TerraformError:
+            #     click.secho("error running terraform init", fg="red")
+            #     raise SystemExit(1)
 
     ###########################################
     # Methods for dealing with terraform plan #

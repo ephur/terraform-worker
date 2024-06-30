@@ -18,6 +18,7 @@ class DefinitionsCollection(Mapping):
     to be managed during the execution for a particular deployment. The collection should be
     used to pass resources to independent functions rather than containing all of the logic.
     """
+
     def __init__(
         self, definitions: Dict[str, "Definition"], limiter: List[str] | None = None
     ) -> None:
@@ -47,19 +48,28 @@ class DefinitionsCollection(Mapping):
             log.trace(f"adding definition {definition} to definitions")
             self._definitions[definition] = config
 
+    # def __len__(self):
+    #     return len(self._definitions)
+
+    # def __getitem__(self, value):
+    #     if type(value) is int:
+    #         return self._definitions[list(self._definitions.keys())[value]]
+    #     return self._definitions[value]
+
+    # def __iter__(self):
+    #     return iter(self._definitions.values())
+
+    # def __str__(self):
+    #     return str(self._definitions)
+
     def __len__(self):
         return len(self._definitions)
 
-    def __getitem__(self, value):
-        if type(value) is int:
-            return self._definitions[list(self._definitions.keys())[value]]
-        return self._definitions[value]
+    def __getitem__(self, key: str) -> "Definition":
+        return self._definitions[key]
 
     def __iter__(self):
-        return iter(self._definitions.values())
-
-    def __str__(self):
-        return str(self._definitions)
+        return iter(self._definitions)
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -67,8 +77,8 @@ class DefinitionsCollection(Mapping):
     ) -> CoreSchema:
         return core_schema.no_info_after_validator_function(cls, handler(dict))
 
-    def keys(self):
-        return self._definitions.keys()
+    # def keys(self):
+    #     return self._definitions.keys()
 
 
 # import collections

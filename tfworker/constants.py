@@ -3,8 +3,8 @@ import os
 _CWD = os.getcwd()
 
 DEFAULT_BACKEND_PREFIX = "terraform/state/{deployment}"
-DEFAULT_CONFIG = f"{_CWD}/worker.yaml"
 DEFAULT_REPOSITORY_PATH = _CWD
+DEFAULT_CONFIG = f"{DEFAULT_REPOSITORY_PATH}/worker.yaml"
 DEFAULT_AWS_REGION = "us-east-1"
 DEFAULT_GCP_REGION = "us-east-1a"
 

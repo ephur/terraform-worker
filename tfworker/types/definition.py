@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 from typing import Dict, List, Optional
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -55,3 +56,9 @@ class Definition(BaseModel):
     template_vars: Optional[Dict[str, str]] = Field(
         {}, description="Variables which are suppled to any jinja templates."
     )
+
+    def get_target_path(self, working_dir: str) -> str:
+        """
+        Get the target path of the definition
+        """
+        return Path(f"{working_dir}/definitions/{self.path}").resolve()
