@@ -1,7 +1,4 @@
-import click
-
 from tfworker.commands.base import BaseCommand
-from tfworker.exceptions import BackendError
 
 
 class CleanCommand(BaseCommand):

@@ -7,14 +7,14 @@ import tfworker.util.log as log
 
 from .aws import AWSAuthenticator  # noqa
 from .base import UnknownAuthenticator  # noqa
-from .base import BaseAuthenticator, BaseAuthenticatorConfig
+from .base import BaseAuthenticator  # noqa
 from .google import GoogleAuthenticator, GoogleBetaAuthenticator  # noqa
 
 # from tfworker.types.cli_options import CLIOptionsRoot
 
 
 if TYPE_CHECKING:
-    from tfworker.types.cli_options import CLIOptionsRoot
+    from tfworker.commands.cli_options import CLIOptionsRoot
 
 # ALL = [AWSAuthenticator, GoogleAuthenticator, GoogleBetaAuthenticator]
 ALL = [AWSAuthenticator, GoogleAuthenticator, GoogleBetaAuthenticator]

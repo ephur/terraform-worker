@@ -9,8 +9,8 @@ from tfworker.definitions import DefinitionsCollection
 from tfworker.handlers.collection import HandlersCollection
 from tfworker.providers.collection import ProvidersCollection
 
-from . import cli_options
-from .config_file import ConfigFile
+from tfworker.commands import cli_options
+from tfworker.types.config_file import ConfigFile
 
 
 class AppState(BaseModel):

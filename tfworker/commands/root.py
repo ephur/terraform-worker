@@ -6,7 +6,7 @@ import click
 
 import tfworker.util.log as log
 from tfworker.commands.config import load_config, resolve_model_with_cli_options
-from tfworker.types.cli_options import CLIOptionsRoot
+from .cli_options import CLIOptionsRoot
 
 
 class RootCommand:

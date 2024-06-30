@@ -8,8 +8,8 @@ from tfworker.commands.env import EnvCommand
 from tfworker.commands.root import RootCommand
 from tfworker.commands.clean import CleanCommand
 from tfworker.commands.terraform import TerraformCommand
-from tfworker.types import (
-    AppState,
+from tfworker.app_state import AppState
+from tfworker.commands.cli_options import (
     CLIOptionsClean,
     CLIOptionsRoot,
     CLIOptionsTerraform,

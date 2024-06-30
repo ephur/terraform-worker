@@ -1,6 +1,5 @@
 import os
 import shutil
-from pathlib import Path
 from typing import List, Optional, Union
 
 import click
@@ -216,6 +215,9 @@ class CLIOptionsRoot(BaseModel):
 
 
 class CLIOptionsClean(BaseModel):
+    """
+    CLIOptionsClean is a Pydantic model that represents the options for the clean command.
+    """
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     limit: Optional[List[str]] = Field(
@@ -229,95 +231,6 @@ class CLIOptionsClean(BaseModel):
         return validate_limit(values)
 
 
-# @click.option(
-#     "--plan-file-path",
-#     default=None,
-#     envvar="WORKER_PLAN_FILE_PATH",
-#     help="path to plan files, with plan it will save to this location, apply will read from it",
-# )
-# @click.option(
-#     "--apply/--no-apply",
-#     "tf_apply",
-#     envvar="WORKER_APPLY",
-#     default=False,
-#     help="apply the terraform configuration",
-# )
-# @click.option(
-#     "--plan/--no-plan",
-#     "tf_plan",
-#     envvar="WORKER_PLAN",
-#     type=bool,
-#     default=True,
-#     help="toggle running a plan, plan will still be skipped if using a saved plan file with apply",
-# )
-# @click.option(
-#     "--force/--no-force",
-#     "force",
-#     default=False,
-#     envvar="WORKER_FORCE",
-#     help="force apply/destroy without plan change",
-# )
-# @click.option(
-#     "--destroy/--no-destroy",
-#     default=False,
-#     envvar="WORKER_DESTROY",
-#     help="destroy a deployment instead of create it",
-# )
-# @click.option(
-#     "--show-output/--no-show-output",
-#     default=True,
-#     envvar="WORKER_SHOW_OUTPUT",
-#     help="show output from terraform commands",
-# )
-# @click.option(
-#     "--terraform-bin",
-#     envvar="WORKER_TERRAFORM_BIN",
-#     help="The complate location of the terraform binary",
-# )
-# @click.option(
-#     "--b64-encode-hook-values/--no--b64-encode-hook-values",
-#     "b64_encode",
-#     default=False,
-#     envvar="WORKER_B64_ENCODE_HOOK_VALUES",
-#     help=(
-#         "Terraform variables and outputs can be complex data structures, setting this"
-#         " open will base64 encode the values for use in hook scripts"
-#     ),
-# )
-# @click.option(
-#     "--terraform-modules-dir",
-#     envvar="WORKER_TERRAFORM_MODULES_DIR",
-#     default="",
-#     help=(
-#         "Absolute path to the directory where terraform modules will be stored."
-#         "If this is not set it will be relative to the repository path at ./terraform-modules"
-#     ),
-# )
-# @click.option(
-#     "--limit",
-#     help="limit operations to a single definition",
-#     envvar="WORKER_LIMIT",
-#     multiple=True,
-#     type=CSVType(),
-# )
-# @click.option(
-#     "--provider-cache",
-#     envvar="WORKER_PROVIDER_CACHE",
-#     default=None,
-#     help="if provided this directory will be used as a cache for provider plugins",
-# )
-# @click.option(
-#     "--stream-output/--no-stream-output",
-#     help="stream the output from terraform command",
-#     envvar="WORKER_STREAM_OUTPUT",
-#     default=True,
-# )
-# @click.option(
-#     "--color/--no-color",
-#     help="colorize the output from terraform command",
-#     envvar="WORKER_COLOR",
-#     default=False,
-# )
 class CLIOptionsTerraform(BaseModel):
     """
     CLIOptionsTerraform is a Pydantic model that represents the options for the terraform command.
@@ -361,13 +274,8 @@ class CLIOptionsTerraform(BaseModel):
     )
     b64_encode: bool = Field(
         False,
-        json_schema_extra={"env": "WORKER_B64_ENCODE_HOOK_VALUES"},
+        json_schema_extra={"env": "WORKER_B64_ENCODE"},
         description="Base64 encode Terraform variables and outputs for use in hook scripts",
-    )
-    terraform_modules_dir: str = Field(
-        "",
-        json_schema_extra={"env": "WORKER_TERRAFORM_MODULES_DIR"},
-        description="Absolute path to the directory where terraform modules will be stored. If not set, it will be relative to the repository path at ./terraform-modules",
     )
     limit: Optional[List[str]] = Field(
         None,
@@ -439,6 +347,7 @@ class CLIOptionsTerraform(BaseModel):
     @model_validator(mode="before")
     def validate_limit(cls, values):
         return validate_limit(values)
+
 
 def validate_existing_dir(fpath: Union[str, None], empty=False) -> Union[str, None]:
     """

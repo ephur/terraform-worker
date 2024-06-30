@@ -14,8 +14,8 @@ if TYPE_CHECKING:
     from tfworker.handlers.collection import HandlersCollection  # pragma: no cover
     from tfworker.backends.base import BaseBackend  # pragma: no cover
     from tfworker.providers.collection import ProvidersCollection  # pragma: no cover
-    from tfworker.types import CLIOptionsRoot  # pragma: no cover
-    from tfworker.types.app_state import AppState  # pragma: no cover
+    from .cli_options import CLIOptionsRoot  # pragma: no cover
+    from tfworker.app_state import AppState  # pragma: no cover
 
 
 class BaseCommand:

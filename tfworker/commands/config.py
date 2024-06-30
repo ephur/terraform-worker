@@ -12,10 +12,10 @@ import yaml
 from jinja2.runtime import StrictUndefined
 from pydantic import BaseModel, ValidationError
 
-# from tfworker.types.app_state import AppState
-import tfworker.types.cli_options
+from . import cli_options
+
 import tfworker.util.log as log
-from tfworker.types.app_state import AppState
+from tfworker.app_state import AppState
 from tfworker.types.config_file import ConfigFile
 from tfworker.util.cli import handle_config_error
 
@@ -85,7 +85,7 @@ def get_cli_options_model_classes() -> List[Type[BaseModel]]:
     Returns:
         List[Type[BaseModel]]: List of model classes.
     """
-    cli_options_module = tfworker.types.cli_options
+    cli_options_module = cli_options
     model_classes = []
 
     for name, obj in inspect.getmembers(cli_options_module, inspect.isclass):
