@@ -9,13 +9,16 @@ from tfworker.exceptions import BackendError, HandlerError
 from tfworker.util.cli import handle_config_error
 
 if TYPE_CHECKING:
-    from tfworker.authenticators.collection import AuthenticatorsCollection  # pragma: no cover
+    from tfworker.app_state import AppState  # pragma: no cover
+    from tfworker.authenticators.collection import (  # pragma: no cover
+        AuthenticatorsCollection,
+    )
+    from tfworker.backends.base import BaseBackend  # pragma: no cover
     from tfworker.definitions import DefinitionsCollection  # pragma: no cover
     from tfworker.handlers.collection import HandlersCollection  # pragma: no cover
-    from tfworker.backends.base import BaseBackend  # pragma: no cover
     from tfworker.providers.collection import ProvidersCollection  # pragma: no cover
+
     from .cli_options import CLIOptionsRoot  # pragma: no cover
-    from tfworker.app_state import AppState  # pragma: no cover
 
 
 class BaseCommand:
@@ -52,6 +55,7 @@ class BaseCommand:
         root_options: "CLIOptionsRoot",
     ) -> "AuthenticatorsCollection":
         from tfworker.authenticators.collection import AuthenticatorsCollection
+
         """
         Initialize the authenticators collection for the application state
 
@@ -69,7 +73,8 @@ class BaseCommand:
 
     @staticmethod
     def _init_providers(
-        providers_config: "ProvidersCollection", authenticators: "AuthenticatorsCollection"
+        providers_config: "ProvidersCollection",
+        authenticators: "AuthenticatorsCollection",
     ) -> "ProvidersCollection":
         """
         Initialize the providers collection based on the provided configuration, it will
@@ -83,6 +88,7 @@ class BaseCommand:
             ProvidersCollection: The initialized providers collection
         """
         from tfworker.providers.collection import ProvidersCollection
+
         try:
             providers = ProvidersCollection(providers_config, authenticators)
         except ValidationError as e:
@@ -93,7 +99,9 @@ class BaseCommand:
         return providers
 
     @staticmethod
-    def _init_definitions(definitions_config: Dict[str, Any]) -> "DefinitionsCollection":
+    def _init_definitions(
+        definitions_config: Dict[str, Any]
+    ) -> "DefinitionsCollection":
         """
         Initialize the definitions collection based on the provided configuration,
 
@@ -203,6 +211,7 @@ class BaseCommand:
 
         """
         from tfworker.handlers.collection import HandlersCollection
+
         parsed_handlers = BaseCommand._parse_handlers(handlers_config)
         BaseCommand._add_universal_handlers(parsed_handlers)
 
@@ -252,6 +261,7 @@ class BaseCommand:
             ValidationError: If the configuration is invalid.
         """
         from tfworker.handlers.registry import HandlerRegistry as hr
+
         try:
             return hr.get_handler_config_model(handler_name).model_validate(
                 handler_config
@@ -275,6 +285,7 @@ class BaseCommand:
             HandlerError: If there is an error initializing the handler.
         """
         from tfworker.handlers.registry import HandlerRegistry as hr
+
         try:
             return hr.get_handler(handler_name)(config)
         except HandlerError as e:
@@ -291,6 +302,7 @@ class BaseCommand:
 
         """
         from tfworker.handlers.registry import HandlerRegistry as hr
+
         for h in hr.list_universal_handlers():
             log.trace(f"initializing universal handler {h}")
             if h not in parsed_handlers.keys():

@@ -7,7 +7,7 @@ import json
 import os
 import re
 from enum import Enum
-from typing import Any, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict
 
 import click
 

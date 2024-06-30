@@ -8,8 +8,8 @@ import click
 import hcl2
 from lark.exceptions import UnexpectedToken
 
-from tfworker.util.system import get_platform
 import tfworker.util.log as log
+from tfworker.util.system import get_platform
 
 if TYPE_CHECKING:
     from tfworker.providers.collection import ProvidersCollection
@@ -84,7 +84,11 @@ def _write_mirror_configuration(
     Raises:
         IndexError: If there are no providers to mirror.
     """
-    includes = [x.name for x in providers.values() if _not_in_cache(x.gid, x.config.requirements.version, cache_dir)]
+    includes = [
+        x.name
+        for x in providers.values()
+        if _not_in_cache(x.gid, x.config.requirements.version, cache_dir)
+    ]
     log.trace(f"Providers to mirror: {includes}")
 
     if len(includes) == 0:

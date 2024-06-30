@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, List
 
 from pydantic import GetCoreSchemaHandler, ValidationError
 from pydantic_core import CoreSchema, core_schema
@@ -13,16 +13,24 @@ if TYPE_CHECKING:
 
 
 class DefinitionsCollection(Mapping):
+    """
+    The DefinitionsCollection holds information about all of the definitions that will need
+    to be managed during the execution for a particular deployment. The collection should be
+    used to pass resources to independent functions rather than containing all of the logic.
+    """
     def __init__(
         self, definitions: Dict[str, "Definition"], limiter: List[str] | None = None
     ) -> None:
         from tfworker.types.definition import Definition
+
         log.trace("initializing DefinitionsCollection")
         self._definitions = {}
         for definition, body in definitions.items():
             # disallow commas in definition names
             if "," in definition:
-                raise ValueError(f"definition {definition} contains a comma, and commas are not allowed, aborting")
+                raise ValueError(
+                    f"definition {definition} contains a comma, and commas are not allowed, aborting"
+                )
             # validation the definition regardless of inclusion
             try:
                 log.trace(f"validating definition: {definition}")

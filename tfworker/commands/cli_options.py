@@ -3,10 +3,15 @@ import shutil
 from typing import List, Optional, Union
 
 import click
-
-from pydantic import BaseModel, Field, field_validator, model_validator, ValidationError, ConfigDict
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_core import InitErrorDetails
-
 
 import tfworker.util.log as log
 from tfworker import constants as const
@@ -17,6 +22,7 @@ class CLIOptionsRoot(BaseModel):
     """
     CLIOptionsRoot is a Pydantic model that represents the root options for the CLI.
     """
+
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     aws_access_key_id: Optional[str] = Field(
@@ -218,6 +224,7 @@ class CLIOptionsClean(BaseModel):
     """
     CLIOptionsClean is a Pydantic model that represents the options for the clean command.
     """
+
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     limit: Optional[List[str]] = Field(
@@ -235,6 +242,7 @@ class CLIOptionsTerraform(BaseModel):
     """
     CLIOptionsTerraform is a Pydantic model that represents the options for the terraform command.
     """
+
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     apply: bool = Field(
@@ -323,7 +331,9 @@ class CLIOptionsTerraform(BaseModel):
             fpath = shutil.which("terraform")
             log.trace(f"Using terraform binary from PATH: {fpath}")
         if fpath is None:
-            raise ValueError("Terraform binary not found in PATH, specify in config or with --terraform-bin")
+            raise ValueError(
+                "Terraform binary not found in PATH, specify in config or with --terraform-bin"
+            )
         if not os.path.isabs(fpath):
             fpath = os.path.abspath(fpath)
         if not os.path.isfile(fpath):
@@ -377,6 +387,7 @@ def validate_existing_dir(fpath: Union[str, None], empty=False) -> Union[str, No
         raise ValueError(f"path {fpath} must be empty!")
     return fpath
 
+
 def validate_limit(values):
     """
     validate_limit is called by multiple CLIOptions models to validate the limit field
@@ -399,7 +410,14 @@ def validate_limit(values):
     if config is not None:
         for item in values["limit"]:
             if item not in config.definitions.keys():
-                 errors.append(InitErrorDetails(loc=("--limit", "--limit"), input=item, ctx={"error": f"definition {item} not found in config"}, type="value_error"))
+                errors.append(
+                    InitErrorDetails(
+                        loc=("--limit", "--limit"),
+                        input=item,
+                        ctx={"error": f"definition {item} not found in config"},
+                        type="value_error",
+                    )
+                )
     if errors:
         raise ValidationError.from_exception_data("invalid_limit", errors)
     return values

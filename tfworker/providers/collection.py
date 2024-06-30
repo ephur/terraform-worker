@@ -1,30 +1,33 @@
 import copy
 from collections.abc import Mapping
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, List
 
 from pydantic import GetCoreSchemaHandler, ValidationError
 from pydantic_core import CoreSchema, core_schema
 
-
-from tfworker.exceptions import TFWorkerException
 import tfworker.util.log as log
+from tfworker.exceptions import TFWorkerException
 
 if TYPE_CHECKING:
     from tfworker.types.provider import Provider
+
 
 class ProvidersCollection(Mapping):
     @classmethod
     def get_named_providers(cls):
         from tfworker.providers.google import GoogleProvider
         from tfworker.providers.google_beta import GoogleBetaProvider
+
         NAMED_PROVIDERS = [GoogleProvider, GoogleBetaProvider]
         return NAMED_PROVIDERS
 
     def __init__(self, providers_odict, authenticators: Dict = dict()):
-        from tfworker.types.provider import Provider, ProviderConfig
         from tfworker.providers.generic import GenericProvider
+        from tfworker.types.provider import Provider, ProviderConfig
 
-        provider_map = dict([(prov.tag, prov) for prov in ProvidersCollection.get_named_providers()])
+        provider_map = dict(
+            [(prov.tag, prov) for prov in ProvidersCollection.get_named_providers()]
+        )
         self._providers = copy.deepcopy(providers_odict)
         for k, v in self._providers.items():
             try:
@@ -42,8 +45,12 @@ class ProvidersCollection(Mapping):
                 obj.add_authenticators(authenticators)
 
             log.trace(f"Adding provider {k} to providers collection")
-            self._providers[k] = Provider.model_validate({"name":k, "obj":obj, "config": config})
-            log.trace(f"Provider Attributes: Name:{self._providers[k].name}, GID:{self._providers[k].gid}, Class:{type(self._providers[k].obj)}, Config:{self._providers[k].config}")
+            self._providers[k] = Provider.model_validate(
+                {"name": k, "obj": obj, "config": config}
+            )
+            log.trace(
+                f"Provider Attributes: Name:{self._providers[k].name}, GID:{self._providers[k].gid}, Class:{type(self._providers[k].obj)}, Config:{self._providers[k].config}"
+            )
 
     def __len__(self):
         return len(self._providers)
@@ -107,7 +114,11 @@ class ProvidersCollection(Mapping):
 
         return_str = "  required_providers {\n"
         return_str += "\n".join(
-            [prov.obj.required() for k, prov in self._providers.items() if k in includes]
+            [
+                prov.obj.required()
+                for k, prov in self._providers.items()
+                if k in includes
+            ]
         )
         return_str += "\n  }"
         return return_str

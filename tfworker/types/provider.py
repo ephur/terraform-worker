@@ -1,14 +1,15 @@
 from collections.abc import Mapping
 from typing import Any, Dict, Optional
-from typing_extensions import Annotated
 
 from pydantic import BaseModel, ConfigDict, GetCoreSchemaHandler, model_validator
 from pydantic_core import CoreSchema, core_schema
+from typing_extensions import Annotated
 
 from tfworker.constants import (
     TF_PROVIDER_DEFAULT_HOSTNAME,
     TF_PROVIDER_DEFAULT_NAMESPACE,
 )
+
 # from tfworker.providers.base import BaseProvider
 
 
@@ -84,8 +85,11 @@ class Provider(BaseModel):
     def __str__(self):
         return self.name
 
+
 def init_forward_refs():
     from tfworker.providers.base import BaseProvider
+
     Provider.model_rebuild()
+
 
 init_forward_refs()

@@ -1,8 +1,10 @@
 from collections.abc import Mapping
-from typing import Dict, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Dict, Union
 
 import tfworker.util.log as log
-from tfworker.exceptions import UnknownHandler, HandlerError
+from tfworker.exceptions import HandlerError, UnknownHandler
+
+from .bitbucket import BitbucketHandler  # noqa: F401
 
 # @TODO: Find a better way to do this; the modules need
 # imported in order to register themselves, but the whole
@@ -11,13 +13,12 @@ from tfworker.exceptions import UnknownHandler, HandlerError
 #
 # they can't be imported in the registry itself due to
 # circular import issues
-from .trivy import TrivyHandler # noqa: F401
-from .bitbucket import BitbucketHandler # noqa: F401
-
+from .trivy import TrivyHandler  # noqa: F401
 
 if TYPE_CHECKING:
-    from .base import BaseHandler  # noqa: F401
     from tfworker.types import TerraformAction, TerraformStage
+
+    from .base import BaseHandler  # noqa: F401
 
 
 class HandlersCollection(Mapping):
@@ -65,11 +66,14 @@ class HandlersCollection(Mapping):
         except Exception:
             raise UnknownHandler(provider=value)
 
-    def exec_handlers(self, action: "TerraformAction", stage: "TerraformStage", **kwargs):
+    def exec_handlers(
+        self, action: "TerraformAction", stage: "TerraformStage", **kwargs
+    ):
         """
         exec_handlers is used to execute a specific action on all handlers
         """
         from tfworker.types import TerraformAction, TerraformStage
+
         if action not in TerraformAction:
             raise HandlerError(f"Invalid action {action}")
         if stage not in TerraformStage:

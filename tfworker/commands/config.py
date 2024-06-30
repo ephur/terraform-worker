@@ -12,12 +12,12 @@ import yaml
 from jinja2.runtime import StrictUndefined
 from pydantic import BaseModel, ValidationError
 
-from . import cli_options
-
 import tfworker.util.log as log
 from tfworker.app_state import AppState
 from tfworker.types.config_file import ConfigFile
 from tfworker.util.cli import handle_config_error
+
+from . import cli_options
 
 
 def load_config(config_file: str, config_vars: Dict[str, str]) -> ConfigFile:

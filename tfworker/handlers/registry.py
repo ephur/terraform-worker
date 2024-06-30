@@ -2,13 +2,16 @@ from typing import Callable, Dict, List
 
 from pydantic import BaseModel
 
-from .base import BaseHandler
 from tfworker.exceptions import HandlerError
+
+from .base import BaseHandler
+
 
 class HandlerRegistry:
     """
     All handlers must be registered in order to be available for selection in an execution
     """
+
     _registry = {}
     _universal = []
 
@@ -17,6 +20,7 @@ class HandlerRegistry:
         """
         Class method to register handlers
         """
+
         def inner_wrapper(wrapped_class: BaseHandler) -> Callable:
             if name in cls._registry:
                 raise ValueError(f"Handler {name} already exists")

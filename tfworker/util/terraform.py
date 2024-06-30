@@ -16,10 +16,10 @@ from tfworker.constants import (
     TF_PROVIDER_DEFAULT_HOSTNAME,
     TF_PROVIDER_DEFAULT_NAMESPACE,
 )
+from tfworker.exceptions import TFWorkerException
 from tfworker.providers.collection import ProvidersCollection
 from tfworker.types.provider import ProviderGID
 from tfworker.util.system import pipe_exec
-from tfworker.exceptions import TFWorkerException
 
 
 def prep_modules(
@@ -74,13 +74,16 @@ def get_terraform_version(terraform_bin: str, validation=False) -> tuple[int, in
     Args:
         terraform_bin (str): The path to the terraform binary.
     """
+
     # @TODO: instead of exiting, raise an error to handle it in the caller
     def click_exit():
         log.error(f"unable to get terraform version from {terraform_bin} version")
         click.get_current_context().exit(1)
 
     def validation_exit():
-        raise ValueError(f"unable to get terraform version from {terraform_bin} version")
+        raise ValueError(
+            f"unable to get terraform version from {terraform_bin} version"
+        )
 
     (return_code, stdout, stderr) = pipe_exec(f"{terraform_bin} version")
     if return_code != 0:
@@ -98,6 +101,7 @@ def get_terraform_version(terraform_bin: str, validation=False) -> tuple[int, in
         if validation:
             validation_exit()
         click_exit()
+
 
 def mirror_providers(
     providers: ProvidersCollection, terraform_bin: str, working_dir: str, cache_dir: str
@@ -122,7 +126,7 @@ def mirror_providers(
                 stream_output=True,
             )
             if return_code != 0:
-                raise  TFWorkerException(f"Unable to mirror providers: {stderr}")
+                raise TFWorkerException(f"Unable to mirror providers: {stderr}")
     except IndexError:
         log.debug("All providers in cache")
 

@@ -6,8 +6,8 @@ from pydantic import ValidationError
 import tfworker.util.log as log
 
 from .aws import AWSAuthenticator  # noqa
-from .base import UnknownAuthenticator  # noqa
 from .base import BaseAuthenticator  # noqa
+from .base import UnknownAuthenticator  # noqa
 from .google import GoogleAuthenticator, GoogleBetaAuthenticator  # noqa
 
 # from tfworker.types.cli_options import CLIOptionsRoot

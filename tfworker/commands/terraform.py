@@ -6,71 +6,33 @@ import click
 import tfworker.util.hooks as hooks
 import tfworker.util.log as log
 import tfworker.util.terraform as tf_util
-from tfworker.commands.base import BaseCommand
-from tfworker.exceptions import HandlerError, HookError, PlanChange, TerraformError, TFWorkerException
 from tfworker.app_state import AppState
+from tfworker.commands.base import BaseCommand
+from tfworker.exceptions import (
+    HandlerError,
+    HookError,
+    PlanChange,
+    TerraformError,
+    TFWorkerException,
+)
 from tfworker.types.definition import Definition
 from tfworker.util.system import pipe_exec, strip_ansi
 
 
 class TerraformCommand(BaseCommand):
-    # def __init__(self, ctx: click.Context, deployment: str):
-    #     super().__init__(ctx=ctx, deployment=deployment)
+    """
+    The TerraformCommand class is called by the top level CLI
+    as part of the `terraform` sub-command. It inherits from
+    BaseCommand which sets up the application state.
 
-    # Minimize impact while refactoring
-    # if isinstance(app_state, RootCommand):
-    #     rootc = app_state
-    #     log.msg(
-    #         f"using legacy compatibility mode in terraform command",
-    #         log.LogLevel.TRACE,
-    #     )
-    # else:
-    #     rootc = app_state.root_command
-    #     log.msg(
-    #         f"using refactored app_state in terraform command", log.log_level.TRACE
-    #     )
+    This class may contain various methods that are used to
+    orchestrate the terraform workflow. The methods in this
+    class should be limited to providing error handling and
+    orchestration of the terraform workflow.
 
-    ##################
-    ##################
-    ##################
-    ##################
-    ##################
-    ##################
-    # self._destroy = self._resolve_arg("destroy")
-    # self._tf_apply = self._resolve_arg("tf_apply")
-    # self._tf_plan = self._resolve_arg("tf_plan")
-    # self._plan_file_path = self._resolve_arg("plan_file_path")
-    # self._deployment = deployment
-
-    # if self._tf_apply and self._destroy:
-    #     click.secho("can not apply and destroy at the same time", fg="red")
-    #     raise SystemExit(1)
-
-    # if self._backend_plans and not self._plan_file_path:
-    #     # create a plan file path in the tmp dir
-    #     self._plan_file_path = f"{self._temp_dir}/plans"
-    #     pathlib.Path(self._plan_file_path).mkdir(parents=True, exist_ok=True)
-
-    # self._b64_encode = self._resolve_arg("b64_encode")
-    # self._force = self._resolve_arg("force")
-    # self._show_output = self._resolve_arg("show_output")
-    # # streaming doesn't allow for distinction between stderr and stdout, but allows
-    # # terraform operations to be viewed before the process is completed
-    # self._stream_output = self._resolve_arg("stream_output")
-    # self._use_colors = True if self._resolve_arg("color") else False
-    # self._terraform_modules_dir = self._resolve_arg("terraform_modules_dir")
-    # self._terraform_output = dict()
-    ##############
-    # Properties #
-    ##############
-    @property
-    def plan_for(self):
-        """plan_for will either be apply or destroy, indicating what action is being planned for"""
-        return self._plan_for
-
-    @property
-    def tf_version_major(self):
-        return self._tf_version_major
+    If you are tempted to override the `__init__` method,
+    reconsider the strategy for what you're about to add
+    """
 
     ##################
     # Public methods #
@@ -85,7 +47,9 @@ class TerraformCommand(BaseCommand):
             log.trace("no provider cache specified, skipping provider mirroring")
             return
 
-        log.trace(f"using provider cache path: {app_state.terraform_options.provider_cache}")
+        log.trace(
+            f"using provider cache path: {app_state.terraform_options.provider_cache}"
+        )
         try:
             tf_util.mirror_providers(
                 app_state.providers,

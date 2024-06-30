@@ -3,17 +3,17 @@ import click
 from pydantic import ValidationError
 
 import tfworker.util.log as log
-from tfworker.commands.config import log_limiter
-from tfworker.commands.env import EnvCommand
-from tfworker.commands.root import RootCommand
-from tfworker.commands.clean import CleanCommand
-from tfworker.commands.terraform import TerraformCommand
 from tfworker.app_state import AppState
+from tfworker.commands.clean import CleanCommand
 from tfworker.commands.cli_options import (
     CLIOptionsClean,
     CLIOptionsRoot,
     CLIOptionsTerraform,
 )
+from tfworker.commands.config import log_limiter
+from tfworker.commands.env import EnvCommand
+from tfworker.commands.root import RootCommand
+from tfworker.commands.terraform import TerraformCommand
 from tfworker.util.cli import (
     handle_option_error,
     pydantic_to_click,
@@ -127,6 +127,7 @@ def env(ctx: click.Context, **kwargs):
     """
     env = EnvCommand()
     env.exec()
+
 
 # @TODO: Command to list all definitions in the backend for a given deployment
 # @TODO: Command to pull the remote state for a given deployment
