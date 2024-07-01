@@ -9,21 +9,21 @@ import tfworker.util.log as log
 from tfworker.exceptions import TFWorkerException
 
 if TYPE_CHECKING:
-    from tfworker.types.provider import Provider
+    from tfworker.providers.model import Provider
 
 
 class ProvidersCollection(Mapping):
     @classmethod
     def get_named_providers(cls):
-        from tfworker.providers.google import GoogleProvider
-        from tfworker.providers.google_beta import GoogleBetaProvider
+        from .google import GoogleProvider
+        from .google_beta import GoogleBetaProvider
 
         NAMED_PROVIDERS = [GoogleProvider, GoogleBetaProvider]
         return NAMED_PROVIDERS
 
     def __init__(self, providers_odict, authenticators: Dict = dict()):
-        from tfworker.providers.generic import GenericProvider
-        from tfworker.types.provider import Provider, ProviderConfig
+        from .generic import GenericProvider
+        from .model import Provider, ProviderConfig
 
         provider_map = dict(
             [(prov.tag, prov) for prov in ProvidersCollection.get_named_providers()]
@@ -62,7 +62,7 @@ class ProvidersCollection(Mapping):
         return iter(self._providers)
 
     def __str__(self):
-        return str([f"{x.tag}: {str(x.gid)}" for x in self._providers.values()])
+        return str([f"{x.name}: {str(x.gid)}" for x in self._providers.values()])
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -93,7 +93,7 @@ class ProvidersCollection(Mapping):
             includes = list(self._providers.keys())
 
         return "\n".join(
-            [prov.hcl() for k, prov in self._providers.items() if k in includes]
+            [prov.obj.hcl() for k, prov in self._providers.items() if k in includes]
         )
 
     def required_hcl(self, includes: List[str] = None) -> str:
@@ -120,5 +120,5 @@ class ProvidersCollection(Mapping):
                 if k in includes
             ]
         )
-        return_str += "\n  }"
+        return_str += "\n  }\n"
         return return_str

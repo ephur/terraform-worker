@@ -4,17 +4,6 @@ from typing import TYPE_CHECKING, Dict, Union
 import tfworker.util.log as log
 from tfworker.exceptions import HandlerError, UnknownHandler
 
-from .bitbucket import BitbucketHandler  # noqa: F401
-
-# @TODO: Find a better way to do this; the modules need
-# imported in order to register themselves, but the whole
-# point of decorating them is to try and reduce the number
-# of touch points when adding a new handler
-#
-# they can't be imported in the registry itself due to
-# circular import issues
-from .trivy import TrivyHandler  # noqa: F401
-
 if TYPE_CHECKING:
     from tfworker.types import TerraformAction, TerraformStage
 

@@ -4,7 +4,7 @@ from pydantic import GetCoreSchemaHandler
 from pydantic_core import CoreSchema, core_schema
 
 if TYPE_CHECKING:
-    from tfworker.types.provider import ProviderConfig, ProviderGID
+    from .model import ProviderConfig, ProviderGID
 
 
 class BaseProvider:
@@ -59,7 +59,7 @@ class BaseProvider:
             result.append(self._hclify(self.config_blocks[k], depth=4))
             result.append("  }")
 
-        result.append("}")
+        result.append("}\n")
         return "\n".join(result)
 
     def required(self):
@@ -68,7 +68,7 @@ class BaseProvider:
                 f"    {self.tag} = {{",
                 f'      source = "{self.source}"',
                 f'      version = "{self.version}"',
-                "     }",
+                "     }\n",
             ]
         )
 

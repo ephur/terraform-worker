@@ -1,5 +1,6 @@
 from abc import ABCMeta, abstractmethod
 
+from tfworker.exceptions import BackendError
 from tfworker.types.json import JSONType
 
 

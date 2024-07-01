@@ -33,7 +33,7 @@ def load_config(config_file: str, config_vars: Dict[str, str]) -> ConfigFile:
     """
     log.trace(f"loading config file: {config_file}")
     rendered_config = _process_template(config_file, _get_full_config_vars(config_vars))
-    log.safe_trace(f"rendered config: {rendered_config}")
+    log.safe_trace(f"rendered config: {json.dumps(rendered_config)}")
     if config_file.endswith(".hcl"):
         loaded_config: Dict[Any, Any] = hcl2.loads(rendered_config)["terraform"]
     else:

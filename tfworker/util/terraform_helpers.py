@@ -2,7 +2,7 @@ import json
 import os
 import pathlib
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Dict, List, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Union
 
 import hcl2
 from lark.exceptions import UnexpectedToken
@@ -12,7 +12,7 @@ from tfworker.util.system import get_platform
 
 if TYPE_CHECKING:
     from tfworker.providers.collection import ProvidersCollection
-    from tfworker.types.provider import ProviderGID
+    from tfworker.providers.model import ProviderGID, ProviderRequirements
 
 
 def _not_in_cache(gid: "ProviderGID", version: str, cache_dir: str) -> bool:
@@ -150,7 +150,9 @@ def _parse_required_providers(content: dict) -> Union[None, Dict[str, Dict[str, 
     return providers
 
 
-def _find_required_providers(search_dir: str) -> Dict[str, [Dict[str, str]]]:
+def _find_required_providers(
+    search_dir: str,
+) -> Dict[str, Dict[str, "ProviderRequirements"]]:
     providers = {}
     for root, _, files in os.walk(search_dir, followlinks=True):
         for file in files:
@@ -159,9 +161,15 @@ def _find_required_providers(search_dir: str) -> Dict[str, [Dict[str, str]]]:
                     try:
                         content = hcl2.load(f)
                     except UnexpectedToken as e:
-                        log.debug(f"skipping {root}/{file}: {e}")
+                        log.info(
+                            f"not processing {root}/{file} for required providers; see debug output for HCL parsing errors"
+                        )
+                        log.debug(f"HCL processing errors in {root}/{file}: {e}")
                         continue
                     new_providers = _parse_required_providers(content)
                     if new_providers is not None:
                         providers.update(new_providers)
+    log.trace(
+        f"Found required providers: {[x for x in providers.keys()]} in {search_dir}"
+    )
     return providers

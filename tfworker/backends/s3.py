@@ -19,7 +19,7 @@ from tfworker.handlers.registry import HandlerRegistry as hr
 from .base import BaseBackend, validate_backend_empty
 
 if TYPE_CHECKING:
-    from tfworker.types.app_state import AppState
+    from tfworker.app_state import AppState
 
 
 class S3Backend(BaseBackend):
@@ -31,6 +31,8 @@ class S3Backend(BaseBackend):
         # print the module name for debugging
         self._definitions = definitions
         self._authenticator = authenticators[self.auth_tag]
+        self._ctx = click.get_current_context()
+        self._app_state = click.get_current_context().obj
 
         if not self._authenticator.session:
             raise BackendError(
@@ -271,12 +273,15 @@ class S3Backend(BaseBackend):
 
     def _get_bucket_files(self) -> set:
         """
-        _get_bucket_files returns a set of the keys in the bucket
+        _get_bucket_files returns a set of the keys in the bucket that correspond
+        to all the definitions in a deployment, the function is poorly named.
+        #@TODO: Rename this function
         """
         bucket_files = set()
         root_options = click.get_current_context().obj.root_options
         bucket = root_options.backend_bucket
-        prefix = root_options.backend_prefix
+        prefix = root_options.backend_prefix.format(deployment=self._deployment)
+        log.trace(f"listing definition prefixes in: {bucket}/{prefix}")
         s3_paginator = self._s3_client.get_paginator("list_objects_v2").paginate(
             Bucket=bucket, Prefix=prefix
         )
@@ -287,6 +292,7 @@ class S3Backend(BaseBackend):
                     # just append the last part of the prefix to the list, as they
                     # are relative to the base path, and deployment name
                     bucket_files.add(key["Key"].split("/")[-2])
+        log.trace(f"bucket files: {bucket_files}")
 
         return bucket_files
 
@@ -327,19 +333,27 @@ class S3Backend(BaseBackend):
             self._clean_locking_state(deployment)
 
     def hcl(self, name: str) -> str:
+        rendered_prefix = self._app_state.root_options.backend_prefix.format(
+            deployment=self._app_state.deployment
+        )
         state_config = []
         state_config.append('  backend "s3" {')
-        state_config.append(f'    region = "{self._authenticator.backend_region}"')
-        state_config.append(f'    bucket = "{self._authenticator.bucket}"')
         state_config.append(
-            f'    key = "{self._authenticator.prefix}/{name}/terraform.tfstate"'
+            f'    region = "{self._app_state.root_options.backend_region}"'
         )
+        state_config.append(
+            f'    bucket = "{self._app_state.root_options.backend_bucket}"'
+        )
+        state_config.append(f'    key = "{rendered_prefix}/{name}/terraform.tfstate"')
         state_config.append(f'    dynamodb_table = "terraform-{self._deployment}"')
         state_config.append('    encrypt = "true"')
-        state_config.append("  }")
+        state_config.append("  }\n")
         return "\n".join(state_config)
 
     def data_hcl(self, remotes: list) -> str:
+        rendered_prefix = self._app_state.root_options.backend_prefix.format(
+            deployment=self._app_state.deployment
+        )
         remote_data_config = []
         if type(remotes) is not list:
             raise ValueError("remotes must be a list")
@@ -349,12 +363,13 @@ class S3Backend(BaseBackend):
             remote_data_config.append('  backend = "s3"')
             remote_data_config.append("  config = {")
             remote_data_config.append(
-                f'    region = "{self._authenticator.backend_region}"'
+                f'    region = "{self._app_state.root_options.backend_region}"'
             )
-            remote_data_config.append(f'    bucket = "{self._authenticator.bucket}"')
             remote_data_config.append(
-                "    key ="
-                f' "{self._authenticator.prefix}/{remote}/terraform.tfstate"'
+                f'    bucket = "{self._app_state.root_options.backend_bucket}"'
+            )
+            remote_data_config.append(
+                "    key =" f' "{rendered_prefix}/{remote}/terraform.tfstate"'
             )
             remote_data_config.append("  }")
             remote_data_config.append("}\n")

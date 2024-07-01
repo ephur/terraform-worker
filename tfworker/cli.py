@@ -50,6 +50,7 @@ def cli(ctx: click.Context, **kwargs):
     log.msg(f"set log level to {options.log_level}", log.LogLevel.DEBUG)
     app_state = AppState(root_options=options)
     ctx.obj = app_state
+    register_plugins()
     RootCommand()
     log.trace("finished intializing root command")
 
@@ -130,6 +131,22 @@ def env(ctx: click.Context, **kwargs):
 
 # @TODO: Command to list all definitions in the backend for a given deployment
 # @TODO: Command to pull the remote state for a given deployment
+
+
+def register_plugins():
+    """
+    Register the plugins
+    """
+
+    # Register Handlers
+    log.trace("registering handlers")
+    from tfworker.handlers.bitbucket import BitbucketHandler  # noqa: F401
+    from tfworker.handlers.trivy import TrivyHandler  # noqa: F401
+
+    # Register Copiers
+    log.trace("registering copiers")
+    import tfworker.copier  # noqa: F401
+
 
 if __name__ == "__main__":
     cli()

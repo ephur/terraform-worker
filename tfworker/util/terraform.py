@@ -5,7 +5,7 @@ import pathlib
 import re
 import shutil
 from functools import lru_cache
-from typing import Dict, List, Union
+from typing import TYPE_CHECKING, Dict, List, Union
 
 import click
 
@@ -17,8 +17,7 @@ from tfworker.constants import (
     TF_PROVIDER_DEFAULT_NAMESPACE,
 )
 from tfworker.exceptions import TFWorkerException
-from tfworker.providers.collection import ProvidersCollection
-from tfworker.types.provider import ProviderGID
+from tfworker.providers import Provider, ProviderGID, ProvidersCollection
 from tfworker.util.system import pipe_exec
 
 
@@ -150,21 +149,32 @@ def generate_terraform_lockfile(
         Union[None, str]: The content of the .terraform.lock.hcl file or None if any required providers are not in the cache
     """
     lockfile = []
-    click.secho(
-        f"Generating lockfile for providers: {included_providers or [x.tag for x in providers]}",
-        fg="yellow",
+    provider: Provider
+
+    log.trace(
+        f"generating lockfile for providers: {included_providers or [x.name for x in providers.values()]}"
     )
-    for provider in providers:
-        if tfhelpers._not_in_cache(provider.gid, provider.version, cache_dir):
+    for provider in providers.values():
+        log.trace(f"checking provider {provider} / {provider.gid}")
+        if tfhelpers._not_in_cache(
+            provider.gid, provider.config.requirements.version, cache_dir
+        ):
+            log.trace(
+                f"Provider {provider.gid} not in cache, skipping lockfile generation"
+            )
             return None
-        if included_providers is not None and provider.tag not in included_providers:
+        if included_providers is not None and provider.name not in included_providers:
+            log.trace(
+                f"Provider {provider.gid} not in included_providers, not adding to lockfile"
+            )
             continue
+        log.trace(f"Provider {provider.gid} is in cache, adding to lockfile")
         lockfile.append(f'provider "{str(provider.gid)}" {{')
-        lockfile.append(f'  version     = "{provider.version}"')
-        lockfile.append(f'  constraints = "{provider.version}"')
+        lockfile.append(f'  version     = "{provider.config.requirements.version}"')
+        lockfile.append(f'  constraints = "{provider.config.requirements.version}"')
         lockfile.append("  hashes = [")
         for hash in tfhelpers._get_cached_hash(
-            provider.gid, provider.version, cache_dir
+            provider.gid, provider.config.requirements.version, cache_dir
         ):
             lockfile.append(f'    "{hash}",')
         lockfile.append("  ]")

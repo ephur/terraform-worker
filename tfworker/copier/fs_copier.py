@@ -2,14 +2,14 @@ import os
 import re
 import shutil
 
-from .copier import Copier
-from .factory import CopyFactory
-
 import tfworker.util.log as log
 
+from .factory import Copier
 
-@CopyFactory.register("fs")
+
 class FileSystemCopier(Copier):
+    _register_name = "fs"
+
     def copy(self, **kwargs) -> None:
         """copy copies files from a local source on the file system to a destination path"""
         dest = self.get_destination(**kwargs)

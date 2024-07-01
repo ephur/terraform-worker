@@ -2,13 +2,13 @@ import os
 import pathlib
 from typing import TYPE_CHECKING
 
-
 import click
 
 import tfworker.util.hooks as hooks
 import tfworker.util.log as log
 import tfworker.util.terraform as tf_util
 from tfworker.commands.base import BaseCommand
+from tfworker.definitions import Definition
 from tfworker.exceptions import (
     HandlerError,
     HookError,
@@ -16,7 +16,6 @@ from tfworker.exceptions import (
     TerraformError,
     TFWorkerException,
 )
-from tfworker.types.definition import Definition
 from tfworker.util.system import pipe_exec, strip_ansi
 
 if TYPE_CHECKING:
@@ -45,24 +44,23 @@ class TerraformCommand(BaseCommand):
         """
         Prepare / Mirror the providers
         """
-        ctx, app_state = self._get_state()
-        if app_state.terraform_options.provider_cache is None:
+        if self.app_state.terraform_options.provider_cache is None:
             log.trace("no provider cache specified, skipping provider mirroring")
             return
 
         log.trace(
-            f"using provider cache path: {app_state.terraform_options.provider_cache}"
+            f"using provider cache path: {self.app_state.terraform_options.provider_cache}"
         )
         try:
             tf_util.mirror_providers(
-                app_state.providers,
-                app_state.terraform_options.terraform_bin,
-                app_state.root_options.working_dir,
-                app_state.terraform_options.provider_cache,
+                self.app_state.providers,
+                self.app_state.terraform_options.terraform_bin,
+                self.app_state.root_options.working_dir,
+                self.app_state.terraform_options.provider_cache,
             )
         except TFWorkerException as e:
             log.error(f"error mirroring providers: {e}")
-            ctx.exit(1)
+            self.ctx.exit(1)
 
     # def terraform_init(self) -> None:
     #     """
@@ -93,28 +91,28 @@ class TerraformCommand(BaseCommand):
     # Methods for dealing with terraform init #
     ###########################################
     def terraform_init(self) -> None:
-        from tfworker.definitions.prepare import prepare
-        ctx: click.Context
-        app_state: "AppState"
-        ctx, app_state = self._get_state()
+        from tfworker.definitions.prepare import TerraformPrepare
 
-        for name, definition in app_state.definitions.items():
-            print(name)
-            print(definition)
+        tfp = TerraformPrepare(self.ctx, self.app_state)
+
+        for name in self.app_state.definitions.keys():
             log.info(f"preparing definition: {name}")
-            prepare(
-                name=name,
-                definition=definition,
-                backend=app_state.backend,
-                working_path=app_state.root_options.working_dir,
-                repo_path=app_state.root_options.repository_path,
-            )
+            tfp.copy_files(name=name)
+            try:
+                tfp.render_templates(name=name)
+                tfp.create_local_vars(name=name)
+                tfp.create_terraform_vars(name=name)
+                tfp.create_worker_tf(name=name)
+                tfp.create_terraform_lockfile(name=name)
+            except TFWorkerException as e:
+                log.error(f"error rendering templates for definition {name}: {e}")
+                self.ctx.exit(1)
 
-            # try:
-            #     self._run(definition, "init", debug=self._show_output)
-            # except TerraformError:
-            #     click.secho("error running terraform init", fg="red")
-            #     raise SystemExit(1)
+            try:
+                self._run(name, "init")
+            except TerraformError:
+                click.secho("error running terraform init", fg="red")
+                raise SystemExit(1)
 
     ###########################################
     # Methods for dealing with terraform plan #
@@ -407,16 +405,27 @@ class TerraformCommand(BaseCommand):
     # Common methods for running terraform #
     ########################################
     def _run(
-        self, definition, command, debug=False, plan_action="init", plan_file=None
+        self,
+        definition_name: str,
+        command,
+        debug=False,
+        plan_action="init",
+        plan_file=None,
     ):
         """Run terraform."""
+        log.debug(
+            f"running terraform command: {command} for definition {definition_name}"
+        )
+        definition: Definition = self.app_state.definitions[definition_name]
 
-        if self._provider_cache is None:
+        if self.app_state.terraform_options.provider_cache is None:
             plugin_dir = f"{self._temp_dir}/terraform-plugins"
         else:
-            plugin_dir = self._provider_cache
+            plugin_dir = self.app_state.terraform_options.provider_cache
 
-        color_str = "-no-color" if self._use_colors is False else ""
+        color_str = (
+            "-no-color" if self.app_state.terraform_options.color is False else ""
+        )
         params = {
             "init": f"-input=false {color_str} -plugin-dir={plugin_dir}",
             # -lockfile=readonly is ideal, but many of our modules are not
@@ -427,6 +436,12 @@ class TerraformCommand(BaseCommand):
             "plan": f"-input=false -detailed-exitcode {color_str}",
             "apply": f"-input=false {color_str} -auto-approve",
             "destroy": f"-input=false {color_str} -auto-approve",
+        }
+        non_stream_output_func = {
+            "init": log.debug,
+            "plan": log.info,
+            "apply": log.info,
+            "destroy": log.info,
         }
 
         if plan_action == "destroy":
@@ -443,10 +458,12 @@ class TerraformCommand(BaseCommand):
         # reduce non essential terraform output
         env["TF_IN_AUTOMATION"] = "1"
 
-        for auth in self._authenticators:
+        for auth in self.app_state.authenticators:
             env.update(auth.env())
 
-        working_dir = f"{self._temp_dir}/definitions/{definition.tag}"
+        working_dir = definition.get_target_path(
+            self.app_state.root_options.working_dir
+        )
         command_params = params.get(command)
         if not command_params:
             raise ValueError(
@@ -485,27 +502,27 @@ class TerraformCommand(BaseCommand):
             )
             raise SystemExit(2)
 
-        click.secho(
-            f"cmd: {self._terraform_bin} {command} {command_params}", fg="yellow"
+        log.debug(
+            f"cmd: {self.app_state.terraform_options.terraform_bin} {command} {command_params}"
         )
         (exit_code, stdout, stderr) = pipe_exec(
-            f"{self._terraform_bin} {command} {command_params}",
+            f"{self.app_state.terraform_options.terraform_bin} {command} {command_params}",
             cwd=working_dir,
             env=env,
-            stream_output=self._stream_output,
+            stream_output=self.app_state.terraform_options.stream_output,
         )
-        click.secho(f"exit code: {exit_code}", fg="blue")
-        (
-            self._terraform_output["exit_code"],
-            self._terraform_output["stdout"],
-            self._terraform_output["stderr"],
-        ) = (exit_code, stdout, stderr)
+        log.debug(f"exit code: {exit_code}")
+        # (
+        #     self._terraform_output["exit_code"],
+        #     self._terraform_output["stdout"],
+        #     self._terraform_output["stderr"],
+        # ) = (exit_code, stdout, stderr)
 
-        if debug and not self._stream_output:
+        if not self.app_state.terraform_options.stream_output:
             for line in stdout.decode().splitlines():
-                click.secho(f"stdout: {line}", fg="blue")
+                non_stream_output_func[command](f"stdout: {line}")
             for line in stderr.decode().splitlines():
-                click.secho(f"stderr: {line}", fg="red")
+                non_stream_output_func[command](f"stderr: {line}")
 
         # If a plan file was saved, write the plan output
         if plan_file is not None:

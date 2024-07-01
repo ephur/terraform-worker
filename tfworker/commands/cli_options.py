@@ -76,7 +76,7 @@ class CLIOptionsRoot(BaseModel):
         description="Store plans in the backend",
     )
     backend_prefix: str = Field(
-        const.DEFAULT_BACKEND_PREFIX,
+        f"{const.DEFAULT_BACKEND_PREFIX}",
         json_schema_extra={"env": "WORKER_BACKEND_PREFIX"},
         description="Prefix to use in backend storage bucket for all terraform states",
     )
@@ -84,11 +84,11 @@ class CLIOptionsRoot(BaseModel):
         const.DEFAULT_AWS_REGION,
         description="Region where terraform root/lock bucket exists",
     )
-    backend_use_all_remotes: bool = Field(
-        False,
-        json_schema_extra={"env": "WORKER_BACKEND_USE_ALL_REMOTES"},
-        description="Generate remote data sources based on all definition paths present in the backend",
-    )
+    # backend_use_all_remotes: bool = Field(
+    #     False,
+    #     json_schema_extra={"env": "WORKER_BACKEND_USE_ALL_REMOTES"},
+    #     description="Generate remote data sources based on all definition paths present in the backend",
+    # )
     create_backend_bucket: bool = Field(
         True, description="Create the backend bucket if it does not exist"
     )
@@ -214,6 +214,26 @@ class CLIOptionsRoot(BaseModel):
         except KeyError:
             raise ValueError("Invalid log level")
 
+    @field_validator("backend_prefix")
+    @classmethod
+    def validate_backend_prefix(cls, prefix: str) -> str:
+        """Mutate the backend prefix to ensure there are no leading or trailing slashes, or double slashes.
+
+        Args:
+            prefix (str): The backend prefix.
+
+        Returns:
+            The validated backend prefix.
+        """
+        if prefix.startswith("/"):
+            prefix = prefix[1:]
+        if prefix.endswith("/"):
+            prefix = prefix[:-1]
+        if "//" in prefix:
+            prefix = prefix.replace("//", "/")
+
+        return prefix
+
     @field_validator("repository_path")
     @classmethod
     def validate_repository_path(cls, fpath: str) -> str:
@@ -309,6 +329,11 @@ class CLIOptionsTerraform(BaseModel):
         False,
         json_schema_extra={"env": "WORKER_COLOR"},
         description="Colorize the output from terraform command",
+    )
+    backend_use_all_remotes: bool = Field(
+        False,
+        json_schema_extra={"env": "WORKER_BACKEND_USE_ALL_REMOTES"},
+        description="Generate remote data sources based on all definition paths present in the backend",
     )
 
     @field_validator("terraform_bin")

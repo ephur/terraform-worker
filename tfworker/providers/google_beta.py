@@ -1,4 +1,4 @@
-from tfworker.providers.google import GoogleProvider
+from .google import GoogleProvider
 
 
 class GoogleBetaProvider(GoogleProvider):

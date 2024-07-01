@@ -5,12 +5,12 @@ import tempfile
 
 from tfworker.util.system import pipe_exec
 
-from .copier import Copier
-from .factory import CopyFactory
+from .factory import Copier
 
 
-@CopyFactory.register("git")
 class GitCopier(Copier):
+    _register_name = "git"
+
     def copy(self, **kwargs) -> None:
         """copy clones a remote git repo, and puts the requested files into the destination"""
         dest = self.get_destination(**kwargs)

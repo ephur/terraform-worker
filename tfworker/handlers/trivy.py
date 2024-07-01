@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-from typing import Callable
 
 import click
 from pydantic import BaseModel

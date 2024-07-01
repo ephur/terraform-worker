@@ -1,5 +1,5 @@
-from tfworker.providers.base import BaseProvider
-from tfworker.types.provider import ProviderConfig
+from .base import BaseProvider
+from .model import ProviderConfig
 
 
 class GenericProvider(BaseProvider):
