@@ -26,6 +26,7 @@ class Definition(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    name: str
     path: str
     always_apply: bool = False
     always_include: bool = False

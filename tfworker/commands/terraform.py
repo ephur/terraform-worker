@@ -1,6 +1,6 @@
 import os
 import pathlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, Union
 
 import click
 
@@ -17,6 +17,7 @@ from tfworker.exceptions import (
     TFWorkerException,
 )
 from tfworker.util.system import pipe_exec, strip_ansi
+from tfworker.types.terraform import TerraformAction, TerraformStage
 
 if TYPE_CHECKING:
     from tfworker.app_state import AppState
@@ -36,17 +37,23 @@ class TerraformCommand(BaseCommand):
     If you are tempted to override the `__init__` method,
     reconsider the strategy for what you're about to add
     """
+    @property
+    def terraform_config(self):
+        if hasattr(self, "_terraform_config"):
+            return self._terraform_config
+        else:
+            self._terraform_config = TerraformCommandConfig(self._app_state)
+        return self._terraform_config
 
-    ##################
-    # Public methods #
-    ##################
     def prep_providers(self) -> None:
         """
         Prepare / Mirror the providers
         """
         if self.app_state.terraform_options.provider_cache is None:
-            log.trace("no provider cache specified, skipping provider mirroring")
-            return
+            log.debug("no provider cache specified; using temporary cache")
+            local_cache = self.app_state.working_dir / "terraform-plugins"
+            local_cache.mkdir(exist_ok=True)
+            self.app_state.terraform_options.provider_cache = str(local_cache)
 
         log.trace(
             f"using provider cache path: {self.app_state.terraform_options.provider_cache}"
@@ -62,36 +69,10 @@ class TerraformCommand(BaseCommand):
             log.error(f"error mirroring providers: {e}")
             self.ctx.exit(1)
 
-    # def terraform_init(self) -> None:
-    #     """
-    #     Handle execution of terraform init for all of the definitions
-    #     """
-    #     # generate an iterator for the specified definitions (or all if no limit is specified)
-    #     ctx, app_state = self._get_state()
 
-    #     # prepare the definitions and run terraform init
-    #     log.trace("preparing definitions and running terraform init")
-    #     self._prep_and_init(list(app_state.definitions))
-
-    #     # for definition in def_iter:
-    #     #     # Execute plan if needed
-    #     #     changes = (
-    #     #         self._exec_plan(definition) if self._check_plan(definition) else None
-    #     #     )
-
-    #     #     # execute apply or destroy if needed
-    #     #     if self._check_apply_or_destroy(changes, definition):
-    #     #         self._exec_apply_or_destroy(definition)
-
-    ###################
-    # Private methods #
-    ###################
-
-    ###########################################
-    # Methods for dealing with terraform init #
-    ###########################################
     def terraform_init(self) -> None:
         from tfworker.definitions.prepare import TerraformPrepare
+
 
         tfp = TerraformPrepare(self.ctx, self.app_state)
 
@@ -108,11 +89,82 @@ class TerraformCommand(BaseCommand):
                 log.error(f"error rendering templates for definition {name}: {e}")
                 self.ctx.exit(1)
 
-            try:
-                self._run(name, "init")
-            except TerraformError:
-                click.secho("error running terraform init", fg="red")
-                raise SystemExit(1)
+            self._execute_terraform_init(name=name)
+
+
+    def _execute_terraform_init(self, name: str) -> None:
+        """
+        Execute terraform init with hooks and handlers for the given definition
+        """
+        definition: Definition = self.app_state.definitions[name]
+
+        self._app_state.handlers.exec_handlers(
+            action=TerraformAction.INIT,
+            stage=TerraformStage.PRE,
+            deployment=self.app_state.deployment,
+            definition=name,
+            definition_path=definition.get_target_path(self.app_state.working_dir)
+        )
+
+        self._exec_hook(
+            self._app_state.definitions[name],
+            TerraformAction.INIT,
+            TerraformStage.PRE,
+        )
+
+        result = self._run(name, "init")
+        if result.exit_code:
+            log.error(f"error running terraform init for {name}")
+            self.ctx.exit(1)
+
+        self._app_state.handlers.exec_handlers(
+            action=TerraformAction.INIT,
+            stage=TerraformStage.POST,
+            deployment=self.app_state.deployment,
+            definition=name,
+            definition_path=definition.get_target_path(self.app_state.working_dir),
+            result=result
+        )
+
+        self._exec_hook(
+            self._app_state.definitions[name],
+            TerraformAction.INIT,
+            TerraformStage.POST,
+            result,
+        )
+
+
+
+    def terraform_plan(self) -> None:
+        for name in self.app_state.definitions.keys():
+            log.info(f"planning definition: {name}")
+
+            if self._check_plan(name):
+                changes = self._exec_plan(name)
+                self._check_apply_or_destroy(changes, name)
+
+        # if not self.app_state.terraform_options.stream_output:
+        #     results.log_stdout(action)
+        #     results.log_stderr(action)
+
+        # # If a plan file was saved, write the plan output
+        # if plan_file is not None:
+        #     results.log_file(f"{os.path.splitext(plan_file)[0]}.log")
+
+        # # special handling of the exit codes for "plan" operations
+        # if action == "plan":
+        #     if results.exit_code == 0:
+        #         return True
+        #     if results.exit_code == 1:
+        #         raise TerraformError
+        #     if results.exit_code == 2:
+        #         raise PlanChange
+
+        # if results.exit_code:
+        #     raise TerraformError
+
+        # return True
+
 
     ###########################################
     # Methods for dealing with terraform plan #
@@ -308,7 +360,7 @@ class TerraformCommand(BaseCommand):
         """_exec_apply_or_destroy executes a terraform apply or destroy"""
         # call handlers for pre apply
         try:
-            self._execute_handlers(
+            self.app_state.handlers.execute_handlers(
                 action=self._plan_for,
                 stage="pre",
                 deployment=self._deployment,
@@ -340,7 +392,7 @@ class TerraformCommand(BaseCommand):
 
         # call handlers for post apply/destroy
         try:
-            self._execute_handlers(
+            self.app_state.handlers.exec_handlers(
                 action=self._plan_for,
                 stage="post",
                 deployment=self._deployment,
@@ -349,6 +401,7 @@ class TerraformCommand(BaseCommand):
                 planfile=definition.plan_file,
                 error=tf_error,
             )
+
         except HandlerError as e:
             if e.terminate:
                 click.secho(f"terminating due to fatal handler error {e}", fg="red")
@@ -401,48 +454,22 @@ class TerraformCommand(BaseCommand):
                 raise SystemExit(1)
             click.secho(f"handler error: {e}", fg="red")
 
-    ########################################
-    # Common methods for running terraform #
-    ########################################
+
     def _run(
         self,
         definition_name: str,
-        command,
-        debug=False,
-        plan_action="init",
-        plan_file=None,
-    ):
-        """Run terraform."""
+        action: TerraformAction,
+        plan_action: str = "init",
+        plan_file: str = None,
+    ) -> "TerraformResult":
+        """
+        run terraform
+        """
         log.debug(
-            f"running terraform command: {command} for definition {definition_name}"
+            f"handling terraform command: {action} for definition {definition_name}"
         )
         definition: Definition = self.app_state.definitions[definition_name]
-
-        if self.app_state.terraform_options.provider_cache is None:
-            plugin_dir = f"{self._temp_dir}/terraform-plugins"
-        else:
-            plugin_dir = self.app_state.terraform_options.provider_cache
-
-        color_str = (
-            "-no-color" if self.app_state.terraform_options.color is False else ""
-        )
-        params = {
-            "init": f"-input=false {color_str} -plugin-dir={plugin_dir}",
-            # -lockfile=readonly is ideal, but many of our modules are not
-            # only partially defining the required providers; they need to specify all
-            # required providers, or none, and let the worker generate the requirements
-            # based on the deployment_config.yaml.j2
-            # "init": f"-input=false {color_str} -plugin-dir={plugin_dir} -lockfile=readonly",
-            "plan": f"-input=false -detailed-exitcode {color_str}",
-            "apply": f"-input=false {color_str} -auto-approve",
-            "destroy": f"-input=false {color_str} -auto-approve",
-        }
-        non_stream_output_func = {
-            "init": log.debug,
-            "plan": log.info,
-            "apply": log.info,
-            "destroy": log.info,
-        }
+        params: dict = self.terraform_config.get_params(action)
 
         if plan_action == "destroy":
             params["plan"] += " -destroy"
@@ -451,128 +478,168 @@ class TerraformCommand(BaseCommand):
             params["plan"] += f" -out {plan_file}"
             params["apply"] += f" {plan_file}"
 
-        env = os.environ.copy()
+        working_dir: str = definition.get_target_path(
+            self.app_state.root_options.working_dir
+        )
 
+        log.debug(
+            f"cmd: {self.app_state.terraform_options.terraform_bin} {action} {params}"
+        )
+
+        result: TerraformResult = TerraformResult(*pipe_exec(
+            f"{self.app_state.terraform_options.terraform_bin} {action} {params}",
+            cwd=working_dir,
+            env=self.terraform_config.env,
+            stream_output=self.terraform_config.stream_output
+        ))
+
+        log.debug(f"exit code: {result.exit_code}")
+        return result
+
+
+    def _exec_hook(self, definition: Definition, action: TerraformAction, stage: TerraformStage, result: Union["TerraformResult", None] = None) -> None:
+        """
+        Find and execute the appropriate hooks for a supplied definition
+
+        Args:
+            definition (Definition): the definition to execute the hooks for
+            action (TerraformAction): the action to execute the hooks for
+            stage (TerraformStage): the stage to execute the hooks for
+            result (TerraformResult): the result of the terraform command
+        """
+        hook_dir = definition.get_target_path(self.app_state.working_dir)
+
+        try:
+            if not hooks.check_hooks(stage, hook_dir, action):
+                log.trace(f"no {stage}-{action} hooks found for definition {definition.name}")
+                return
+
+            log.info(f"executing {stage}-{action} hooks for definition {definition.name}")
+            hooks.hook_exec(
+                stage,
+                action,
+                hook_dir,
+                self.terraform_config.env,
+                self.terraform_config.terraform_bin,
+                b64_encode=self.terraform_config.b64_encode,
+                debug=self.terraform_config.debug,
+                extra_vars=definition.get_template_vars(self.app_state.loaded_config.global_vars.template_vars)
+            )
+        except HookError as e:
+            log.error(f"hook execution error on definition {definition.name}: \n{e}")
+            self.ctx.exit(2)
+
+
+class TerraformResult:
+    """
+    Hold the results of a terraform run
+    """
+    def __init__(self, exit_code: int, stdout: bytes, stderr: bytes):
+        self.exit_code = exit_code
+        self.stdout = stdout
+        self.stderr = stderr
+
+    @property
+    def stdout_str(self) -> str:
+        return self.stdout.decode()
+
+    @property
+    def stderr_str(self) -> str:
+        return self.stdout.decode()
+
+    def log_stdout(self, action: TerraformAction) -> None:
+        log_method = TerraformCommandConfig.get_config().get_log_method(action)
+        for line in self.stdout.decode().splitlines():
+                log_method(f"stdout: {line}")
+
+    def log_stderr(self, action: TerraformAction) -> None:
+        log_method = TerraformCommandConfig.get_config().get_log_method(action)
+        for line in self.stderr.decode().splitlines():
+            log_method(f"stderr: {line}")
+
+    def log_file(self, filename: str) -> None:
+        with open(filename, "w+") as f:
+            f.write(self.stdout.decode())
+            f.write(self.stderr.decode())
+
+class TerraformCommandConfig:
+    """
+    A class to hold parameters for terraform commands
+
+    this class is meant to be a singleton
+    """
+
+    _instance = None
+
+    def __new__(cls, app_state: "AppState"):
+        if cls._instance is None:
+            cls._instance = super(TerraformCommandConfig, cls).__new__(cls)
+            cls._instance._app_state = app_state
+        return cls._instance
+
+    def __init__(self, app_state: "AppState"):
+        self._app_state = app_state
+        self._env = None
+
+    @classmethod
+    def get_config(cls) -> "TerraformCommandConfig":
+        return cls._instance
+
+    @property
+    def stream_output(self):
+        return self._app_state.terraform_options.stream_output
+
+    @property
+    def terraform_bin(self):
+        return self._app_state.terraform_options.terraform_bin
+
+    @property
+    def env(self):
+        if self._env is None:
+            self._env = self._get_env()
+        return self._env
+
+    @property
+    def b64_encode(self):
+        return self._app_state.terraform_options.b64_encode
+
+    @property
+    def debug(self):
+        if log.LogLevel[self._app_state.root_options.log_level].value <= log.LogLevel.DEBUG.value:
+            return True
+        return False
+
+    @staticmethod
+    def get_log_method(command: str) -> callable:
+        return {
+            "init": log.debug,
+            "plan": log.info,
+            "apply": log.info,
+            "destroy": log.info,
+        }[command]
+
+    def get_params(self, command: str) -> str:
+        """Return the parameters for a given command"""
+        color_str = (
+            "-no-color" if self._app_state.terraform_options.color is False else ""
+        )
+        """ it would be desirable to add -lockfile=readonly but requires modules have strict
+            adherance to defining all module versions
+            "init": f"-input=false {color_str} -plugin-dir={plugin_dir} -lockfile=readonly"""
+        return {
+            "init": f"-input=false {color_str} -plugin-dir={self._app_state.terraform_options.provider_cache}",
+            "plan": f"-input=false {color_str} -detailed-exitcode",
+            "apply": f"-input=false {color_str} -auto-approve",
+            "destroy": f"-input=false {color_str} -auto-approve",
+        }[command]
+
+    def _get_env(self) -> Dict[str, str]:
+        env = os.environ.copy()
         # acknowledge that we are using a plugin cache; and compute the lockfile each run
         env["TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE"] = "1"
         # reduce non essential terraform output
         env["TF_IN_AUTOMATION"] = "1"
 
-        for auth in self.app_state.authenticators:
+        for auth in self._app_state.authenticators:
             env.update(auth.env())
-
-        working_dir = definition.get_target_path(
-            self.app_state.root_options.working_dir
-        )
-        command_params = params.get(command)
-        if not command_params:
-            raise ValueError(
-                f"invalid command passed to terraform, {command} has no defined params!"
-            )
-
-        # only execute hooks for plan/apply/destroy
-        try:
-            if hooks.check_hooks("pre", working_dir, command) and command in [
-                "apply",
-                "destroy",
-                "plan",
-            ]:
-                # pre exec hooks
-                # want to pass remotes
-                # want to pass tf_vars
-                click.secho(
-                    f"found pre-{command} hook script for definition {definition.tag},"
-                    " executing ",
-                    fg="yellow",
-                )
-                hooks.hook_exec(
-                    "pre",
-                    command,
-                    working_dir,
-                    env,
-                    self._terraform_bin,
-                    debug=debug,
-                    b64_encode=self._b64_encode,
-                    extra_vars=definition.template_vars,
-                )
-        except HookError as e:
-            click.secho(
-                f"hook execution error on definition {definition.tag}: {e}",
-                fg="red",
-            )
-            raise SystemExit(2)
-
-        log.debug(
-            f"cmd: {self.app_state.terraform_options.terraform_bin} {command} {command_params}"
-        )
-        (exit_code, stdout, stderr) = pipe_exec(
-            f"{self.app_state.terraform_options.terraform_bin} {command} {command_params}",
-            cwd=working_dir,
-            env=env,
-            stream_output=self.app_state.terraform_options.stream_output,
-        )
-        log.debug(f"exit code: {exit_code}")
-        # (
-        #     self._terraform_output["exit_code"],
-        #     self._terraform_output["stdout"],
-        #     self._terraform_output["stderr"],
-        # ) = (exit_code, stdout, stderr)
-
-        if not self.app_state.terraform_options.stream_output:
-            for line in stdout.decode().splitlines():
-                non_stream_output_func[command](f"stdout: {line}")
-            for line in stderr.decode().splitlines():
-                non_stream_output_func[command](f"stderr: {line}")
-
-        # If a plan file was saved, write the plan output
-        if plan_file is not None:
-            plan_log = f"{os.path.splitext(plan_file)[0]}.log"
-
-            with open(plan_log, "w") as pl:
-                pl.write("STDOUT:\n")
-                for line in stdout.decode().splitlines():
-                    pl.write(f"{line}\n")
-                pl.write("\nSTDERR:\n")
-                for line in stderr.decode().splitlines():
-                    pl.write(f"{line}\n")
-
-        # special handling of the exit codes for "plan" operations
-        if command == "plan":
-            if exit_code == 0:
-                return True
-            if exit_code == 1:
-                raise TerraformError
-            if exit_code == 2:
-                raise PlanChange
-
-        if exit_code:
-            raise TerraformError
-
-        # only execute hooks for plan/destroy
-        try:
-            if hooks.check_hooks("post", working_dir, command) and command in [
-                "apply",
-                "destroy",
-                "plan",
-            ]:
-                click.secho(
-                    f"found post-{command} hook script for definition {definition.tag},"
-                    " executing ",
-                    fg="yellow",
-                )
-                hooks.hook_exec(
-                    "post",
-                    command,
-                    working_dir,
-                    env,
-                    self._terraform_bin,
-                    debug=debug,
-                    b64_encode=self._b64_encode,
-                    extra_vars=definition.template_vars,
-                )
-        except HookError as e:
-            click.secho(
-                f"hook execution error on definition {definition.tag}: {e}", fg="red"
-            )
-            raise SystemExit(2)
-        return True
+        return env

@@ -34,6 +34,7 @@ class DefinitionsCollection(Mapping):
             # validation the definition regardless of inclusion
             try:
                 log.trace(f"validating definition: {definition}")
+                body["name"] = definition
                 config = Definition.model_validate(body)
             except ValidationError as e:
                 handle_config_error(e)

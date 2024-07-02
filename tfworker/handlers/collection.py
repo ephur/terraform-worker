@@ -55,6 +55,7 @@ class HandlersCollection(Mapping):
         except Exception:
             raise UnknownHandler(provider=value)
 
+
     def exec_handlers(
         self, action: "TerraformAction", stage: "TerraformStage", **kwargs
     ):
@@ -62,11 +63,15 @@ class HandlersCollection(Mapping):
         exec_handlers is used to execute a specific action on all handlers
         """
         from tfworker.types import TerraformAction, TerraformStage
+        handler: BaseHandler
 
         if action not in TerraformAction:
             raise HandlerError(f"Invalid action {action}")
         if stage not in TerraformStage:
             raise HandlerError(f"Invalid stage {stage}")
-        for handler in self._handlers.values():
+        for name, handler in self._handlers.items():
             if handler is not None:
-                handler.exec_action(action, stage, **kwargs)
+                if action in handler.actions and handler.is_ready():
+                    handler.exec_action(action, stage, **kwargs)
+                else:
+                    log.trace(f"Handler {name} is not ready for action {action}")
