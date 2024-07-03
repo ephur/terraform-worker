@@ -71,6 +71,11 @@ class BaseCommand:
             self._app_state.loaded_config.handlers
         )
 
+        # with deployment name known, update the root options
+        self._app_state.root_options.backend_prefix = (
+            self._app_state.root_options.backend_prefix.format(deployment=deployment)
+        )
+
     @property
     def ctx(self) -> click.Context:
         return self._ctx
@@ -145,6 +150,7 @@ def _init_definitions(definitions_config: Dict[str, Any]) -> "DefinitionsCollect
         log.debug(
             f"initialized definitions {[x for x in definitions.keys()]}",
         )
+
     except ValueError as e:
         log.error(e)
         click.get_current_context().exit(1)
@@ -331,7 +337,7 @@ def _add_universal_handlers(parsed_handlers: Dict[str, Any]):
     for h in hr.list_universal_handlers():
         log.trace(f"initializing universal handler {h}")
         if h not in parsed_handlers.keys():
-            parsed_handlers[h] = hr.get_handler(h)
+            parsed_handlers[h] = hr.get_handler(h)()
 
 
 def _check_handlers_ready(handlers: "HandlersCollection"):

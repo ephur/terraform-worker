@@ -9,12 +9,12 @@ import re
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict
 
+import tfworker.util.log as log
 from tfworker.constants import (
     TF_STATE_CACHE_NAME,
     WORKER_LOCALS_FILENAME,
     WORKER_TFVARS_FILENAME,
 )
-import tfworker.util.log as log
 from tfworker.exceptions import HookError
 from tfworker.types.terraform import TerraformAction, TerraformStage
 from tfworker.util.system import pipe_exec
@@ -66,7 +66,9 @@ def get_state_item(
         log.trace(f"Getting state item {state}.{item} from output")
         return _get_state_item_from_output(working_dir, env, terraform_bin, state, item)
     except FileNotFoundError:
-        log.trace("Remote state not setup, falling back to getting state item from remote")
+        log.trace(
+            "Remote state not setup, falling back to getting state item from remote"
+        )
         return _get_state_item_from_remote(working_dir, env, terraform_bin, state, item)
 
 
@@ -374,7 +376,10 @@ def _execute_hook_script(
     """
     hook_dir = os.path.join(working_dir, "hooks")
     exit_code, stdout, stderr = pipe_exec(
-        f"{hook_script} {phase} {command}", cwd=hook_dir, env=local_env, stream_output=stream_output
+        f"{hook_script} {phase} {command}",
+        cwd=hook_dir,
+        env=local_env,
+        stream_output=stream_output,
     )
 
     if debug:

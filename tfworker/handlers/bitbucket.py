@@ -4,6 +4,7 @@ from atlassian.bitbucket import Cloud
 from pydantic import BaseModel
 
 from tfworker.exceptions import HandlerError
+from tfworker.types.terraform import TerraformAction, TerraformStage
 
 from .base import BaseHandler
 from .registry import HandlerRegistry
@@ -30,7 +31,7 @@ class BitbucketHandler(BaseHandler):
     """
 
     # define supported actions
-    actions = ["plan"]
+    actions = [TerraformAction.PLAN]
     config_model = BitbucketConfig
     ready = False
 

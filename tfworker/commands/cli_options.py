@@ -76,7 +76,7 @@ class CLIOptionsRoot(BaseModel):
         description="Store plans in the backend",
     )
     backend_prefix: str = Field(
-        f"{const.DEFAULT_BACKEND_PREFIX}",
+        const.DEFAULT_BACKEND_PREFIX,
         json_schema_extra={"env": "WORKER_BACKEND_PREFIX"},
         description="Prefix to use in backend storage bucket for all terraform states",
     )

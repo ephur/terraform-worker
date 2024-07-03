@@ -60,6 +60,11 @@ class Definition(BaseModel):
         {}, description="Variables which are suppled to any jinja templates."
     )
 
+    # Internals, these should not be set by the user
+    ready: bool = False
+    needs_apply: bool = False
+    plan_file: Optional[Union[str, None]] = None
+
     def get_target_path(self, working_dir: str) -> str:
         """
         Get the target path of the definition

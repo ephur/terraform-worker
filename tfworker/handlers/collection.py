@@ -5,6 +5,8 @@ import tfworker.util.log as log
 from tfworker.exceptions import HandlerError, UnknownHandler
 
 if TYPE_CHECKING:
+    from tfworker.commands.terraform import TerraformResult
+    from tfworker.definitions.model import Definition
     from tfworker.types import TerraformAction, TerraformStage
 
     from .base import BaseHandler  # noqa: F401
@@ -55,14 +57,20 @@ class HandlersCollection(Mapping):
         except Exception:
             raise UnknownHandler(provider=value)
 
-
     def exec_handlers(
-        self, action: "TerraformAction", stage: "TerraformStage", **kwargs
+        self,
+        action: "TerraformAction",
+        stage: "TerraformStage",
+        deployment: str,
+        definition: "Definition",
+        working_dir: str,
+        result: Union["TerraformResult", None] = None,
     ):
         """
         exec_handlers is used to execute a specific action on all handlers
         """
         from tfworker.types import TerraformAction, TerraformStage
+
         handler: BaseHandler
 
         if action not in TerraformAction:
@@ -72,6 +80,16 @@ class HandlersCollection(Mapping):
         for name, handler in self._handlers.items():
             if handler is not None:
                 if action in handler.actions and handler.is_ready():
-                    handler.exec_action(action, stage, **kwargs)
+                    log.trace(
+                        f"Executing handler {name} for {definition.name} action {action} and stage {stage}"
+                    )
+                    handler.execute(
+                        action=action,
+                        stage=stage,
+                        deployment=deployment,
+                        definition=definition,
+                        working_dir=working_dir,
+                        result=result,
+                    )
                 else:
                     log.trace(f"Handler {name} is not ready for action {action}")

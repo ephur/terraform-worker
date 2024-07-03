@@ -1,14 +1,21 @@
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, Union
 
 import click
 from pydantic import BaseModel
 
 from tfworker.exceptions import HandlerError
+from tfworker.types.terraform import TerraformAction, TerraformStage
 
 from ..util.system import pipe_exec, strip_ansi
 from .base import BaseHandler
 from .registry import HandlerRegistry
+
+if TYPE_CHECKING:
+    from tfworker.commands.terraform import TerraformResult
+    from tfworker.definitions.model import Definition
+    from tfworker.types import TerraformAction, TerraformStage
 
 
 class TrivyConfig(BaseModel):
@@ -37,9 +44,9 @@ class TrivyHandler(BaseHandler):
     The TrivyHandler will execute a trivy scan on a specified terraform plan file
     """
 
-    actions = ["plan"]
+    actions = [TerraformAction.PLAN]
     config_model = TrivyConfig
-    ready = False
+    _ready = False
 
     def __init__(self, config: BaseModel) -> None:
         # configure the handler
@@ -54,13 +61,13 @@ class TrivyHandler(BaseHandler):
 
     def execute(
         self,
-        action: str,
-        stage: str,
-        planfile: str = None,
-        definition_path: Path = None,
-        changes: bool = False,
-        **kwargs,
-    ) -> None:
+        action: "TerraformAction",
+        stage: "TerraformStage",
+        deployment: str,
+        definition: "Definition",
+        working_dir: str,
+        result: Union["TerraformResult", None] = None,
+    ) -> None:  # pragma: no cover
         """execute is called when a handler should trigger, if this is run post plan
         and there are changes, a scan will be executed
 

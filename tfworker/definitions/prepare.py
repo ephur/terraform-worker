@@ -32,7 +32,7 @@ terraform {{
 """
 
 
-class TerraformPrepare:
+class DefinitionPrepare:
     """
     TerraformPrepare is a class that prepares a definition to be ready for terraform init
     """
