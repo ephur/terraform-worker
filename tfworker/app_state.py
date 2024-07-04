@@ -8,10 +8,10 @@ from tfworker.backends import BaseBackend
 from tfworker.definitions import DefinitionsCollection
 from tfworker.handlers.collection import HandlersCollection
 from tfworker.providers import ProvidersCollection
-from tfworker.types import ConfigFile
+from tfworker.types import ConfigFile, FreezableBaseModel
 
 
-class AppState(BaseModel):
+class AppState(FreezableBaseModel):
     """
     AppState defines the model for the application state. The application state is stored on the
     click context as an object that can always be retrieved by any component of the program by
@@ -70,3 +70,10 @@ class AppState(BaseModel):
         None,
         description="The working directory is the root of where all filesystem actions are handled within the application.",
     )
+
+    def freeze(self):
+        super().freeze()
+        self.clean_options.freeze() if self.clean_options else None
+        self.terraform_options.freeze() if self.terraform_options else None
+        self.root_options.freeze() if self.root_options else None
+        self.loaded_config.freeze() if self.loaded_config else None

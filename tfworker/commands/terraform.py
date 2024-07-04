@@ -86,7 +86,7 @@ class TerraformCommand(BaseCommand):
                 log.error(f"error rendering templates for definition {name}: {e}")
                 self.ctx.exit(1)
 
-            self._execute_terraform_init(name=name)
+            self._exec_terraform_action(name=name, action=TerraformAction.INIT)
 
     def terraform_plan(self) -> None:
         if not self.app_state.terraform_options.plan:
@@ -106,11 +106,102 @@ class TerraformCommand(BaseCommand):
             needed, reason = def_plan.needs_plan(self.app_state.definitions[name])
 
             if not needed:
+                if "plan file exists" in reason:
+                    self.app_state.definitions[name].needs_apply = True
                 log.info(f"definition {name} does not need a plan: {reason}")
                 continue
 
             log.info(f"definition {name} needs a plan: {reason}")
             self._exec_terraform_plan(name=name)
+
+    def terraform_apply_or_destroy(self) -> None:
+        if self.app_state.terraform_options.destroy:
+            action: TerraformAction = TerraformAction.DESTROY
+        elif self.app_state.terraform_options.apply:
+            action: TerraformAction = TerraformAction.APPLY
+        else:
+            log.debug("neither apply nor destroy specified; skipping")
+            return
+
+        for name in self.app_state.definitions.keys():
+            if action == TerraformAction.DESTROY:
+                if self.app_state.terraform_options.limit:
+                    if name not in self.app_state.terraform_options.limit:
+                        log.info(f"skipping destroy for definition: {name}")
+                        continue
+            log.trace(
+                f"running {action} for definition: {name} if needs_apply is True, value is: {self.app_state.definitions[name].needs_apply}"
+            )
+            if self.app_state.definitions[name].needs_apply:
+                log.info(f"running apply for definition: {name}")
+                self._exec_terraform_action(name=name, action=action)
+
+    def _exec_terraform_action(self, name: str, action: TerraformAction) -> None:
+        """
+        Execute terraform action
+        """
+        if action == TerraformAction.PLAN:
+            raise TFWorkerException(
+                "use _exec_terraform_pre_plan & _exec_terraform_plan method to run plan"
+            )
+
+        definition: Definition = self.app_state.definitions[name]
+
+        try:
+            log.trace(
+                f"executing {TerraformStage.PRE} {action.value} handlers for definition {name}"
+            )
+            self._app_state.handlers.exec_handlers(
+                action=action,
+                stage=TerraformStage.PRE,
+                deployment=self.app_state.deployment,
+                definition=definition,
+                working_dir=self.app_state.working_dir,
+            )
+        except HandlerError as e:
+            log.error(f"handler error on definition {name}: {e}")
+            self.ctx.exit(2)
+
+        log.trace(
+            f"executing {TerraformStage.PRE} {action.value} hooks for definition {name}"
+        )
+        self._exec_hook(
+            definition,
+            action,
+            TerraformStage.PRE,
+        )
+
+        log.trace(f"running terraform {action.value} for definition {name}")
+        result = self._run(name, action)
+        if result.exit_code:
+            log.error(f"error running terraform {action.value} for {name}")
+            self.ctx.exit(1)
+
+        try:
+            log.trace(
+                f"executing {TerraformStage.POST.value} {action.value} handlers for definition {name}"
+            )
+            self._app_state.handlers.exec_handlers(
+                action=action,
+                stage=TerraformStage.POST,
+                deployment=self.app_state.deployment,
+                definition=definition,
+                working_dir=self.app_state.working_dir,
+                result=result,
+            )
+        except HandlerError as e:
+            log.error(f"handler error on definition {name}: {e}")
+            self.ctx.exit(2)
+
+        log.trace(
+            f"executing {TerraformStage.POST.value} {action.value} hooks for definition {name}"
+        )
+        self._exec_hook(
+            definition,
+            action,
+            TerraformStage.POST,
+            result,
+        )
 
     def _execute_terraform_init(self, name: str) -> None:
         """

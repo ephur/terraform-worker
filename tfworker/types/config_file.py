@@ -2,8 +2,10 @@ from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .freezable_basemodel import FreezableBaseModel
 
-class GlobalVars(BaseModel):
+
+class GlobalVars(FreezableBaseModel):
     """
     Global Variables can be defined inside of the configuration file, this is a model for those variables.
     """
@@ -22,7 +24,7 @@ class GlobalVars(BaseModel):
     )
 
 
-class ConfigFile(BaseModel):
+class ConfigFile(FreezableBaseModel):
     """
     This model is used to validate and deserialize the configuration file.
     """
@@ -40,3 +42,9 @@ class ConfigFile(BaseModel):
         {}, description="The base worker options, overlaps with command line options"
     )
     handlers: Dict[str, Any] = Field({}, description="The handler configurations.")
+
+    def freeze(self):
+        super().freeze()
+        if self.global_vars:
+            self.global_vars.freeze()
+        return self

@@ -9,6 +9,7 @@ import botocore
 import click
 
 import tfworker.util.log as log
+from tfworker.backends import Backends
 from tfworker.exceptions import HandlerError
 from tfworker.types.terraform import TerraformAction, TerraformStage
 
@@ -77,7 +78,7 @@ class S3Handler(BaseHandler):
         is_ready performs a test to ensure that the handler is able to perform
         the required operations in s3
         """
-        if self.app_state.root_options.backend != "s3":
+        if self.app_state.root_options.backend != Backends.S3:
             return False
         if self.app_state.root_options.backend_plans is not True:
             return False
@@ -192,7 +193,7 @@ class S3Handler(BaseHandler):
         finally:
             logfile.unlink()
 
-    def _pre_apply(self, planfile: Path, definition: str, **kwargs):
+    def _pre_apply(self, definition: "Definition", **kwargs):
         """_pre_apply runs before the apply is started, it should remove the planfile from the backend"""
         remotefile = self.get_remote_file(definition.name)
         remotelog = remotefile.replace(".tfplan", ".log")

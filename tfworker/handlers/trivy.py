@@ -86,8 +86,8 @@ class TrivyHandler(BaseHandler):
             None
         """
         # pre plan; trivy scan the definition if its applicable
+        definition_path = definition.get_target_path(working_dir=working_dir)
         if action == TerraformAction.PLAN and stage == TerraformStage.PRE:
-            definition_path = definition.get_target_path(working_dir=working_dir)
             if definition_path is None:
                 raise HandlerError(
                     "definition_path is not provided, can't scan",

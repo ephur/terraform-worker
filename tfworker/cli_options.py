@@ -16,10 +16,11 @@ from pydantic_core import InitErrorDetails
 import tfworker.util.log as log
 from tfworker import constants as const
 from tfworker.backends import Backends
+from tfworker.types import FreezableBaseModel
 from tfworker.util.terraform import get_terraform_version
 
 
-class CLIOptionsRoot(BaseModel):
+class CLIOptionsRoot(FreezableBaseModel):
     """
     CLIOptionsRoot is a Pydantic model that represents the root options for the CLI.
     """
@@ -251,7 +252,7 @@ class CLIOptionsRoot(BaseModel):
         return validate_existing_dir(fpath, empty=True)
 
 
-class CLIOptionsClean(BaseModel):
+class CLIOptionsClean(FreezableBaseModel):
     """
     CLIOptionsClean is a Pydantic model that represents the options for the clean command.
     """
@@ -269,7 +270,7 @@ class CLIOptionsClean(BaseModel):
         return validate_limit(values)
 
 
-class CLIOptionsTerraform(BaseModel):
+class CLIOptionsTerraform(FreezableBaseModel):
     """
     CLIOptionsTerraform is a Pydantic model that represents the options for the terraform command.
     """
@@ -341,6 +342,31 @@ class CLIOptionsTerraform(BaseModel):
         json_schema_extra={"env": "WORKER_BACKEND_USE_ALL_REMOTES"},
         description="Generate remote data sources based on all definition paths present in the backend",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_apply_and_destroy(cls, values):
+        errors = []
+        if values.get("apply") and values.get("destroy"):
+            errors.append(
+                InitErrorDetails(
+                    loc=("--apply", "--apply"),
+                    input=(values.get("apply")),
+                    ctx={"error": "apply and destroy cannot both be true"},
+                    type="value_error",
+                )
+            )
+            errors.append(
+                InitErrorDetails(
+                    loc=("--destroy", "--destroy"),
+                    input=(values.get("destroy")),
+                    ctx={"error": "apply and destroy cannot both be true"},
+                    type="value_error",
+                )
+            )
+        if errors:
+            raise ValidationError.from_exception_data("apply_and_destroy", errors)
+        return values
 
     @field_validator("terraform_bin")
     @classmethod

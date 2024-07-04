@@ -106,7 +106,7 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
     # orchestrated in the TerraformCommand classes .exec method
     tfc.terraform_init()
     tfc.terraform_plan()
-    # tfc.terraform_apply_or_destroy()
+    tfc.terraform_apply_or_destroy()
 
 
 @cli.command()
@@ -136,10 +136,11 @@ def register_plugins():
 
     # Register Handlers
     log.trace("registering handlers")
-    from tfworker.handlers.bitbucket import BitbucketHandler  # noqa: F401
-    from tfworker.handlers.s3 import S3Handler  # noqa: F401
-    from tfworker.handlers.trivy import TrivyHandler  # noqa: F401
+    import tfworker.handlers  # noqa: F401
 
+    # from tfworker.handlers.bitbucket import BitbucketHandler  # noqa: F401
+    # from tfworker.handlers.s3 import S3Handler  # noqa: F401
+    # from tfworker.handlers.trivy import TrivyHandler  # noqa: F401
     # Register Copiers
     log.trace("registering copiers")
     import tfworker.copier  # noqa: F401

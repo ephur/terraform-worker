@@ -75,6 +75,7 @@ class BaseCommand:
         self._app_state.root_options.backend_prefix = (
             self._app_state.root_options.backend_prefix.format(deployment=deployment)
         )
+        self._app_state.freeze()
 
     @property
     def ctx(self) -> click.Context:
