@@ -1,7 +1,7 @@
 from abc import ABCMeta, abstractmethod
 
 from tfworker.exceptions import BackendError
-from tfworker.types.json import JSONType
+from tfworker.types import JSONType
 
 
 class BaseBackend(metaclass=ABCMeta):
@@ -27,11 +27,6 @@ class BaseBackend(metaclass=ABCMeta):
     @property
     def handlers(self) -> dict:
         return {}
-
-
-class Backends:
-    s3 = "s3"
-    gcs = "gcs"
 
 
 def validate_backend_empty(state: JSONType) -> bool:

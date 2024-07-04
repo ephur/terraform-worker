@@ -1,16 +1,11 @@
-from collections.abc import Mapping
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, ConfigDict, GetCoreSchemaHandler, model_validator
-from pydantic_core import CoreSchema, core_schema
-from typing_extensions import Annotated
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from tfworker.constants import (
     TF_PROVIDER_DEFAULT_HOSTNAME,
     TF_PROVIDER_DEFAULT_NAMESPACE,
 )
-
-# from tfworker.providers.base import BaseProvider
 
 
 class ProviderRequirements(BaseModel):
@@ -49,7 +44,7 @@ class Provider(BaseModel):
     name: str
     gid: ProviderGID
     config: ProviderConfig
-    obj: "BaseProvider"
+    obj: "BaseProvider"  # noqa: F821
 
     # When the model is created, the gid is created from requirements.source, or the name
     @model_validator(mode="before")
@@ -87,7 +82,8 @@ class Provider(BaseModel):
 
 
 def init_forward_refs():
-    from tfworker.providers.base import BaseProvider
+    # this is required to prevent circular imports
+    from tfworker.providers.base import BaseProvider  # noqa: F401
 
     Provider.model_rebuild()
 

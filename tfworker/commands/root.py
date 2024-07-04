@@ -1,13 +1,13 @@
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, Union
+from typing import Any, Dict
 
 import click
 
 import tfworker.util.log as log
-from tfworker.commands.config import load_config, resolve_model_with_cli_options
+from tfworker.cli_options import CLIOptionsRoot
 
-from .cli_options import CLIOptionsRoot
+from .config import load_config, resolve_model_with_cli_options
 
 
 class RootCommand:

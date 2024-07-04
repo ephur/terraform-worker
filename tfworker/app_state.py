@@ -1,15 +1,14 @@
 from pathlib import Path
-from typing import Any, Dict
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from tfworker.authenticators.collection import AuthenticatorsCollection
-from tfworker.backends.base import BaseBackend
-from tfworker.commands import cli_options
-from tfworker.definitions.collection import DefinitionsCollection
+from tfworker import cli_options
+from tfworker.authenticators import AuthenticatorsCollection
+from tfworker.backends import BaseBackend
+from tfworker.definitions import DefinitionsCollection
 from tfworker.handlers.collection import HandlersCollection
-from tfworker.providers.collection import ProvidersCollection
-from tfworker.types.config_file import ConfigFile
+from tfworker.providers import ProvidersCollection
+from tfworker.types import ConfigFile
 
 
 class AppState(BaseModel):

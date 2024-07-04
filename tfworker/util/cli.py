@@ -1,4 +1,5 @@
 import typing as t
+from enum import Enum
 
 import click
 from pydantic import BaseModel, ValidationError
@@ -21,11 +22,14 @@ def handle_option_error(e: ValidationError) -> None:
         click.ClickBadOption: Pydantic validation error.
     """
     error_message = ["options error(s):"]
-    for error in e.errors():
-        # pydantic adds "Value error," to the beginning of the error message, so we remove it
-        error_message.append(
-            f"{error['loc'][0]}: {error['msg'].split(',', 1)[1].strip()}"
-        )
+    try:
+        for error in e.errors():
+            # pydantic adds "Value error," to the beginning of the error message, so we remove it
+            error_message.append(
+                f"{error['loc'][0]}: {error['msg'].split(',', 1)[1].strip()}"
+            )
+    except IndexError:
+        error_message.append(str(e))
 
     # use .format to work around python f-string limitation of not being able to use \n
     # log.msg(f"{'\\n  '.join(error_message)}", log.LogLevel.ERROR)
@@ -80,7 +84,6 @@ def pydantic_to_click(pydantic_model: t.Type[BaseModel]) -> click.Command:
     def decorator(func):
         model_types = t.get_type_hints(pydantic_model)
         for fname, fdata in reversed(sorted(pydantic_model.model_fields.items())):
-            description = fdata.description or ""
             default = fdata.default
             multiple = False
             has_extra = fdata.json_schema_extra is not None
@@ -107,9 +110,11 @@ def pydantic_to_click(pydantic_model: t.Type[BaseModel]) -> click.Command:
                 multiple = True
                 if default is PydanticUndefined:
                     default = []
-
+            elif isinstance(model_types[fname], type) and issubclass(
+                model_types[fname], Enum
+            ):
+                option_type = click.STRING
             else:
-                print(fname, fdata)
                 raise ValueError(f"Unsupported type {model_types[fname]}")
             c_option_kwargs["type"] = option_type
             c_option_kwargs["multiple"] = multiple

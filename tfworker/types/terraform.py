@@ -1,12 +1,4 @@
 from enum import Enum
-from typing import Optional
-
-from pydantic import BaseModel
-
-from tfworker.constants import (
-    TF_PROVIDER_DEFAULT_HOSTNAME,
-    TF_PROVIDER_DEFAULT_NAMESPACE,
-)
 
 
 class TerraformAction(Enum):

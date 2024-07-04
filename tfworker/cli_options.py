@@ -15,6 +15,7 @@ from pydantic_core import InitErrorDetails
 
 import tfworker.util.log as log
 from tfworker import constants as const
+from tfworker.backends import Backends
 from tfworker.util.terraform import get_terraform_version
 
 
@@ -60,8 +61,8 @@ class CLIOptionsRoot(BaseModel):
         json_schema_extra={"env": "AWS_DEFAULT_REGION"},
         description="AWS Region to build in",
     )
-    backend: Optional[str] = Field(
-        "s3",
+    backend: Backends = Field(
+        Backends.S3.name.lower(),
         json_schema_extra={"env": "WORKER_BACKEND"},
         description="State/locking provider. One of: s3, gcs",
     )
@@ -84,11 +85,11 @@ class CLIOptionsRoot(BaseModel):
         const.DEFAULT_AWS_REGION,
         description="Region where terraform root/lock bucket exists",
     )
-    # backend_use_all_remotes: bool = Field(
-    #     False,
-    #     json_schema_extra={"env": "WORKER_BACKEND_USE_ALL_REMOTES"},
-    #     description="Generate remote data sources based on all definition paths present in the backend",
-    # )
+    backend_use_all_remotes: bool = Field(
+        False,
+        json_schema_extra={"env": "WORKER_BACKEND_USE_ALL_REMOTES"},
+        description="Generate remote data sources based on all definition paths present in the backend",
+    )
     create_backend_bucket: bool = Field(
         True, description="Create the backend bucket if it does not exist"
     )
@@ -132,9 +133,9 @@ class CLIOptionsRoot(BaseModel):
         description="Specify the path to use instead of a temporary directory, must exist, be empty, and be writeable, --clean applies to this directory as well",
     )
 
-    @field_validator("backend")
+    @field_validator("backend", mode="before")
     @classmethod
-    def validate_backend(cls, backend: str) -> str:
+    def validate_backend(cls, backend: Union[Backends, str]) -> Backends:
         """Validate the backend type.
 
         Args:
@@ -146,9 +147,14 @@ class CLIOptionsRoot(BaseModel):
         Raises:
             ValueError: If the backend is not supported.
         """
-        if backend.lower() not in const.SUPPORTED_BACKENDS.keys():
-            raise ValueError(f"Backend {backend} is not supported!")
-        return backend.lower()
+        # convert the backend str to the corresponding enum
+        if isinstance(backend, str):
+            try:
+                selected_backend = Backends(backend.lower())
+            except ValueError:
+                raise ValueError(f"Backend {backend} is not supported!")
+            return selected_backend
+        return backend
 
     @field_validator("config_file")
     @classmethod

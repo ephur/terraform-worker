@@ -6,7 +6,6 @@ from pydantic import GetCoreSchemaHandler, ValidationError
 from pydantic_core import CoreSchema, core_schema
 
 import tfworker.util.log as log
-from tfworker.exceptions import TFWorkerException
 
 if TYPE_CHECKING:
     from tfworker.providers.model import Provider

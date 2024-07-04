@@ -1,7 +1,6 @@
 import click
 
-from tfworker.authenticators.collection import AuthenticatorsCollection
-from tfworker.commands.base import BaseCommand
+from .base import BaseCommand
 
 
 class EnvCommand(BaseCommand):
@@ -12,20 +11,7 @@ class EnvCommand(BaseCommand):
     executing commands against the rendered terraform definitions such as `terraform import`
     """
 
-    def __init__(self, rootc, **kwargs):
-        # Initialize the base command
-        self._rootc = rootc
-        self._args_dict = dict(kwargs)
-        self._args_dict.update(self._rootc.args.__dict__)
-
-        # parse the configuration
-        rootc.add_arg("deployment", "env")
-        rootc.load_config()
-
-        # initialize any authenticators
-        self._authenticators = AuthenticatorsCollection(rootc.args, deployment=None)
-
     def exec(self):
-        for auth in self._authenticators:
+        for auth in self.app_state.authenticators:
             for k, v in auth.env().items():
                 click.secho(f"export {k}={v}")

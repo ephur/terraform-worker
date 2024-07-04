@@ -4,12 +4,8 @@ from pydantic import ValidationError
 
 import tfworker.util.log as log
 from tfworker.app_state import AppState
+from tfworker.cli_options import CLIOptionsClean, CLIOptionsRoot, CLIOptionsTerraform
 from tfworker.commands.clean import CleanCommand
-from tfworker.commands.cli_options import (
-    CLIOptionsClean,
-    CLIOptionsRoot,
-    CLIOptionsTerraform,
-)
 from tfworker.commands.config import log_limiter
 from tfworker.commands.env import EnvCommand
 from tfworker.commands.root import RootCommand

@@ -1,68 +1,21 @@
 # This file contains functions primarily used by the "TerraformCommand" class
 # the goal of moving these functions here is to reduce the responsibility of
 # the TerraformCommand class, making it easier to test and maintain
-import pathlib
 import re
-import shutil
 from functools import lru_cache
-from typing import TYPE_CHECKING, Dict, List, Union
+from typing import Dict, List, Union
 
 import click
 
 import tfworker.util.log as log
 import tfworker.util.terraform_helpers as tfhelpers
 from tfworker.constants import (
-    DEFAULT_REPOSITORY_PATH,
     TF_PROVIDER_DEFAULT_HOSTNAME,
     TF_PROVIDER_DEFAULT_NAMESPACE,
 )
 from tfworker.exceptions import TFWorkerException
 from tfworker.providers import Provider, ProviderGID, ProvidersCollection
 from tfworker.util.system import pipe_exec
-
-
-def prep_modules(
-    module_path: str,
-    target_path: str,
-    ignore_patterns: list[str] = None,
-    required: bool = False,
-) -> None:
-    """This puts any terraform modules from the module path in place. By default
-    it will not generate an error if the module path is not found. If required
-    is set to True, it will raise an error if the module path is not found.
-
-    Args:
-        module_path (str): The path to the terraform modules directory
-        target_path (str): The path to the target directory, /terraform-modules will be appended
-        ignore_patterns (list(str)): A list of patterns to ignore
-        required (bool): If the terraform modules directory is required
-    """
-    if module_path == "":
-        module_path = f"{DEFAULT_REPOSITORY_PATH}/terraform-modules"
-
-    module_path = pathlib.Path(module_path)
-    target_path = pathlib.Path(f"{target_path}/terraform-modules".replace("//", "/"))
-
-    if not module_path.exists() and required:
-        click.secho(
-            f"The specified terraform-modules directory '{module_path}' does not exists",
-            fg="red",
-        )
-        raise SystemExit(1)
-
-    if not module_path.exists():
-        return
-
-    if ignore_patterns is None:
-        ignore_patterns = ["test", ".terraform", "terraform.tfstate*"]
-
-    click.secho(f"copying modules from {module_path} to {target_path}", fg="yellow")
-    shutil.copytree(
-        module_path,
-        target_path,
-        symlinks=True,
-        ignore=shutil.ignore_patterns(*ignore_patterns),
-    )
 
 
 @lru_cache
@@ -72,6 +25,7 @@ def get_terraform_version(terraform_bin: str, validation=False) -> tuple[int, in
 
     Args:
         terraform_bin (str): The path to the terraform binary.
+        validation (bool, optional): A boolean indicating if the function should raise an error if the version cannot be determined. Defaults to False.
     """
 
     # @TODO: instead of exiting, raise an error to handle it in the caller

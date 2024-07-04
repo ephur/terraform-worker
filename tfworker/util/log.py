@@ -94,7 +94,6 @@ def redact_items_token(
                         quote = items[i]
                         result.append(quote)
                         i += 1
-                        start = i
                         # skip chars until the closing quote
                         while i < len(items) and items[i] != quote:
                             i += 1
@@ -105,7 +104,6 @@ def redact_items_token(
                             i += 1
                     else:
                         # handle unquoted values
-                        start = i
                         while i < len(items) and items[i] not in " \t,:;\n":
                             i += 1
                         result.append("REDACTED")

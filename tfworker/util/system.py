@@ -5,8 +5,6 @@ import shlex
 import subprocess
 from typing import Dict, List, Tuple, Union
 
-import click
-
 
 def strip_ansi(line: str) -> str:
     """
@@ -114,7 +112,7 @@ def pipe_exec(
         # for a single command this will be the only command, for a pipeline reading from the
         # last command will trigger all of the commands, communicating through their pipes
         for line in iter(commands[-1].stdout.readline, ""):
-            click.secho(line.rstrip())
+            print(line.rstrip())
             stdout += line
 
         # for streaming output stderr will be included with stdout, there's no way to make

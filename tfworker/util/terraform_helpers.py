@@ -2,7 +2,7 @@ import json
 import os
 import pathlib
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Any, Dict, List, Union
+from typing import TYPE_CHECKING, Dict, List, Union
 
 import hcl2
 from lark.exceptions import UnexpectedToken

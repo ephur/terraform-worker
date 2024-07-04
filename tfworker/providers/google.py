@@ -1,5 +1,10 @@
+from typing import TYPE_CHECKING
+
 from .base import BaseProvider
 from .model import ProviderConfig
+
+if TYPE_CHECKING:
+    from tfworker.authenticators import AuthenticatorsCollection
 
 
 class GoogleProvider(BaseProvider):
@@ -12,8 +17,6 @@ class GoogleProvider(BaseProvider):
         self._authenticator = None
 
     def add_authenticators(self, authenticators: "AuthenticatorsCollection"):
-        from tfworker.authenticators.collection import AuthenticatorsCollection
-
         self._authenticator = authenticators.get(self.tag)
 
         # if there is a creds file, tuck it into the provider vars

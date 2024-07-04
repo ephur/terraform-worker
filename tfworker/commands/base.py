@@ -1,11 +1,11 @@
-from typing import TYPE_CHECKING, Any, Dict, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, Union
 
 import click
 from pydantic import BaseModel, ValidationError
 
 import tfworker.commands.config as c
 import tfworker.util.log as log
-from tfworker.exceptions import BackendError, HandlerError
+from tfworker.exceptions import BackendError, HandlerError, TFWorkerException
 from tfworker.util.cli import handle_config_error
 
 if TYPE_CHECKING:
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from tfworker.handlers.collection import HandlersCollection  # pragma: no cover
     from tfworker.providers.collection import ProvidersCollection  # pragma: no cover
 
-    from .cli_options import CLIOptionsRoot  # pragma: no cover
+    from ..cli_options import CLIOptionsRoot  # pragma: no cover
 
 
 class BaseCommand:
@@ -63,10 +63,10 @@ class BaseCommand:
         self._app_state.providers = _init_providers(
             self._app_state.loaded_config.providers, self._app_state.authenticators
         )
+        self._app_state.backend = _init_backend_(self._app_state)
         self._app_state.definitions = _init_definitions(
             self._app_state.loaded_config.definitions
         )
-        self._app_state.backend = _init_backend_(self._app_state)
         self._app_state.handlers = _init_handlers(
             self._app_state.loaded_config.handlers
         )
@@ -99,7 +99,11 @@ def _init_authenticators(
     Returns:
         AuthenticatorsCollection: The initialized authenticators collection
     """
-    authenticators = AuthenticatorsCollection(root_options)
+    try:
+        authenticators = AuthenticatorsCollection(root_options)
+    except TFWorkerException as e:
+        log.error(e)
+        click.get_current_context().exit(1)
     log.debug(
         f"initialized authentiactors {[x.tag for x in authenticators.keys()]}",
     )
@@ -168,13 +172,12 @@ def _init_backend_(app_state: "AppState") -> "BaseBackend":
         BaseBackend: The initialized backend.
 
     """
-    backend_config = app_state.loaded_config.worker_options["backend"]
+    backend_config = app_state.root_options.backend
 
     be = _select_backend(
         backend_config,
         app_state.deployment,
         app_state.authenticators,
-        app_state.definitions,
     )
 
     _check_backend_plans(app_state.root_options.backend_plans, be)
@@ -183,9 +186,7 @@ def _init_backend_(app_state: "AppState") -> "BaseBackend":
     return be
 
 
-def _select_backend(
-    backend_config, deployment, authenticators, definitions
-) -> "BaseBackend":
+def _select_backend(backend_config, deployment, authenticators) -> "BaseBackend":
     """
     Selects and initializes the backend.
 
@@ -208,7 +209,6 @@ def _select_backend(
             backend_config,
             deployment,
             authenticators,
-            definitions,
         )
     except BackendError as e:
         log.error(e)

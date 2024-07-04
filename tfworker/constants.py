@@ -15,8 +15,8 @@ TF_PROVIDER_DEFAULT_LOCKFILE = ".terraform.lock.hcl"
 # Items to refact from CLI / Logging output
 REDACTED_ITEMS = ["aws_secret_access_key", "aws_session_token"]
 
-# A map of supported backends, to the authenticators which they require
-SUPPORTED_BACKENDS = {"s3": "aws", "gcs": "google"}
+# # A map of supported backends, to the authenticators which they require
+# SUPPORTED_BACKENDS = {"s3": "aws", "gcs": "google"}
 
 TF_STATE_CACHE_NAME = "worker_state_cache.json"
 WORKER_LOCALS_FILENAME = "worker_generated_locals.tf"

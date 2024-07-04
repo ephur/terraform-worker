@@ -1,36 +1,24 @@
 import json
 import os
 from contextlib import closing
-from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import uuid4
-from zipfile import ZipFile
 
-import boto3
 import botocore
 import click
-from pydantic import BaseModel
 
 import tfworker.util.log as log
-from tfworker.exceptions import BackendError, HandlerError
-from tfworker.handlers.base import BaseConfig, BaseHandler
-from tfworker.handlers.registry import HandlerRegistry as hr
-from tfworker.types.terraform import TerraformAction, TerraformStage
+from tfworker.exceptions import BackendError
 
 from .base import BaseBackend, validate_backend_empty
-
-if TYPE_CHECKING:
-    from tfworker.app_state import AppState
 
 
 class S3Backend(BaseBackend):
     tag = "s3"
     auth_tag = "aws"
-    plan_storage = False
+    plan_storage = True
 
-    def __init__(self, authenticators, definitions, deployment=None):
+    def __init__(self, authenticators, deployment=None):
         # print the module name for debugging
-        self._definitions = definitions
         self._authenticator = authenticators[self.auth_tag]
         self._ctx = click.get_current_context()
         self._app_state = click.get_current_context().obj
@@ -57,20 +45,6 @@ class S3Backend(BaseBackend):
         self._ensure_locking_table()
         self._ensure_backend_bucket()
         self._bucket_files = self._get_bucket_files()
-
-        try:
-            # self._handlers = S3Handler(self._authenticator)
-            self.plan_storage = True
-        except HandlerError as e:
-            click.secho(f"Error initializing S3Handler: {e}")
-            raise SystemExit(1)
-
-    # @property
-    # def handlers(self) -> dict:
-    #     """
-    #     handlers returns a dictionary of handlers for the backend, ensure a singleton
-    #     """
-    #     return {self.tag: self._handlers}
 
     def remotes(self) -> list:
         """return a list of the remote bucket keys"""
@@ -103,7 +77,7 @@ class S3Backend(BaseBackend):
 
             if validate_backend_empty(backend):
                 self._delete_with_versions(s3_object)
-                click.secho(f"backend file removed: {s3_object}", fg="yellow")
+                log.info(f"backend file removed: {s3_object}")
             else:
                 raise BackendError(f"state file at: {s3_object} is not empty")
 
@@ -117,7 +91,7 @@ class S3Backend(BaseBackend):
         if definition is None:
             table = dynamo_client.Table(f"terraform-{deployment}")
             table.delete()
-            click.secho(f"locking table: terraform-{deployment} removed", fg="yellow")
+            log.info(f"locking table: terraform-{deployment} removed")
         else:
             # delete only the entry for a single state resource
             table = dynamo_client.Table(f"terraform-{deployment}")
@@ -126,9 +100,8 @@ class S3Backend(BaseBackend):
                     "LockID": f"{self._authenticator.bucket}/{self._authenticator.prefix}/{definition}/terraform.tfstate-md5"
                 }
             )
-            click.secho(
-                f"locking table key: '{self._authenticator.bucket}/{self._authenticator.prefix}/{definition}/terraform.tfstate-md5' removed",
-                fg="yellow",
+            log.info(
+                f"locking table key: '{self._authenticator.bucket}/{self._authenticator.prefix}/{definition}/terraform.tfstate-md5' removed"
             )
 
     def _ensure_locking_table(self) -> None:
@@ -239,7 +212,7 @@ class S3Backend(BaseBackend):
         """
         _create_bucket_versioning enables versioning on the bucket
         """
-        click.secho(f"Enabling versioning on bucket: {name}", fg="yellow")
+        log.info(f"Enabling versioning on bucket: {name}")
         self._s3_client.put_bucket_versioning(
             Bucket=name, VersioningConfiguration={"Status": "Enabled"}
         )
@@ -248,7 +221,7 @@ class S3Backend(BaseBackend):
         """
         _create_bucket_public_access_block blocks public access to the bucket
         """
-        click.secho(f"Blocking public access to bucket: {name}", fg="yellow")
+        log.info(f"Blocking public access to bucket: {name}")
         self._s3_client.put_public_access_block(
             Bucket=name,
             PublicAccessBlockConfiguration={
@@ -313,9 +286,8 @@ class S3Backend(BaseBackend):
         """
         if limit:
             for limit_item in limit:
-                click.secho(
-                    "when using limit, dynamodb tables won't be completely dropped",
-                    fg="yellow",
+                log.warn(
+                    "when using limit, dynamodb tables won't be completely dropped"
                 )
                 try:
                     # the bucket state deployment is part of the s3 prefix
@@ -323,14 +295,12 @@ class S3Backend(BaseBackend):
                     # deployment name needs specified to determine the dynamo table
                     self._clean_locking_state(deployment, definition=limit_item)
                 except BackendError as e:
-                    click.secho(f"error deleting state: {e}", fg="red")
-                    raise SystemExit(1)
+                    raise BackendError(f"error deleting state: {e}")
         else:
             try:
                 self._clean_bucket_state()
             except BackendError as e:
-                click.secho(f"error deleting state: {e}")
-                raise SystemExit(1)
+                raise BackendError(f"error deleting state: {e}")
             self._clean_locking_state(deployment)
 
     def hcl(self, name: str) -> str:

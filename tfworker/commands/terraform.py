@@ -1,5 +1,4 @@
 import os
-import pathlib
 from typing import TYPE_CHECKING, Dict, Union
 
 import click
@@ -12,12 +11,11 @@ from tfworker.definitions import Definition
 from tfworker.exceptions import (
     HandlerError,
     HookError,
-    PlanChange,
     TerraformError,
     TFWorkerException,
 )
 from tfworker.types.terraform import TerraformAction, TerraformStage
-from tfworker.util.system import pipe_exec, strip_ansi
+from tfworker.util.system import pipe_exec
 
 if TYPE_CHECKING:
     from tfworker.app_state import AppState
@@ -120,14 +118,18 @@ class TerraformCommand(BaseCommand):
         """
         definition: Definition = self.app_state.definitions[name]
 
-        log.trace(f"executing pre init handlers for definition {name}")
-        self._app_state.handlers.exec_handlers(
-            action=TerraformAction.INIT,
-            stage=TerraformStage.PRE,
-            deployment=self.app_state.deployment,
-            definition=name,
-            working_dir=self.app_state.working_dir,
-        )
+        try:
+            log.trace(f"executing pre init handlers for definition {name}")
+            self._app_state.handlers.exec_handlers(
+                action=TerraformAction.INIT,
+                stage=TerraformStage.PRE,
+                deployment=self.app_state.deployment,
+                definition=name,
+                working_dir=self.app_state.working_dir,
+            )
+        except HandlerError as e:
+            log.error(f"handler error on definition {name}: {e}")
+            self.ctx.exit(2)
 
         log.trace(f"executing pre init hooks for definition {name}")
         self._exec_hook(
@@ -142,15 +144,19 @@ class TerraformCommand(BaseCommand):
             log.error(f"error running terraform init for {name}")
             self.ctx.exit(1)
 
-        log.trace(f"executing post init handlers for definition {name}")
-        self._app_state.handlers.exec_handlers(
-            action=TerraformAction.INIT,
-            stage=TerraformStage.POST,
-            deployment=self.app_state.deployment,
-            definition=definition,
-            working_dir=self.app_state.working_dir,
-            result=result,
-        )
+        try:
+            log.trace(f"executing post init handlers for definition {name}")
+            self._app_state.handlers.exec_handlers(
+                action=TerraformAction.INIT,
+                stage=TerraformStage.POST,
+                deployment=self.app_state.deployment,
+                definition=definition,
+                working_dir=self.app_state.working_dir,
+                result=result,
+            )
+        except HandlerError as e:
+            log.error(f"handler error on definition {name}: {e}")
+            self.ctx.exit(2)
 
         log.trace(f"executing post init hooks for definition {name}")
         self._exec_hook(
@@ -167,13 +173,17 @@ class TerraformCommand(BaseCommand):
         definition: Definition = self.app_state.definitions[name]
 
         log.trace(f"executing pre plan handlers for definition {name}")
-        self._app_state.handlers.exec_handlers(
-            action=TerraformAction.PLAN,
-            stage=TerraformStage.PRE,
-            deployment=self.app_state.deployment,
-            definition=definition,
-            working_dir=self.app_state.working_dir,
-        )
+        try:
+            self._app_state.handlers.exec_handlers(
+                action=TerraformAction.PLAN,
+                stage=TerraformStage.PRE,
+                deployment=self.app_state.deployment,
+                definition=definition,
+                working_dir=self.app_state.working_dir,
+            )
+        except HandlerError as e:
+            log.error(f"handler error on definition {name}: {e}")
+            self.ctx.exit(2)
 
         log.trace(f"executing pre plan hooks for definition {name}")
         self._exec_hook(
@@ -203,15 +213,19 @@ class TerraformCommand(BaseCommand):
             log.debug(f"terraform plan for {name} indicates changes")
             definition.needs_apply = True
 
-        log.trace(f"executing post plan handlers for definition {name}")
-        self._app_state.handlers.exec_handlers(
-            action=TerraformAction.PLAN,
-            stage=TerraformStage.POST,
-            deployment=self.app_state.deployment,
-            definition=definition,
-            working_dir=self.app_state.working_dir,
-            result=result,
-        )
+        try:
+            log.trace(f"executing post plan handlers for definition {name}")
+            self._app_state.handlers.exec_handlers(
+                action=TerraformAction.PLAN,
+                stage=TerraformStage.POST,
+                deployment=self.app_state.deployment,
+                definition=definition,
+                working_dir=self.app_state.working_dir,
+                result=result,
+            )
+        except HandlerError as e:
+            log.error(f"handler error on definition {name}: {e}")
+            self.ctx.exit(2)
 
         log.trace(f"executing post plan hooks for definition {name}")
         self._exec_hook(
@@ -334,6 +348,9 @@ class TerraformResult:
         with open(filename, "w+") as f:
             f.write(self.stdout.decode())
             f.write(self.stderr.decode())
+
+    def has_changes(self) -> bool:
+        return self.exit_code == 2
 
 
 class TerraformCommandConfig:

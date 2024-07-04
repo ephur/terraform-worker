@@ -1,6 +1,6 @@
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class BaseAuthenticatorConfig(BaseModel): ...
@@ -15,8 +15,3 @@ class BaseAuthenticator(ABC):
 
     @abstractmethod
     def env(self): ...
-
-
-class UnknownAuthenticator(Exception):
-    def __init__(self, provider):
-        super().__init__(f"{provider} is not a known authenticator.")

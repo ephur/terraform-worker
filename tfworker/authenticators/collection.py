@@ -4,17 +4,17 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 import tfworker.util.log as log
+from tfworker.exceptions import UnknownAuthenticator
 
 from .aws import AWSAuthenticator  # noqa
 from .base import BaseAuthenticator  # noqa
-from .base import UnknownAuthenticator  # noqa
 from .google import GoogleAuthenticator, GoogleBetaAuthenticator  # noqa
 
 # from tfworker.types.cli_options import CLIOptionsRoot
 
 
 if TYPE_CHECKING:
-    from tfworker.commands.cli_options import CLIOptionsRoot
+    from tfworker.cli_options import CLIOptionsRoot
 
 # ALL = [AWSAuthenticator, GoogleAuthenticator, GoogleBetaAuthenticator]
 ALL = [AWSAuthenticator, GoogleAuthenticator, GoogleBetaAuthenticator]
@@ -33,7 +33,7 @@ class AuthenticatorsCollection(collections.abc.Mapping):
                 config = auth.config_model(**root_args.model_dump())
                 self._authenticators[auth.tag] = auth(config)
                 log.debug(f"authenticator {auth.tag} created")
-            except ValidationError as e:
+            except ValidationError:
                 log.trace(
                     f"authenticator {auth.tag} not created, configuration not supplied"
                 )

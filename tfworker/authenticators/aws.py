@@ -6,7 +6,7 @@ from botocore.credentials import Credentials
 from pydantic import field_validator, model_validator
 
 import tfworker.util.log as log
-from tfworker import constants as const
+from tfworker.exceptions import TFWorkerException
 
 from .base import BaseAuthenticator, BaseAuthenticatorConfig
 
@@ -70,9 +70,13 @@ class AWSAuthenticator(BaseAuthenticator):
         self._session: boto3.session = None
 
         log.debug(f"authenticating to AWS, in region {auth_config.aws_region}")
-        init_session: boto3.session = boto3.Session(
-            region_name=auth_config.aws_region, **_get_init_session_args(auth_config)
-        )
+        try:
+            init_session: boto3.session = boto3.Session(
+                region_name=auth_config.aws_region,
+                **_get_init_session_args(auth_config),
+            )
+        except Exception as e:
+            raise TFWorkerException(f"error authenticating to AWS: {e}") from e
 
         # Handle the primary session
         if not auth_config.aws_role_arn:
@@ -95,10 +99,15 @@ class AWSAuthenticator(BaseAuthenticator):
                 log.debug(
                     f"authenticating to AWS for backend session, in region {auth_config.backend_region}"
                 )
-                self._backend_session = boto3.Session(
-                    region_name=auth_config.backend_region,
-                    **_get_init_session_args(auth_config),
-                )
+                try:
+                    self._backend_session = boto3.Session(
+                        region_name=auth_config.backend_region,
+                        **_get_init_session_args(auth_config),
+                    )
+                except Exception as e:
+                    raise TFWorkerException(
+                        f"error authenticating to AWS for backend: {e}"
+                    ) from e
 
     @property
     def backend_session(self) -> boto3.session:
@@ -203,15 +212,18 @@ def _assume_role_session(
         }
         region = auth_config.backend_region
 
-    if external_id:
-        assume_args["ExternalId"] = external_id
+    if auth_config.external_id:
+        assume_args["ExternalId"] = auth_config.external_id
 
     role_creds = sts_client.assume_role(**assume_args)["Credentials"]
-    new_session = boto3.Session(
-        aws_access_key_id=role_creds["AccessKeyId"],
-        aws_secret_access_key=role_creds["SecretAccessKey"],
-        aws_session_token=role_creds["SessionToken"],
-        region_name=region,
-    )
+    try:
+        new_session = boto3.Session(
+            aws_access_key_id=role_creds["AccessKeyId"],
+            aws_secret_access_key=role_creds["SecretAccessKey"],
+            aws_session_token=role_creds["SessionToken"],
+            region_name=region,
+        )
+    except Exception as e:
+        raise TFWorkerException(f"error assuming role: {e}") from e
 
     return new_session

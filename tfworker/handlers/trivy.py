@@ -2,9 +2,9 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
-import click
 from pydantic import BaseModel
 
+import tfworker.util.log as log
 from tfworker.exceptions import HandlerError
 from tfworker.types.terraform import TerraformAction, TerraformStage
 
@@ -15,7 +15,6 @@ from .registry import HandlerRegistry
 if TYPE_CHECKING:
     from tfworker.commands.terraform import TerraformResult
     from tfworker.definitions.model import Definition
-    from tfworker.types import TerraformAction, TerraformStage
 
 
 class TrivyConfig(BaseModel):
@@ -55,6 +54,10 @@ class TrivyHandler(BaseHandler):
 
         # ensure trivy is runnable
         if not self._trivy_runable(self._path):
+            if self.required:
+                raise HandlerError(
+                    f"Trivy is not runnable at {self._path}", terminate=True
+                )
             raise HandlerError(f"Trivy is not runnable at {self._path}")
 
         self._ready = True
@@ -83,7 +86,8 @@ class TrivyHandler(BaseHandler):
             None
         """
         # pre plan; trivy scan the definition if its applicable
-        if action == "plan" and stage == "pre":
+        if action == TerraformAction.PLAN and stage == TerraformStage.PRE:
+            definition_path = definition.get_target_path(working_dir=working_dir)
             if definition_path is None:
                 raise HandlerError(
                     "definition_path is not provided, can't scan",
@@ -91,16 +95,19 @@ class TrivyHandler(BaseHandler):
                 )
 
             if self._skip_definition:
-                click.secho("Skipping trivy scan of definition", fg="yellow")
+                log.info(f"Skipping trivy scan of definition: {definition_path}")
                 return None
 
-            click.secho(
-                f"scanning definition with trivy: {definition_path}", fg="green"
-            )
+            log.info(f"scanning definition with trivy: {definition_path}")
             self._scan(definition_path)
 
         # post plan; trivy scan the planfile if its applicable
-        if action == "plan" and stage == "post" and changes:
+        if (
+            action == TerraformAction.PLAN
+            and stage == TerraformStage.POST
+            and result.has_changes()
+        ):
+            planfile = definition.plan_file
             if planfile is None:
                 raise HandlerError(
                     "planfile is not provided, can't scan", terminate=self._required
@@ -113,10 +120,10 @@ class TrivyHandler(BaseHandler):
                 )
 
             if self._skip_planfile:
-                click.secho("Skipping trivy scan of planfile", fg="yellow")
+                log.info(f"Skipping trivy scan of planfile: {planfile}")
                 return None
 
-            click.secho(f"scanning planfile with trivy: {planfile}", fg="green")
+            log.info(f"scanning planfile with trivy: {planfile}")
             self._scan(definition_path, planfile)
 
     def _scan(self, definition_path: Path, planfile: Path = None):
@@ -177,7 +184,7 @@ class TrivyHandler(BaseHandler):
 
         try:
             if self._debug:
-                click.secho(f"cmd: {' '.join(trivy_args)}", fg="yellow")
+                log.debug(f"cmd: {' '.join(trivy_args)}")
             (exit_code, stdout, stderr) = pipe_exec(
                 f"{' '.join(trivy_args)}",
                 cwd=str(definition_path),
@@ -200,14 +207,14 @@ class TrivyHandler(BaseHandler):
             None
         """
         if exit_code != 0:
-            click.secho(f"trivy scan failed with exit code {exit_code}", fg="red")
+            log.error(f"trivy scan failed with exit code {exit_code}")
             if self._stream_output is False:
-                click.secho(strip_ansi(f"stdout: {stdout.decode('UTF-8')}"), fg="red")
-                click.secho(strip_ansi(f"stderr: {stderr.decode('UTF-8')}"), fg="red")
+                log.error(strip_ansi(f"stdout: {stdout.decode('UTF-8')}"))
+                log.error(strip_ansi(f"stderr: {stderr.decode('UTF-8')}"))
 
             if self._required:
                 if planfile is not None:
-                    click.secho(f"Removing planfile: {planfile}", fg="yellow")
+                    log.warn(f"Removing planfile: {planfile}")
                     os.remove(planfile)
                 raise HandlerError(
                     "trivy scan required; aborting execution", terminate=True

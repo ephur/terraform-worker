@@ -12,14 +12,12 @@ import tfworker.util.log as log
 from tfworker.exceptions import HandlerError
 from tfworker.types.terraform import TerraformAction, TerraformStage
 
-from ..util.system import pipe_exec, strip_ansi
 from .base import BaseConfig, BaseHandler
 from .registry import HandlerRegistry
 
 if TYPE_CHECKING:
     from tfworker.commands.terraform import TerraformResult
     from tfworker.definitions.model import Definition
-    from tfworker.types import TerraformAction, TerraformStage
 
 
 @HandlerRegistry.register("s3", always=True)

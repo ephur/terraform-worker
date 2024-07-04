@@ -15,9 +15,8 @@ class GCSBackend(BaseBackend):
     tag = "gcs"
     auth_tag = "google"
 
-    def __init__(self, authenticators, definitions, deployment=None):
+    def __init__(self, authenticators, deployment=None):
         self._authenticator = authenticators[self.auth_tag]
-        self._definitions = definitions
         self._gcs_bucket = None
         self._gcs_prefix = None
 

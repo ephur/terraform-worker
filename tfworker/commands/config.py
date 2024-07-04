@@ -17,7 +17,7 @@ from tfworker.app_state import AppState
 from tfworker.types.config_file import ConfigFile
 from tfworker.util.cli import handle_config_error
 
-from . import cli_options
+from .. import cli_options
 
 
 def load_config(config_file: str, config_vars: Dict[str, str]) -> ConfigFile:
@@ -168,20 +168,23 @@ def _set_model_parameters(
     for k, v in app_state.loaded_config.worker_options.items():
         if k in model.model_fields:
             if ctx.get_parameter_source(k) in skip_param_sources:
+                log.trace(
+                    f"skipping {k} as it is set via {ctx.get_parameter_source(k)}"
+                )
                 continue
             log.trace(f"Setting {k} to {v} on {field}")
             try:
                 setattr(model, k, v)
             except ValidationError as e:
                 handle_config_error(e)
-    # Also need to add all unset model options to the worker_options
+    # Also need to add all the worker_options to the loaded_config
     for k in model.model_fields.keys():
-        if k not in app_state.loaded_config.worker_options:
-            value = getattr(model, k)
-            log.trace(
-                f"adding {k}={value} to worker_options via {model.__class__.__name__}"
-            )
-            app_state.loaded_config.worker_options[k] = value
+        # if k not in app_state.loaded_config.worker_options:
+        value = getattr(model, k)
+        log.trace(
+            f"setting {k}={value} to worker_options via {model.__class__.__name__}"
+        )
+        app_state.loaded_config.worker_options[k] = value
 
 
 def _process_template(config_file: str, config_vars: Dict[str, str]) -> str:

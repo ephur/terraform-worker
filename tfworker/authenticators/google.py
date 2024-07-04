@@ -1,7 +1,5 @@
 import shlex
 
-from tfworker import constants as const
-
 from .base import BaseAuthenticator, BaseAuthenticatorConfig
 
 

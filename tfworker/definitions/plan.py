@@ -43,9 +43,8 @@ class DefinitionPlan:
         else:
             plan_base: str = Path(f"{self._app_state.working_dir}/plans").resolve()
 
-        plan_path: Path = Path(f"{plan_base}/{self._app_state.deployment}")
-        plan_path.mkdir(parents=True, exist_ok=True)
-        plan_file: Path = plan_path / f"{definition.name}.tfplan"
+        plan_base.mkdir(parents=True, exist_ok=True)
+        plan_file: Path = plan_base / f"{definition.name}.tfplan"
         definition.plan_file = plan_file.resolve()
 
     def needs_plan(self, definition: "Definition") -> Tuple[bool, str]:

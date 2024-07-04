@@ -94,3 +94,8 @@ class HandlerError(TFWorkerException):
 
     def __str__(self) -> str:
         return f"Handler error: {self.message}"
+
+
+class UnknownAuthenticator(Exception):
+    def __init__(self, provider):
+        super().__init__(f"{provider} is not a known authenticator.")

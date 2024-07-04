@@ -1,5 +1,4 @@
 from collections.abc import Mapping
-from copy import deepcopy
 from typing import Dict, List
 
 from pydantic import GetCoreSchemaHandler, ValidationError
@@ -25,6 +24,8 @@ class DefinitionsCollection(Mapping):
 
         log.trace("initializing DefinitionsCollection")
         self._definitions = {}
+        if limiter is None:
+            limiter = []
         for definition, body in definitions.items():
             # disallow commas in definition names
             if "," in definition:
@@ -41,7 +42,7 @@ class DefinitionsCollection(Mapping):
 
             if config.always_apply or config.always_include:
                 log.trace(f"definition {definition} is set to always_[apply|include]")
-            elif definition not in limiter:
+            elif len(limiter) > 0 and definition not in limiter:
                 log.trace(f"definition {definition} not in limiter, skipping")
                 continue
 
