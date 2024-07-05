@@ -12,6 +12,20 @@ def aws_credentials():
     os.environ["AWS_SESSION_TOKEN"] = "testing"
 
 
+@pytest.fixture
+def empty_state():
+    with open(f"{os.path.dirname(__file__)}/fixtures/states/empty.tfstate", "r") as f:
+        return f.read()
+
+
+@pytest.fixture
+def occupied_state():
+    with open(
+        f"{os.path.dirname(__file__)}/fixtures/states/occupied.tfstate", "r"
+    ) as f:
+        return f.read()
+
+
 # import os
 # import random
 # import string

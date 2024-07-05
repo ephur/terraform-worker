@@ -1,4 +1,5 @@
 import json
+from typing import TYPE_CHECKING
 
 import click
 from google.api_core import page_iterator
@@ -10,12 +11,19 @@ from tfworker.exceptions import BackendError
 
 from .base import BaseBackend, validate_backend_empty
 
+if TYPE_CHECKING:
+    from tfworker.authenticators import (  # pragma: no cover  # noqa
+        AuthenticatorsCollection,
+    )
+
 
 class GCSBackend(BaseBackend):
     tag = "gcs"
     auth_tag = "google"
 
-    def __init__(self, authenticators, deployment=None):
+    def __init__(
+        self, authenticators: "AuthenticatorsCollection", deployment: str = None
+    ):
         self._authenticator = authenticators[self.auth_tag]
         self._gcs_bucket = None
         self._gcs_prefix = None
@@ -86,6 +94,7 @@ class GCSBackend(BaseBackend):
             else:
                 raise BackendError(f"state file at: {b.name} is not empty")
 
+    @property
     def remotes(self) -> list:
         """this is unimplemented here"""
         raise NotImplementedError

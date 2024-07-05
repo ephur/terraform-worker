@@ -159,7 +159,7 @@ class DefinitionPrepare:
         log.trace(f"getting remotes for definition {name}")
         if self._app_state.terraform_options.backend_use_all_remotes:
             log.trace(f"using all remotes for definition {name}")
-            remotes = self._app_state.backend.remotes()
+            remotes = self._app_state.backend.remotes
         else:
             remotes = list(
                 map(lambda x: x.split(".")[0], definition.remote_vars.values())
