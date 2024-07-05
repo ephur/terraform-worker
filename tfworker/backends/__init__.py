@@ -1,5 +1,5 @@
-from .backends import Backends  # noqa
-from .base import BaseBackend  # noqa
-from .gcs import GCSBackend  # noqa
-from .s3 import S3Backend  # noqa
-from .selector import select_backend  # noqa
+from .backends import Backends  # pragma: no cover # noqa
+from .base import BaseBackend  # pragma: no cover # noqa
+from .gcs import GCSBackend  # pragma: no cover # noqa
+from .s3 import S3Backend  # pragma: no cover # noqa
+from .selector import select_backend  # pragma: no cover # noqa

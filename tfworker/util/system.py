@@ -85,7 +85,7 @@ def pipe_exec(
         if lastloop and stream_output:
             popen_kwargs["stderr"] = subprocess.STDOUT
 
-        commands.append(subprocess.Popen(shlex.split(args[i]), **popen_kwargs))
+        commands.append(subprocess.Popen(shlex.split(cmd_str), **popen_kwargs))
 
         # close stdout on the command before we just added to allow recieving SIGPIPE
         commands[-2].stdout.close()

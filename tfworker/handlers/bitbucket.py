@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Union
 
 from atlassian.bitbucket import Cloud
 from pydantic import BaseModel, Field
+from pydantic_settings import SettingsConfigDict
 
 from tfworker.exceptions import HandlerError
 from tfworker.types.terraform import TerraformAction, TerraformStage
@@ -15,13 +16,16 @@ if TYPE_CHECKING:
 
 
 class BitbucketConfig(BaseModel):
+    model_config = SettingsConfigDict(env_prefix="BITBUCKET_")
+
     username: str
     password: str
     workspace: str
     project: str
     repository: str
     pull_request: str = Field(
-        description="The pull request number to add the comment to.", env="PULL_REQUEST"
+        description="The pull request number to add the comment to.",
+        json_schema_extra={"env": "PULL_REQUEST"},
     )
     pr_text: str = (
         "Terraform Plan Output for {deployment} / {definition} \n---\n\n```\n{text}\n```"

@@ -117,12 +117,3 @@ class BaseProvider:
         Allow this class to be used as a Pydantic model type
         """
         return core_schema.is_instance_schema(cls)
-
-
-def validate_backend_region(state):
-    """
-    validate_backend_region validates that a statefile
-    was previously used in the region the current
-    deployment is being created for
-    """
-    raise NotImplementedError("validate_backend_region is not implemented")

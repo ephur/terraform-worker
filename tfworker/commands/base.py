@@ -35,7 +35,8 @@ class BaseCommand:
         app_state: Union["AppState", None] = None,
     ) -> None:
         """
-        initialize the base command with the deployment
+        initialize the base command with the deployment, exceptions are handled
+        in all of the _init methods
 
         Args:
             deployment (str | None): The deployment name
@@ -57,6 +58,7 @@ class BaseCommand:
         self._app_state.deployment = deployment
         c.resolve_model_with_cli_options(self._app_state)
         log.log_level = log.LogLevel[self._app_state.root_options.log_level]
+
         self._app_state.authenticators = _init_authenticators(
             self._app_state.root_options
         )
@@ -89,8 +91,6 @@ class BaseCommand:
 def _init_authenticators(
     root_options: "CLIOptionsRoot",
 ) -> "AuthenticatorsCollection":
-    from tfworker.authenticators.collection import AuthenticatorsCollection
-
     """
     Initialize the authenticators collection for the application state
 
@@ -100,13 +100,17 @@ def _init_authenticators(
     Returns:
         AuthenticatorsCollection: The initialized authenticators collection
     """
+    #    from tfworker.authenticators.collection import AuthenticatorsCollection
+    import tfworker.authenticators.collection as c
+
     try:
-        authenticators = AuthenticatorsCollection(root_options)
+        authenticators = c.AuthenticatorsCollection(root_options)
     except TFWorkerException as e:
         log.error(e)
         click.get_current_context().exit(1)
+
     log.debug(
-        f"initialized authentiactors {[x.tag for x in authenticators.keys()]}",
+        f"initialized authenticators {[x.tag for x in authenticators.keys()]}",
     )
     return authenticators
 
@@ -132,6 +136,7 @@ def _init_providers(
         providers = ProvidersCollection(providers_config, authenticators)
     except ValidationError as e:
         handle_config_error(e)
+
     log.debug(
         f"initialized providers {[x for x in providers.keys()]}",
     )
@@ -155,10 +160,10 @@ def _init_definitions(definitions_config: Dict[str, Any]) -> "DefinitionsCollect
         log.debug(
             f"initialized definitions {[x for x in definitions.keys()]}",
         )
-
     except ValueError as e:
         log.error(e)
         click.get_current_context().exit(1)
+
     return definitions
 
 
@@ -312,9 +317,6 @@ def _initialize_handler(handler_name: str, config: BaseModel) -> Any:
 
     Returns:
         Any: The initialized handler.
-
-    Raises:
-        HandlerError: If there is an error initializing the handler.
     """
     from tfworker.handlers.registry import HandlerRegistry as hr
 
