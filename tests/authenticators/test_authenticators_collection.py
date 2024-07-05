@@ -1,0 +1,116 @@
+from unittest.mock import MagicMock, create_autospec, patch
+
+import pytest
+from pydantic import BaseModel, ValidationError
+from pydantic_core import InitErrorDetails
+
+from tfworker.authenticators.base import BaseAuthenticator, BaseAuthenticatorConfig
+from tfworker.authenticators.collection import AuthenticatorsCollection
+from tfworker.exceptions import UnknownAuthenticator
+
+
+# Mock classes for testing
+class MockCLIOptionsRoot:
+    def model_dump(self):
+        return {}
+
+
+class MockAuthenticatorConfig(BaseAuthenticatorConfig):
+    pass
+
+
+class MockAuthenticator(BaseAuthenticator):
+    config_model = MockAuthenticatorConfig
+
+    def __init__(self, auth_config: BaseAuthenticatorConfig):
+        self.auth_config = auth_config
+
+    def env(self):
+        pass
+
+
+MockAuthenticator.tag = "mock"
+
+
+@pytest.fixture
+def cli_options_root():
+    return MockCLIOptionsRoot()
+
+
+@pytest.fixture
+def authenticators_collection(cli_options_root):
+    # Create a fresh instance of ALL for each test
+    all_authenticators = [MockAuthenticator]
+    with patch("tfworker.authenticators.collection.ALL", all_authenticators):
+        AuthenticatorsCollection._instance = None
+        return AuthenticatorsCollection(cli_options_root)
+
+
+class TestAuthenticatorsCollection:
+
+    def test_singleton_behavior(self, cli_options_root):
+        instance1 = AuthenticatorsCollection(cli_options_root)
+        instance2 = AuthenticatorsCollection(cli_options_root)
+        assert instance1 is instance2, "AuthenticatorsCollection should be a singleton"
+
+    def test_init_successful_authenticator_creation(self, authenticators_collection):
+        assert (
+            "mock" in authenticators_collection._authenticators
+        ), "Authenticator should be created and added to the collection"
+
+    def test_init_unsuccessful_authenticator_creation(self, cli_options_root):
+        # Mocking the ValidationError to simulate a configuration failure
+        errors = [
+            InitErrorDetails(
+                **{
+                    "loc": ("mock_field", "mock_field"),
+                    "input": "mock_input",
+                    "ctx": {"error": "error message"},
+                    "type": "value_error",
+                }
+            )
+        ]
+        validation_error = ValidationError.from_exception_data("invalid config", errors)
+
+        with patch.object(
+            MockAuthenticator.config_model, "__call__", side_effect=validation_error
+        ):
+            AuthenticatorsCollection._instance = None
+            authenticators_collection = AuthenticatorsCollection(cli_options_root)
+            assert (
+                "mock" not in authenticators_collection._authenticators
+            ), "Authenticator with invalid configuration should not be added to the collection"
+
+    def test_len(self, authenticators_collection):
+        assert len(authenticators_collection) == len(
+            authenticators_collection._authenticators
+        ), "__len__ method should return the number of authenticators"
+
+    def test_getitem_by_key(self, authenticators_collection):
+        assert (
+            authenticators_collection["mock"] is not None
+        ), "__getitem__ should return the authenticator for the given key"
+
+    def test_getitem_by_index(self, authenticators_collection):
+        assert (
+            authenticators_collection[0] is not None
+        ), "__getitem__ should return the authenticator for the given index"
+
+    def test_getitem_key_error(self, authenticators_collection):
+        with pytest.raises(UnknownAuthenticator):
+            authenticators_collection["invalid"]
+
+    def test_get_method(self, authenticators_collection):
+        assert (
+            authenticators_collection.get("mock") is not None
+        ), "get method should return the authenticator for the given key"
+
+    def test_get_method_key_error(self, authenticators_collection):
+        with pytest.raises(UnknownAuthenticator):
+            authenticators_collection.get("invalid")
+
+    def test_iter(self, authenticators_collection):
+        for authenticator in authenticators_collection:
+            assert (
+                authenticator.tag == "mock"
+            ), "__iter__ should return the authenticators in the collection"
