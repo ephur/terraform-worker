@@ -80,7 +80,7 @@ def redact_items_token(
             found = False
             for key in redact:
                 # check if the key is in the items
-                if items[i : i + len(key)] == key:
+                if items[i : i + len(key)] == key:  # noqa: E203
                     found = True
                     result.append(key)
                     i += len(key)

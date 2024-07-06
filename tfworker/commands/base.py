@@ -9,18 +9,22 @@ from tfworker.exceptions import BackendError, HandlerError, TFWorkerException
 from tfworker.util.cli import handle_config_error
 
 if TYPE_CHECKING:
-    from tfworker.app_state import AppState  # pragma: no cover
-    from tfworker.authenticators.collection import (  # pragma: no cover
+    from tfworker.app_state import AppState  # pragma: no cover # noqa
+    from tfworker.authenticators.collection import (  # pragma: no cover # noqa
         AuthenticatorsCollection,
     )
     from tfworker.backends.base import BaseBackend  # pragma: no cover
-    from tfworker.definitions.collection import (  # pragma: no cover
+    from tfworker.definitions.collection import (  # pragma: no cover # noqa
         DefinitionsCollection,
     )
-    from tfworker.handlers.collection import HandlersCollection  # pragma: no cover
-    from tfworker.providers.collection import ProvidersCollection  # pragma: no cover
+    from tfworker.handlers.collection import (  # pragma: no cover # noqa
+        HandlersCollection,
+    )
+    from tfworker.providers.collection import (  # pragma: no cover # noqa
+        ProvidersCollection,
+    )
 
-    from ..cli_options import CLIOptionsRoot  # pragma: no cover
+    from ..cli_options import CLIOptionsRoot  # pragma: no cover # noqa
 
 
 class BaseCommand:

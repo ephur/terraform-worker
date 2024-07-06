@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Generator
 
 import boto3.dynamodb
 import botocore
+import botocore.errorfactory
 import botocore.paginate
 import click
 
@@ -50,7 +51,7 @@ class S3Backend(BaseBackend):
     ):
         self._authenticator: "AWSAuthenticator" = authenticators[self.auth_tag]
         self._ctx: click.Context = click.get_current_context()
-        self._app_state: "AppState" = click.get_current_context().obj
+        self._app_state: "AppState" = self._ctx.obj
 
         if not self._authenticator.session:
             raise BackendError(
@@ -74,6 +75,7 @@ class S3Backend(BaseBackend):
         self._s3_client: botocore.client.S3 = (
             self._authenticator.backend_session.client("s3")
         )
+        log.error(f"Backend Region: {self._authenticator.backend_region}")
         self._ensure_locking_table()
         self._ensure_backend_bucket()
         self._bucket_files: list = self._list_bucket_definitions()
@@ -293,6 +295,9 @@ class S3Backend(BaseBackend):
             deployment (str): The deployment name
             definition (str): The definition, if provided, only an item will be removed
         """
+        bucket = self._ctx.obj.root_options.backend_bucket
+        prefix = self._ctx.obj.root_options.backend_prefix.format(deployment=deployment)
+
         dynamo_client = self._authenticator.backend_session.resource("dynamodb")
         if definition is None:
             table = dynamo_client.Table(f"terraform-{deployment}")
@@ -300,15 +305,10 @@ class S3Backend(BaseBackend):
             log.info(f"locking table: terraform-{deployment} removed")
         else:
             # delete only the entry for a single state resource
+            item = f"{bucket}/{prefix}/{definition}/terraform.tfstate-md5"
+            log.info(f"removing locking table key: {item} if it exists")
             table = dynamo_client.Table(f"terraform-{deployment}")
-            table.delete_item(
-                Key={
-                    "LockID": f"{self._authenticator.bucket}/{self._authenticator.prefix}/{definition}/terraform.tfstate-md5"
-                }
-            )
-            log.info(
-                f"locking table key: '{self._authenticator.bucket}/{self._authenticator.prefix}/{definition}/terraform.tfstate-md5' removed"
-            )
+            table.delete_item(Key={"LockID": item})
 
     def _create_bucket(self, name: str) -> None:
         """
@@ -345,8 +345,10 @@ class S3Backend(BaseBackend):
                         f"Bucket {name} already exists, this is not expected since a moment ago it did not"
                     )
                 click.get_current_context().exit(1)
-            elif "BucketAlreadyOwnedByYou" not in err_str:
-                # throw unknown errors
+            elif "BucketAlreadyOwnedByYou" in err_str:
+                log.error(f"Bucket {name} already owned by you: {err}")
+                self._ctx.exit(1)
+            else:
                 raise err
 
     def _create_bucket_versioning(self, name: str) -> None:

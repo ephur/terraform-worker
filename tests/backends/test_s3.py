@@ -1,6 +1,6 @@
 import os
 import sys
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 import boto3
 import botocore
@@ -32,7 +32,7 @@ def mock_cli_options_root_backend_west():
     mock_root = MagicMock(spec=CLIOptionsRoot)
     mock_root.region = "us-east-1"
     mock_root.backend_region = "us-west-2"
-    mock_root.backend_bucket = "test-bucket"
+    mock_root.backend_bucket = "west-test-bucket"
     mock_root.backend_prefix = "prefix"
     mock_root.create_backend_bucket = True
     return mock_root
@@ -78,7 +78,7 @@ def mock_authenticators_backend_west():
     mock_auth = MagicMock()
     mock_auth["aws"].session = boto3.Session()
     mock_auth["aws"].backend_session = boto3.Session(region_name="us-west-2")
-    mock_auth["aws"].bucket = "test-bucket"
+    mock_auth["aws"].bucket = "west-test-bucket"
     mock_auth["aws"].prefix = "prefix"
     mock_auth["aws"].backend_region = "us-west-2"
     return mock_auth
@@ -115,7 +115,12 @@ class TestS3BackendInit:
         assert backend._bucket_files is not None
 
     @mock_aws
-    def test_init_success_alt_region(self, mock_authenticators_backend_west):
+    def test_init_success_alt_region(
+        self, mock_authenticators_backend_west, mocker, mock_click_context_backend_west
+    ):
+        mocker.patch(
+            "click.get_current_context", return_value=mock_click_context_backend_west
+        )
         backend = S3Backend(mock_authenticators_backend_west, "test-deployment")
         assert backend._deployment == "test-deployment"
         assert backend._s3_client is not None
@@ -142,6 +147,18 @@ class TestS3BackendInit:
     def test_init_no_backend_session(self, mock_authenticators):
         mock_authenticators["aws"].backend_session = None
         with pytest.raises(BackendError, match="AWS backend session not available"):
+            S3Backend(mock_authenticators, "test-deployment")
+
+    @mock_aws
+    def test_init_no_create_bucket(
+        self, mock_authenticators, mocker, mock_click_context
+    ):
+        mock_click_context.obj.root_options.create_backend_bucket = False
+        mocker.patch("click.get_current_context", return_value=mock_click_context)
+        with pytest.raises(
+            BackendError,
+            match="Backend bucket not found and --no-create-backend-bucket specified",
+        ):
             S3Backend(mock_authenticators, "test-deployment")
 
 
@@ -171,44 +188,6 @@ class TestS3BackendCheckBucketExists:
         ):
             with pytest.raises(SystemExit):
                 backend._check_bucket_exists("test-bucket")
-
-
-class TestS3BackendCreateBucket:
-
-    @mock_aws
-    def test_create_bucket_success(self, mock_authenticators):
-        backend = S3Backend(mock_authenticators, "test-deployment")
-        backend._create_bucket("test-bucket")
-        s3 = boto3.client("s3")
-        response = s3.list_buckets()
-        buckets = [bucket["Name"] for bucket in response["Buckets"]]
-        assert "test-bucket" in buckets
-
-    @mock_aws
-    def test_create_bucket_invalid_location_constraint(self, mock_authenticators):
-        backend = S3Backend(mock_authenticators, "test-deployment")
-        with patch.object(
-            backend._s3_client,
-            "create_bucket",
-            side_effect=botocore.exceptions.ClientError(
-                {"Error": {"Code": "InvalidLocationConstraint"}}, "CreateBucket"
-            ),
-        ):
-            with pytest.raises(SystemExit):
-                backend._create_bucket("test-bucket")
-
-    @mock_aws
-    def test_create_bucket_already_exists(self, mock_authenticators):
-        backend = S3Backend(mock_authenticators, "test-deployment")
-        with patch.object(
-            backend._s3_client,
-            "create_bucket",
-            side_effect=botocore.exceptions.ClientError(
-                {"Error": {"Code": "BucketAlreadyExists"}}, "CreateBucket"
-            ),
-        ):
-            with pytest.raises(SystemExit):
-                backend._create_bucket("test-bucket")
 
 
 class TestS3BackendEnsureLockingTable:
@@ -580,28 +559,88 @@ class TestS3BackendCleanLockingState:
 
     @mock_aws
     def test_clean_locking_state(self, mock_authenticators):
-        self.setup_ddb("test-deployment", "lock1")
+        self.setup_ddb(
+            "test-deployment", "test-bucket/prefix/lock1/terraform.tfstate-md5"
+        )
         backend = S3Backend(mock_authenticators, "test-deployment")
         backend._clean_locking_state("test-deployment")
         tables = self.dynamodb.list_tables()["TableNames"]
-        assert f"terraform-test-deployment" not in tables
-        items = self.dynamodb.scan(TableName="terraform-test-deployment")["Items"]
-        log.trace(items)
-        assert len(items) == 0
+        assert "terraform-test-deployment" not in tables
 
     @mock_aws
     def test_clean_locking_state_with_definition(self, mock_authenticators):
-        self.setup_ddb("test-deployment", "lock1")
+        self.setup_ddb(
+            "test-deployment", "test-bucket/prefix/lock1/terraform.tfstate-md5"
+        )
         backend = S3Backend(mock_authenticators, "test-deployment")
         backend._clean_locking_state("test-deployment", definition="lock1")
         tables = self.dynamodb.list_tables()["TableNames"]
-        assert f"terraform-test-deployment" in tables
+        items = self.dynamodb.scan(TableName="terraform-test-deployment")["Items"]
+        log.trace(items)
+        assert len(items) == 0
+        assert "terraform-test-deployment" in tables
 
     @mock_aws
-    def test_clean_locking_state_raises_backend_error(self, mock_authenticators):
-        self.setup_ddb("test-deployment", "lock1")
+    def test_clean_locking_state_with_bad_key(self, mock_authenticators):
+        self.setup_ddb(
+            "test-deployment", "test-bucket/prefix/lock1/terraform.tfstate-md5"
+        )
         backend = S3Backend(mock_authenticators, "test-deployment")
-        with pytest.raises(BackendError, match="not empty"):
-            backend._clean_locking_state("test-deployment", definition="lock2")
+        backend._clean_locking_state("test-deployment", definition="lock2")
         tables = self.dynamodb.list_tables()["TableNames"]
-        assert f"terraform-test-deployment" in tables
+        items = self.dynamodb.scan(TableName="terraform-test-deployment")["Items"]
+        assert len(items) == 1
+        assert "terraform-test-deployment" in tables
+
+
+class TestS3BackendCreateBucket:
+    @mock_aws
+    def test_create_bucket_success(self, mock_authenticators):
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        backend._create_bucket("test-bucket")
+        s3 = boto3.client("s3")
+        response = s3.list_buckets()
+        buckets = [bucket["Name"] for bucket in response["Buckets"]]
+        assert "test-bucket" in buckets
+
+    @mock_aws
+    def test_create_bucket_invalid_location_constraint(self, mock_authenticators):
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        with patch.object(
+            backend._s3_client,
+            "create_bucket",
+            side_effect=botocore.exceptions.ClientError(
+                {"Error": {"Code": "InvalidLocationConstraint"}}, "CreateBucket"
+            ),
+        ):
+            with pytest.raises(SystemExit):
+                backend._create_bucket("test-bucket")
+
+    @mock_aws
+    def test_create_bucket_already_exists(self, mock_authenticators):
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        with patch.object(
+            backend._s3_client,
+            "create_bucket",
+            side_effect=botocore.exceptions.ClientError(
+                {"Error": {"Code": "BucketAlreadyExists"}}, "CreateBucket"
+            ),
+        ):
+            with pytest.raises(SystemExit):
+                backend._create_bucket("test-bucket")
+
+    @mock_aws
+    def test_create_bucket_already_exists_alt_region(
+        self, mock_authenticators_backend_west, mocker, mock_click_context_backend_west
+    ):
+        mocker.patch(
+            "click.get_current_context", return_value=mock_click_context_backend_west
+        )
+        backend = S3Backend(mock_authenticators_backend_west, "test-deployment")
+        s3 = boto3.client("s3", region_name="us-west-2")
+        s3.create_bucket(
+            Bucket="already-exists-test-bucket",
+            CreateBucketConfiguration={"LocationConstraint": "us-west-2"},
+        )
+        with pytest.raises(SystemExit):
+            backend._create_bucket("already-exists-test-bucket")

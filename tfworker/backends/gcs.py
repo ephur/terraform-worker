@@ -7,6 +7,7 @@ from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import storage
 from google.cloud.exceptions import Conflict, NotFound
 
+import tfworker.util.log as log
 from tfworker.exceptions import BackendError
 
 from .base import BaseBackend, validate_backend_empty
@@ -24,6 +25,10 @@ class GCSBackend(BaseBackend):
     def __init__(
         self, authenticators: "AuthenticatorsCollection", deployment: str = None
     ):
+        log.warn(
+            "The GCS Backend has not been updated and tested in a long time; it may not work as expected."
+        )
+
         self._authenticator = authenticators[self.auth_tag]
         self._gcs_bucket = None
         self._gcs_prefix = None

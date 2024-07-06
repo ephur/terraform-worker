@@ -20,7 +20,7 @@ class BaseAuthenticator(ABC):
     config_model: BaseAuthenticatorConfig
 
     @abstractmethod
-    def __init__(self, auth_config: BaseAuthenticatorConfig): ...
+    def __init__(self, auth_config: BaseAuthenticatorConfig): ...  # noqa
 
     @abstractmethod
-    def env(self): ...
+    def env(self): ...  # noqa

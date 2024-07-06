@@ -3,7 +3,7 @@ from typing import Dict
 
 import boto3
 from botocore.credentials import Credentials
-from pydantic import field_validator, model_validator
+from pydantic import model_validator
 
 import tfworker.util.log as log
 from tfworker.exceptions import TFWorkerException

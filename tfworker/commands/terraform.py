@@ -1,19 +1,12 @@
 import os
 from typing import TYPE_CHECKING, Dict, Union
 
-import click
-
 import tfworker.util.hooks as hooks
 import tfworker.util.log as log
 import tfworker.util.terraform as tf_util
 from tfworker.commands.base import BaseCommand
 from tfworker.definitions import Definition
-from tfworker.exceptions import (
-    HandlerError,
-    HookError,
-    TerraformError,
-    TFWorkerException,
-)
+from tfworker.exceptions import HandlerError, HookError, TFWorkerException
 from tfworker.types.terraform import TerraformAction, TerraformStage
 from tfworker.util.system import pipe_exec
 

@@ -3,29 +3,20 @@ from unittest.mock import MagicMock, patch
 
 import click
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 from pydantic_core import InitErrorDetails
 
 import tfworker.util.log as log
 from tfworker.app_state import AppState
 from tfworker.authenticators import AuthenticatorsCollection, BaseAuthenticator
 from tfworker.backends.base import BaseBackend
-from tfworker.cli_options import CLIOptionsClean, CLIOptionsRoot, CLIOptionsTerraform
-from tfworker.commands.base import (
-    BaseCommand,
-    _init_authenticators,
-    _init_backend_,
-    _init_definitions,
-    _init_handlers,
-    _init_providers,
-)
-from tfworker.commands.config import resolve_model_with_cli_options
+from tfworker.cli_options import CLIOptionsRoot
+from tfworker.commands.base import BaseCommand, _init_authenticators
 from tfworker.definitions.collection import DefinitionsCollection
-from tfworker.exceptions import BackendError, HandlerError, TFWorkerException
+from tfworker.exceptions import TFWorkerException
 from tfworker.handlers.collection import HandlersCollection
 from tfworker.providers.collection import ProvidersCollection
-from tfworker.types import ConfigFile, FreezableBaseModel
-from tfworker.util.cli import handle_config_error
+from tfworker.types import ConfigFile
 from tfworker.util.log import LogLevel
 
 
@@ -167,7 +158,7 @@ class TestInitAuthenticators:
             with patch.object(log, "debug") as mock_log_debug:
                 authenticators = _init_authenticators(mock_cli_options_root)
                 assert authenticators == mock_authenticators_collection
-                expected_call = patch(
+                patch(
                     "tfworker.authenticators.collection.AuthenticatorsCollection",
                     return_value=mock_authenticators_collection,
                 )

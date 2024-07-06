@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from tfworker.types import TerraformAction, TerraformStage
 
 
-class BaseConfig(BaseModel): ...
+class BaseConfig(BaseModel): ...  # noqa
 
 
 class BaseHandler(metaclass=ABCMeta):

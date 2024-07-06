@@ -73,7 +73,7 @@ def clean(ctx: click.Context, deployment: str, **kwargs):  # noqa: E501
     log_limiter()
 
     cc = CleanCommand(deployment=deployment)
-    # cc.exec()
+    cc.exec()
 
 
 @cli.command()

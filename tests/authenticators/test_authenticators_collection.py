@@ -1,7 +1,7 @@
-from unittest.mock import MagicMock, create_autospec, patch
+from unittest.mock import patch
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 from pydantic_core import InitErrorDetails
 
 from tfworker.authenticators.base import BaseAuthenticator, BaseAuthenticatorConfig

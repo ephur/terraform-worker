@@ -4,7 +4,6 @@ from typing import List, Optional, Union
 
 import click
 from pydantic import (
-    BaseModel,
     ConfigDict,
     Field,
     ValidationError,
