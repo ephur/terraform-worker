@@ -1,230 +1,149 @@
 #!/usr/bin/env python
-# Copyright 2020-2023 Richard Maynard (richard.maynard@gmail.com)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-
-import sys
-
 import click
 from pydantic import ValidationError
 
-import tfworker.types as tf_types
-from tfworker.commands import (
-    CleanCommand,
-    EnvCommand,
-    RootCommand,
-    TerraformCommand,
-    VersionCommand,
+import tfworker.util.log as log
+from tfworker.app_state import AppState
+from tfworker.cli_options import CLIOptionsClean, CLIOptionsRoot, CLIOptionsTerraform
+from tfworker.commands.clean import CleanCommand
+from tfworker.commands.config import log_limiter
+from tfworker.commands.env import EnvCommand
+from tfworker.commands.root import RootCommand
+from tfworker.commands.terraform import TerraformCommand
+from tfworker.util.cli import (
+    handle_option_error,
+    pydantic_to_click,
+    validate_deployment,
+    validate_host,
 )
-from tfworker.util.cli import pydantic_to_click
-from tfworker.util.system import get_platform
-
-
-def validate_deployment(ctx, deployment, name):
-    """Validate the deployment is no more than 32 characters."""
-    if len(name) > 32:
-        click.secho("deployment must be less than 32 characters", fg="red")
-        raise SystemExit(1)
-    if " " in name:
-        click.secho("deployment must not contain spaces", fg="red")
-        raise SystemExit(1)
-    return name
-
-
-def validate_host():
-    """Ensure that the script is being run on a supported platform."""
-    supported_opsys = ["darwin", "linux"]
-    supported_machine = ["amd64", "arm64"]
-
-    opsys, machine = get_platform()
-
-    if opsys not in supported_opsys:
-        click.secho(
-            f"running on {opsys} is not supported",
-            fg="red",
-        )
-        raise SystemExit(1)
-
-    if machine not in supported_machine:
-        click.secho(
-            f"running on {machine} machines is not supported",
-            fg="red",
-        )
-        raise SystemExit(1)
-
-    return True
-
-
-class CSVType(click.types.StringParamType):
-    name = "csv"
-    envvar_list_splitter = ","
-
-    def __repr__(self):
-        return "CSV"
 
 
 @click.group()
-@pydantic_to_click(tf_types.CLIOptionsRoot)
+@pydantic_to_click(CLIOptionsRoot)
+@click.version_option(package_name="terraform-worker")
 @click.pass_context
-def cli(ctx, **kwargs):
-    """CLI for the worker utility."""
+def cli(ctx: click.Context, **kwargs):
+    """
+    The terraform worker is a command line utility to orchestrate terraform
+
+    The goal is to reduce the amount of boiler plate terraform code, and allow
+    for both a more dynamic execution, as well as a more controlled execution.
+    Through a combinatin of definitions and providers specified in the configuration
+    file, the worker can be used to build, destroy, and manage terraform deployments.
+    """
     try:
-        options = tf_types.CLIOptionsRoot(**kwargs)
         validate_host()
-        ctx.obj = RootCommand(options)
-    except ValidationError as e:
-        click.echo(f"Error in options: {e}")
+    except NotImplementedError as e:
+        log.msg(str(e), log.LogLevel.ERROR)
         ctx.exit(1)
 
-
-@cli.command()
-@click.option(
-    "--limit",
-    help="limit operations to a single definition",
-    envvar="WORKER_LIMIT",
-    multiple=True,
-    type=CSVType(),
-)
-@click.argument("deployment", callback=validate_deployment)
-@click.pass_obj
-def clean(rootc, *args, **kwargs):  # noqa: E501
-    """clean up terraform state"""
-    # clean just items if limit supplied, or everything if no limit
-    CleanCommand(rootc, *args, **kwargs).exec()
-
-
-@cli.command()
-def version():
-    """display program version"""
-    VersionCommand().exec()
-    sys.exit(0)
-
-
-@cli.command()
-@click.option(
-    "--plan-file-path",
-    default=None,
-    envvar="WORKER_PLAN_FILE_PATH",
-    help="path to plan files, with plan it will save to this location, apply will read from it",
-)
-@click.option(
-    "--apply/--no-apply",
-    "tf_apply",
-    envvar="WORKER_APPLY",
-    default=False,
-    help="apply the terraform configuration",
-)
-@click.option(
-    "--plan/--no-plan",
-    "tf_plan",
-    envvar="WORKER_PLAN",
-    type=bool,
-    default=True,
-    help="toggle running a plan, plan will still be skipped if using a saved plan file with apply",
-)
-@click.option(
-    "--force/--no-force",
-    "force",
-    default=False,
-    envvar="WORKER_FORCE",
-    help="force apply/destroy without plan change",
-)
-@click.option(
-    "--destroy/--no-destroy",
-    default=False,
-    envvar="WORKER_DESTROY",
-    help="destroy a deployment instead of create it",
-)
-@click.option(
-    "--show-output/--no-show-output",
-    default=True,
-    envvar="WORKER_SHOW_OUTPUT",
-    help="show output from terraform commands",
-)
-@click.option(
-    "--terraform-bin",
-    envvar="WORKER_TERRAFORM_BIN",
-    help="The complate location of the terraform binary",
-)
-@click.option(
-    "--b64-encode-hook-values/--no--b64-encode-hook-values",
-    "b64_encode",
-    default=False,
-    envvar="WORKER_B64_ENCODE_HOOK_VALUES",
-    help=(
-        "Terraform variables and outputs can be complex data structures, setting this"
-        " open will base64 encode the values for use in hook scripts"
-    ),
-)
-@click.option(
-    "--terraform-modules-dir",
-    envvar="WORKER_TERRAFORM_MODULES_DIR",
-    default="",
-    help=(
-        "Absolute path to the directory where terraform modules will be stored."
-        "If this is not set it will be relative to the repository path at ./terraform-modules"
-    ),
-)
-@click.option(
-    "--limit",
-    help="limit operations to a single definition",
-    envvar="WORKER_LIMIT",
-    multiple=True,
-    type=CSVType(),
-)
-@click.option(
-    "--provider-cache",
-    envvar="WORKER_PROVIDER_CACHE",
-    default=None,
-    help="if provided this directory will be used as a cache for provider plugins",
-)
-@click.option(
-    "--stream-output/--no-stream-output",
-    help="stream the output from terraform command",
-    envvar="WORKER_STREAM_OUTPUT",
-    default=True,
-)
-@click.option(
-    "--color/--no-color",
-    help="colorize the output from terraform command",
-    envvar="WORKER_COLOR",
-    default=False,
-)
-@click.argument("deployment", envvar="WORKER_DEPLOYMENT", callback=validate_deployment)
-@click.pass_obj
-def terraform(rootc, *args, **kwargs):
-    """execute terraform orchestration"""
     try:
-        tfc = TerraformCommand(rootc, *args, **kwargs)
-    except FileNotFoundError as e:
-        click.secho(f"terraform binary not found: {e.filename}", fg="red", err=True)
-        raise SystemExit(1)
+        options = CLIOptionsRoot.model_validate(kwargs)
+    except ValidationError as e:
+        handle_option_error(e)
 
-    click.secho(f"building deployment {kwargs.get('deployment')}", fg="green")
-    click.secho(f"working in directory: {tfc.temp_dir}", fg="yellow")
-
-    tfc.exec()
-    sys.exit(0)
+    log.log_level = log.LogLevel[options.log_level]
+    log.msg(f"set log level to {options.log_level}", log.LogLevel.DEBUG)
+    app_state = AppState(root_options=options)
+    ctx.obj = app_state
+    register_plugins()
+    RootCommand()
+    log.trace("finished intializing root command")
 
 
 @cli.command()
-@click.pass_obj
-def env(rootc, *args, **kwargs):
-    # provide environment variables from backend to configure shell environment
-    env = EnvCommand(rootc, *args, **kwargs)
+@pydantic_to_click(CLIOptionsClean)
+@click.argument("deployment", envvar="WORKER_DEPLOYMENT", callback=validate_deployment)
+@click.pass_context
+def clean(ctx: click.Context, deployment: str, **kwargs):  # noqa: E501
+    """
+    Clean up remnants of a deployment
+
+    Once a deployment is destroyed via terraform, there are traces left in
+    the backend such as S3 buckets, DynamoDB tables, etc. This command will
+    verify the state is empty, and then remove those traces from the backend.
+    """
+    try:
+        options = CLIOptionsClean.model_validate(kwargs)
+    except ValidationError as e:
+        handle_option_error(e)
+
+    ctx.obj.clean_options = options
+    log.info(f"cleaning Deployment: {deployment}")
+    log_limiter()
+
+    cc = CleanCommand(deployment=deployment)
+    cc.exec()
+
+
+@cli.command()
+@pydantic_to_click(CLIOptionsTerraform)
+@click.argument("deployment", envvar="WORKER_DEPLOYMENT", callback=validate_deployment)
+@click.pass_context
+def terraform(ctx: click.Context, deployment: str, **kwargs):
+    """
+    Execute terraform orchestration on all or a subset of definitions in a deployment
+
+    The terraform command is used to plan, apply, and destroy terraform deployments. It
+    dynamically creates and breaks down large states into smaller subsets of deployments
+    which can share common parameters and a fixed set of providers.
+    """
+    # @TODO: Add support for a --target flag to target specific IDs in a definition
+
+    try:
+        options = CLIOptionsTerraform.model_validate(kwargs)
+    except ValidationError as e:
+        handle_option_error(e)
+
+    ctx.obj.terraform_options = options
+    log.info(f"building Deployment: {deployment}")
+    log_limiter()
+    tfc = TerraformCommand(deployment=deployment)
+
+    # Prepare the provider cache
+    tfc.prep_providers()
+    # @TODO: Determine how much of this should be executed here, versus
+    # orchestrated in the TerraformCommand classes .exec method
+    tfc.terraform_init()
+    tfc.terraform_plan()
+    tfc.terraform_apply_or_destroy()
+
+
+@cli.command()
+@click.pass_context
+def env(ctx: click.Context, **kwargs):
+    """
+    Export environment variables for the configured backend
+
+    This command can be useful to setup environment credentials, that the
+    worker will use. It handles configuration for the different backends
+    allowing you to `eval` the output to have terraform commands work as
+    the worker will execute them. This can be helpful when doing manual
+    state management
+    """
+    env = EnvCommand()
     env.exec()
-    sys.exit(0)
+
+
+# @TODO: Command to list all definitions in the backend for a given deployment
+# @TODO: Command to pull the remote state for a given deployment
+
+
+def register_plugins():
+    """
+    Register the plugins
+    """
+
+    # Register Handlers
+    log.trace("registering handlers")
+    import tfworker.handlers  # noqa: F401
+
+    # from tfworker.handlers.bitbucket import BitbucketHandler  # noqa: F401
+    # from tfworker.handlers.s3 import S3Handler  # noqa: F401
+    # from tfworker.handlers.trivy import TrivyHandler  # noqa: F401
+    # Register Copiers
+    log.trace("registering copiers")
+    import tfworker.copier  # noqa: F401
 
 
 if __name__ == "__main__":

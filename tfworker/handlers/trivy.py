@@ -1,63 +1,76 @@
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, Union
 
-import click
+from pydantic import BaseModel
+
+import tfworker.util.log as log
+from tfworker.exceptions import HandlerError
+from tfworker.types.terraform import TerraformAction, TerraformStage
 
 from ..util.system import pipe_exec, strip_ansi
 from .base import BaseHandler
-from .exceptions import HandlerError
+from .registry import HandlerRegistry
+
+if TYPE_CHECKING:
+    from tfworker.commands.terraform import TerraformResult
+    from tfworker.definitions.model import Definition
 
 
+class TrivyConfig(BaseModel):
+    args: dict = {}
+    cache_dir: str = "/tmp/trivy_cache"
+    debug: bool = False
+    exit_code: str = "1"
+    format: str = None
+    handler_debug: bool = False
+    path: str = "/usr/bin/trivy"
+    quiet: bool = True
+    required: bool = False
+    severity: str = "HIGH,CRITICAL"
+    skip_dirs: list = ["**/examples"]
+    template: str = (
+        '\'ERRORS: {{ range . }}{{ range .Misconfigurations}}{{ .Severity }} - {{ .ID }} - {{ .AVDID }} - {{ .Title -}} - {{ .Description }} - {{ .Message }} - {{ .Resolution }} - {{ .PrimaryURL }} - {{ range .References }}{{ . }}{{ end }}{{ "\\n" }}{{ end }}{{ "\\n" }}{{ end }}{{ "\\n" }}\''
+    )
+    skip_planfile: bool = False
+    skip_definition: bool = False
+    stream_output: bool = True
+
+
+@HandlerRegistry.register("trivy")
 class TrivyHandler(BaseHandler):
     """
     The TrivyHandler will execute a trivy scan on a specified terraform plan file
     """
 
-    actions = ["plan"]
+    actions = [TerraformAction.PLAN]
+    config_model = TrivyConfig
+    _ready = False
 
-    defaults = {
-        "args": {},
-        "cache_dir": "/tmp/trivy_cache",
-        "debug": False,
-        "exit_code": "1",
-        "format": None,
-        "handler_debug": False,
-        "path": "/usr/bin/trivy",
-        "quiet": True,
-        "required": False,
-        "severity": "HIGH,CRITICAL",
-        "skip_dirs": ["**/examples"],
-        "template": '\'ERRORS: {{ range . }}{{ range .Misconfigurations}}{{ .Severity }} - {{ .ID }} - {{ .AVDID }} - {{ .Title -}} - {{ .Description }} - {{ .Message }} - {{ .Resolution }} - {{ .PrimaryURL }} - {{ range .References }}{{ . }}{{ end }}{{ "\\n" }}{{ end }}{{ "\\n" }}{{ end }}{{ "\\n" }}\'',
-        "skip_planfile": False,
-        "skip_definition": False,
-        "stream_output": True,
-    }
-
-    def __init__(self, kwargs):
-        self._ready = False
-
+    def __init__(self, config: BaseModel) -> None:
         # configure the handler
-        for k in self.defaults:
-            if k in kwargs:
-                setattr(self, f"_{k}", kwargs[k])
-            else:
-                setattr(self, f"_{k}", self.defaults[k])
+        for k in config.model_fields:
+            setattr(self, f"_{k}", getattr(config, k))
 
         # ensure trivy is runnable
         if not self._trivy_runable(self._path):
+            if self.required:
+                raise HandlerError(
+                    f"Trivy is not runnable at {self._path}", terminate=True
+                )
             raise HandlerError(f"Trivy is not runnable at {self._path}")
 
         self._ready = True
 
     def execute(
         self,
-        action: str,
-        stage: str,
-        planfile: str = None,
-        definition_path: Path = None,
-        changes: bool = False,
-        **kwargs,
-    ) -> None:
+        action: "TerraformAction",
+        stage: "TerraformStage",
+        deployment: str,
+        definition: "Definition",
+        working_dir: str,
+        result: Union["TerraformResult", None] = None,
+    ) -> None:  # pragma: no cover
         """execute is called when a handler should trigger, if this is run post plan
         and there are changes, a scan will be executed
 
@@ -73,7 +86,8 @@ class TrivyHandler(BaseHandler):
             None
         """
         # pre plan; trivy scan the definition if its applicable
-        if action == "plan" and stage == "pre":
+        definition_path = definition.get_target_path(working_dir=working_dir)
+        if action == TerraformAction.PLAN and stage == TerraformStage.PRE:
             if definition_path is None:
                 raise HandlerError(
                     "definition_path is not provided, can't scan",
@@ -81,16 +95,19 @@ class TrivyHandler(BaseHandler):
                 )
 
             if self._skip_definition:
-                click.secho("Skipping trivy scan of definition", fg="yellow")
+                log.info(f"Skipping trivy scan of definition: {definition_path}")
                 return None
 
-            click.secho(
-                f"scanning definition with trivy: {definition_path}", fg="green"
-            )
+            log.info(f"scanning definition with trivy: {definition_path}")
             self._scan(definition_path)
 
         # post plan; trivy scan the planfile if its applicable
-        if action == "plan" and stage == "post" and changes:
+        if (
+            action == TerraformAction.PLAN
+            and stage == TerraformStage.POST
+            and result.has_changes()
+        ):
+            planfile = definition.plan_file
             if planfile is None:
                 raise HandlerError(
                     "planfile is not provided, can't scan", terminate=self._required
@@ -103,10 +120,10 @@ class TrivyHandler(BaseHandler):
                 )
 
             if self._skip_planfile:
-                click.secho("Skipping trivy scan of planfile", fg="yellow")
+                log.info(f"Skipping trivy scan of planfile: {planfile}")
                 return None
 
-            click.secho(f"scanning planfile with trivy: {planfile}", fg="green")
+            log.info(f"scanning planfile with trivy: {planfile}")
             self._scan(definition_path, planfile)
 
     def _scan(self, definition_path: Path, planfile: Path = None):
@@ -167,7 +184,7 @@ class TrivyHandler(BaseHandler):
 
         try:
             if self._debug:
-                click.secho(f"cmd: {' '.join(trivy_args)}", fg="yellow")
+                log.debug(f"cmd: {' '.join(trivy_args)}")
             (exit_code, stdout, stderr) = pipe_exec(
                 f"{' '.join(trivy_args)}",
                 cwd=str(definition_path),
@@ -190,14 +207,14 @@ class TrivyHandler(BaseHandler):
             None
         """
         if exit_code != 0:
-            click.secho(f"trivy scan failed with exit code {exit_code}", fg="red")
+            log.error(f"trivy scan failed with exit code {exit_code}")
             if self._stream_output is False:
-                click.secho(strip_ansi(f"stdout: {stdout.decode('UTF-8')}"), fg="red")
-                click.secho(strip_ansi(f"stderr: {stderr.decode('UTF-8')}"), fg="red")
+                log.error(strip_ansi(f"stdout: {stdout.decode('UTF-8')}"))
+                log.error(strip_ansi(f"stderr: {stderr.decode('UTF-8')}"))
 
             if self._required:
                 if planfile is not None:
-                    click.secho(f"Removing planfile: {planfile}", fg="yellow")
+                    log.warn(f"Removing planfile: {planfile}")
                     os.remove(planfile)
                 raise HandlerError(
                     "trivy scan required; aborting execution", terminate=True

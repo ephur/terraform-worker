@@ -1,24 +1,17 @@
-# Copyright 2020 Richard Maynard (richard.maynard@gmail.com)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-from tfworker.types import ProviderConfig, ProviderGID
+from typing import TYPE_CHECKING
+
+from pydantic import GetCoreSchemaHandler
+from pydantic_core import CoreSchema, core_schema
+
+if TYPE_CHECKING:
+    from .model import ProviderConfig, ProviderGID
 
 
 class BaseProvider:
     tag = None
     requires_auth = False
 
-    def __init__(self, config: ProviderConfig) -> None:
+    def __init__(self, config: "ProviderConfig") -> None:
         self.vars = config.vars or {}
         self.config_blocks = config.config_blocks or {}
         self.version = config.requirements.version
@@ -29,7 +22,7 @@ class BaseProvider:
         return self.tag
 
     @property
-    def gid(self) -> ProviderGID:
+    def gid(self) -> "ProviderGID":
         from tfworker.util.terraform import get_provider_gid_from_source
 
         return get_provider_gid_from_source(self.source)
@@ -66,7 +59,7 @@ class BaseProvider:
             result.append(self._hclify(self.config_blocks[k], depth=4))
             result.append("  }")
 
-        result.append("}")
+        result.append("}\n")
         return "\n".join(result)
 
     def required(self):
@@ -75,7 +68,7 @@ class BaseProvider:
                 f"    {self.tag} = {{",
                 f'      source = "{self.source}"',
                 f'      version = "{self.version}"',
-                "     }",
+                "     }\n",
             ]
         )
 
@@ -116,11 +109,11 @@ class BaseProvider:
 
         return "\n".join(result)
 
-
-def validate_backend_region(state):
-    """
-    validate_backend_region validates that a statefile
-    was previously used in the region the current
-    deployment is being created for
-    """
-    raise NotImplementedError("validate_backend_region is not implemented")
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, _, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        """
+        Allow this class to be used as a Pydantic model type
+        """
+        return core_schema.is_instance_schema(cls)

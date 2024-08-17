@@ -1,8 +1,4 @@
-from tfworker.types.cli_options import CLIOptionsRoot  # noqa: F401
-from tfworker.types.json import JSONType  # noqa: F401
-from tfworker.types.provider import ProviderConfig, Requirements  # noqa: F401
-from tfworker.types.terraform import (  # noqa: F401
-    ProviderGID,
-    TerraformAction,
-    TerraformStage,
-)
+from .config_file import ConfigFile, GlobalVars  # pragma: no cover  # noqa
+from .freezable_basemodel import FreezableBaseModel  # pragma: no cover  # noqa
+from .json import JSONType  # pragma: no cover  # noqa
+from .terraform import TerraformAction, TerraformStage  # pragma: no cover  # noqa

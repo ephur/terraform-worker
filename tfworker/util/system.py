@@ -1,25 +1,9 @@
-# Copyright 2020-2023 Richard Maynard (richard.maynard@gmail.com)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-import importlib.metadata
 import os
 import platform
 import re
 import shlex
 import subprocess
 from typing import Dict, List, Tuple, Union
-
-import click
 
 
 def strip_ansi(line: str) -> str:
@@ -101,7 +85,7 @@ def pipe_exec(
         if lastloop and stream_output:
             popen_kwargs["stderr"] = subprocess.STDOUT
 
-        commands.append(subprocess.Popen(shlex.split(args[i]), **popen_kwargs))
+        commands.append(subprocess.Popen(shlex.split(cmd_str), **popen_kwargs))
 
         # close stdout on the command before we just added to allow recieving SIGPIPE
         commands[-2].stdout.close()
@@ -128,7 +112,7 @@ def pipe_exec(
         # for a single command this will be the only command, for a pipeline reading from the
         # last command will trigger all of the commands, communicating through their pipes
         for line in iter(commands[-1].stdout.readline, ""):
-            click.secho(line.rstrip())
+            print(line.rstrip())
             stdout += line
 
         # for streaming output stderr will be included with stdout, there's no way to make
@@ -152,45 +136,6 @@ def pipe_exec(
             returncode = commands[0].returncode
 
     return (returncode, stdout, stderr)
-
-
-def which(program: str) -> Union[str, None]:
-    """
-    A function to mimic the behavior of the `which` command in Unix-like systems.
-
-    Args:
-        program (str): The program to search for in the PATH.
-
-    Returns:
-        str: The full path to the program if found, otherwise None.
-    """
-
-    def is_exe(fpath):
-        return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
-
-    fpath, fname = os.path.split(program)
-    if fpath:
-        if is_exe(program):
-            return program
-    else:
-        for path in os.environ["PATH"].split(os.pathsep):
-            exe_file = os.path.join(path, program)
-            if is_exe(exe_file):
-                return exe_file
-    return None
-
-
-def get_version() -> str:
-    """
-    Get the version of the current package
-
-    Returns:
-        str: The version of the package
-    """
-    try:
-        return importlib.metadata.version("terraform-worker")
-    except importlib.metadata.PackageNotFoundError:
-        return "unknown"
 
 
 def get_platform() -> Tuple[str, str]:

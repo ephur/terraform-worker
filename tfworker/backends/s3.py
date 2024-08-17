@@ -1,41 +1,58 @@
-# Copyright 2020-2023 Richard Maynard (richard.maynard@gmail.com)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import json
 import os
 from contextlib import closing
-from pathlib import Path
-from uuid import uuid4
-from zipfile import ZipFile
+from typing import TYPE_CHECKING, Generator
 
-import boto3
+import boto3.dynamodb
 import botocore
+import botocore.errorfactory
+import botocore.paginate
 import click
 
-from ..handlers import BaseHandler, HandlerError
-from .base import BackendError, BaseBackend, validate_backend_empty
+import tfworker.util.log as log
+from tfworker.exceptions import BackendError
+
+from .base import BaseBackend, validate_backend_empty
+
+if TYPE_CHECKING:
+    import boto3  # pragma: no cover  # noqa
+
+    from tfworker.app_state import AppState  # pragma: no cover  # noqa
+    from tfworker.authenticators import (  # pragma: no cover  # noqa
+        AuthenticatorsCollection,
+        AWSAuthenticator,
+    )
 
 
 class S3Backend(BaseBackend):
-    tag = "s3"
-    auth_tag = "aws"
-    plan_storage = False
+    """
+    Defines how to interact with the S3 backend
 
-    def __init__(self, authenticators, definitions, deployment=None):
-        # print the module name for debugging
-        self._definitions = definitions
-        self._authenticator = authenticators[self.auth_tag]
+    Attributes:
+        auth_tag (str): The tag for the authenticator to use
+        plan_storage (bool): A flag to indicate whether the backend supports plan storage
+        remotes (list): A list of remote data sources based on the deployment
+        tag (str): A unique identifier for the backend
+        _authenticator (Authenticator): The authenticator for the backend
+        _ctx (Context): The current click context
+        _app_state (AppState): The current application state
+        _s3_client (botocore.client.S3): The boto3 S3 client
+        _deployment (str): The deployment name or "undefined"
+        _ddb_client (botocore.client.DynamoDB): The boto3 DynamoDB client
+        _bucket_files (set): A set of the keys in the bucket that correspond to all the definitions in a deployment
+    """
+
+    auth_tag = "aws"
+    plan_storage = True
+    tag = "s3"
+
+    def __init__(
+        self, authenticators: "AuthenticatorsCollection", deployment: str = None
+    ):
+        self._authenticator: "AWSAuthenticator" = authenticators[self.auth_tag]
+        self._ctx: click.Context = click.get_current_context()
+        self._app_state: "AppState" = self._ctx.obj
+
         if not self._authenticator.session:
             raise BackendError(
                 "AWS session not available",
@@ -49,41 +66,199 @@ class S3Backend(BaseBackend):
 
         if deployment is None:
             self._deployment = "undefined"
-        else:
-            self._deployment = deployment
+            return
 
-        # Setup AWS clients and ensure backend resources are available
-        self._ddb_client = self._authenticator.backend_session.client("dynamodb")
-        self._s3_client = self._authenticator.backend_session.client("s3")
+        self._deployment = deployment
+        self._ddb_client: botocore.client.DynamodDB = (
+            self._authenticator.backend_session.client("dynamodb")
+        )
+        self._s3_client: botocore.client.S3 = (
+            self._authenticator.backend_session.client("s3")
+        )
         self._ensure_locking_table()
         self._ensure_backend_bucket()
-        self._bucket_files = self._get_bucket_files()
-
-        try:
-            self._handlers = S3Handler(self._authenticator)
-            self.plan_storage = True
-        except HandlerError as e:
-            click.secho(f"Error initializing S3Handler: {e}")
-            raise SystemExit(1)
+        self._bucket_files: list = self._list_bucket_definitions()
 
     @property
-    def handlers(self) -> dict:
-        """
-        handlers returns a dictionary of handlers for the backend, ensure a singleton
-        """
-        return {self.tag: self._handlers}
-
     def remotes(self) -> list:
-        """return a list of the remote bucket keys"""
         return list(self._bucket_files)
 
-    def _clean_bucket_state(self, definition=None):
+    def clean(self, deployment: str, limit: tuple = None) -> None:
+        """
+        clean handles determining the desired items to clean and acts as a director to the
+        internal methods which handle actual resource removal
+
+        Args:
+            deployment (str): The deployment name
+            limit (tuple): A tuple with a list of resources to limit execution to
+
+        Raises:
+            BackendError: An error occurred while cleaning the backend
+        """
+        if limit:
+            for limit_item in limit:
+                log.warn(
+                    "when using limit, dynamodb tables won't be completely dropped"
+                )
+                try:
+                    self._clean_bucket_state(definition=limit_item)
+                    self._clean_locking_state(deployment, definition=limit_item)
+                except BackendError as e:
+                    raise BackendError(f"error deleting state: {e}")
+        else:
+            try:
+                self._clean_bucket_state()
+            except BackendError as e:
+                raise BackendError(f"error deleting state: {e}")
+            self._clean_locking_state(deployment)
+
+    def data_hcl(self, remotes: list) -> str:
+        """
+        data_hcl returns the terraform configuration for the remote data sources
+
+        Args:
+            remotes (list): A list of remote sources to provide a configuration for
+
+        Returns:
+            str: The HCL configuration for the remote data source
+        """
+
+        rendered_prefix = self._app_state.root_options.backend_prefix.format(
+            deployment=self._app_state.deployment
+        )
+        remote_data_config = []
+        if type(remotes) is not list:
+            raise ValueError("remotes must be a list")
+
+        for remote in set(remotes):
+            remote_data_config.append(f'data "terraform_remote_state" "{remote}" {{')
+            remote_data_config.append('  backend = "s3"')
+            remote_data_config.append("  config = {")
+            remote_data_config.append(
+                f'    region = "{self._app_state.root_options.backend_region}"'
+            )
+            remote_data_config.append(
+                f'    bucket = "{self._app_state.root_options.backend_bucket}"'
+            )
+            remote_data_config.append(
+                "    key =" f' "{rendered_prefix}/{remote}/terraform.tfstate"'
+            )
+            remote_data_config.append("  }")
+            remote_data_config.append("}\n")
+        return "\n".join(remote_data_config)
+
+    def hcl(self, deployment: str) -> str:
+        """
+        hcl returns the configuration that belongs inside the "terraform" configuration block
+
+        Args:
+            deployment (str): The deployment name
+
+        Returns:
+            str: The HCL configuration
+        """
+        rendered_prefix = self._app_state.root_options.backend_prefix.format(
+            deployment=self._app_state.deployment
+        )
+        state_config = []
+        state_config.append('  backend "s3" {')
+        state_config.append(
+            f'    region = "{self._app_state.root_options.backend_region}"'
+        )
+        state_config.append(
+            f'    bucket = "{self._app_state.root_options.backend_bucket}"'
+        )
+        state_config.append(
+            f'    key = "{rendered_prefix}/{deployment}/terraform.tfstate"'
+        )
+        state_config.append(f'    dynamodb_table = "terraform-{self._deployment}"')
+        state_config.append('    encrypt = "true"')
+        state_config.append("  }\n")
+        return "\n".join(state_config)
+
+    @staticmethod
+    def filter_keys(
+        paginator: botocore.paginate.Paginator,
+        bucket_name: str,
+        prefix: str = "/",
+        delimiter: str = "/",
+        start_after: str = "",
+    ) -> Generator[str, None, None]:
+        """
+        Filters the keys in a bucket based on the prefix
+
+        adapted from: https://stackoverflow.com/questions/30249069/listing-contents-of-a-bucket-with-boto3
+
+        Args:
+            paginator (botocore.paginate.Paginator): The paginator object
+            bucket_name (str): The name of the bucket
+            prefix (str): The prefix to filter by
+            delimiter (str): The delimiter to use
+            start_after (str): The key to start after
+
+        Yields:
+            str: Any object key in the bucket contents for all pages
+        """
+
+        prefix = prefix[1:] if prefix.startswith(delimiter) else prefix
+        start_after = (
+            (start_after or prefix) if prefix.endswith(delimiter) else start_after
+        )
+        for page in paginator.paginate(
+            Bucket=bucket_name, Prefix=prefix, StartAfter=start_after
+        ):
+            for content in page.get("Contents", ()):
+                yield content["Key"]
+
+    def _check_bucket_exists(self, name: str) -> bool:
+        """
+        check if a supplied bucket exists
+
+        Args:
+            name (str): The name of the bucket
+
+        Returns:
+            bool: True if the bucket exists, False otherwise
+        """
+        try:
+            self._s3_client.head_bucket(Bucket=name)
+            return True
+        except botocore.exceptions.ClientError as err:
+            err_str = str(err)
+            if "Not Found" in err_str:
+                return False
+            log.error(f"Error checking for bucket: {err}")
+            click.get_current_context().exit(1)
+
+    def _check_table_exists(self, name: str) -> bool:
+        """
+        check if a supplied dynamodb table exists
+
+        Args:
+            name (str): The name of the table
+
+        Returns:
+            bool: True if the table exists, False otherwise
+        """
+        try:
+            log.trace(f"checking for table: {name}")
+            if name in self._ddb_client.list_tables()["TableNames"]:
+                return True
+        except botocore.exceptions.ClientError as err:
+            log.error(f"Error checking for table: {err}")
+            click.get_current_context().exit(1)
+        return False
+
+    def _clean_bucket_state(self, definition: str = None) -> None:
         """
         clean_state validates all of the terraform states are empty,
         and then removes the backend objects from S3
 
-        optionally definition can be passed to limit the cleanup
-        to a single definition
+        Args:
+            definition (str): The definition
+
+        Raises:
+            BackendError: An error occurred while cleaning the state
         """
         s3_paginator = self._s3_client.get_paginator("list_objects_v2")
 
@@ -104,66 +279,115 @@ class S3Backend(BaseBackend):
 
             if validate_backend_empty(backend):
                 self._delete_with_versions(s3_object)
-                click.secho(f"backend file removed: {s3_object}", fg="yellow")
+                log.info(f"backend file removed: {s3_object}")
             else:
                 raise BackendError(f"state file at: {s3_object} is not empty")
 
-    def _clean_locking_state(self, deployment, definition=None):
+    def _clean_locking_state(self, deployment: str, definition: str = None) -> None:
         """
-        clean_locking_state when called removes the dynamodb table
-        that holds all of the state checksums and locking table
-        entries
+        Remove the table, or items from the locking table
+
+        Args:
+            deployment (str): The deployment name
+            definition (str): The definition, if provided, only an item will be removed
         """
+        bucket = self._ctx.obj.root_options.backend_bucket
+        prefix = self._ctx.obj.root_options.backend_prefix.format(deployment=deployment)
+
         dynamo_client = self._authenticator.backend_session.resource("dynamodb")
         if definition is None:
             table = dynamo_client.Table(f"terraform-{deployment}")
             table.delete()
-            click.secho(f"locking table: terraform-{deployment} removed", fg="yellow")
+            log.info(f"locking table: terraform-{deployment} removed")
         else:
             # delete only the entry for a single state resource
+            item = f"{bucket}/{prefix}/{definition}/terraform.tfstate-md5"
+            log.info(f"removing locking table key: {item} if it exists")
             table = dynamo_client.Table(f"terraform-{deployment}")
-            table.delete_item(
-                Key={
-                    "LockID": f"{self._authenticator.bucket}/{self._authenticator.prefix}/{definition}/terraform.tfstate-md5"
-                }
-            )
-            click.secho(
-                f"locking table key: '{self._authenticator.bucket}/{self._authenticator.prefix}/{definition}/terraform.tfstate-md5' removed",
-                fg="yellow",
-            )
+            table.delete_item(Key={"LockID": item})
 
-    def _ensure_locking_table(self) -> None:
+    def _create_bucket(self, name: str) -> None:
         """
-        _ensure_locking_table checks for the existence of the locking table, and
-        creates it if it doesn't exist
-        """
-        # get dynamodb client from backend session
-        locking_table_name = f"terraform-{self._deployment}"
+        Create the S3 locking bucket
 
-        # Check locking table for aws backend
-        click.secho(
-            f"Checking backend locking table: {locking_table_name}", fg="yellow"
+        Args:
+            name (str): The name of the bucket
+        """
+        create_bucket_args = {
+            "Bucket": name,
+            "ACL": "private",
+        }
+        if self._authenticator.backend_session.region_name != "us-east-1":
+            create_bucket_args["CreateBucketConfiguration"] = {
+                "LocationConstraint": self._authenticator.backend_region
+            }
+        try:
+            log.info(f"Creating backend bucket: {name}")
+            self._s3_client.create_bucket(**create_bucket_args)
+        except botocore.exceptions.ClientError as err:
+            err_str = str(err)
+            log.trace(f"Error creating bucket: {err}")
+            if "InvalidLocationConstraint" in err_str:
+                log.error(
+                    "InvalidLocationConstraint raised when trying to create a bucket. "
+                    "Verify the AWS backend region passed to the worker matches the "
+                    "backend AWS region in the profile.",
+                )
+                click.get_current_context().exit(1)
+            elif "BucketAlreadyExists" in err_str:
+                # Ignore when testing
+                if "PYTEST_CURRENT_TEST" not in os.environ:
+                    log.error(
+                        f"Bucket {name} already exists, this is not expected since a moment ago it did not"
+                    )  # pragma: no cover
+                click.get_current_context().exit(1)
+            elif "BucketAlreadyOwnedByYou" in err_str:
+                log.error(f"Bucket {name} already owned by you: {err}")
+                self._ctx.exit(1)
+            else:
+                log.error(f"Unknown error creating bucket: {err}")
+                self._ctx.exit(1)
+
+    def _create_bucket_versioning(self, name: str) -> None:
+        """
+        Enable versioning on the bucket
+
+        Args:
+            name (str): The name of the bucket
+        """
+        log.info(f"Enabling versioning on bucket: {name}")
+        self._s3_client.put_bucket_versioning(
+            Bucket=name, VersioningConfiguration={"Status": "Enabled"}
         )
 
-        if self._check_table_exists(locking_table_name):
-            click.secho("DynamoDB lock table found, continuing.", fg="yellow")
-        else:
-            click.secho(
-                "DynamoDB lock table not found, creating, please wait...", fg="yellow"
-            )
-            self._create_table(locking_table_name)
+    def _create_bucket_public_access_block(self, name: str) -> None:
+        """
+        Block public access to the bucket
 
-    def _check_table_exists(self, name: str) -> bool:
-        """check if a supplied dynamodb table exists"""
-        if name in self._ddb_client.list_tables()["TableNames"]:
-            return True
-        return False
+        Args:
+            name (str): The name of the bucket
+        """
+        log.info(f"Blocking public access to bucket: {name}")
+        self._s3_client.put_public_access_block(
+            Bucket=name,
+            PublicAccessBlockConfiguration={
+                "BlockPublicAcls": True,
+                "IgnorePublicAcls": True,
+                "BlockPublicPolicy": True,
+                "RestrictPublicBuckets": True,
+            },
+        )
 
     def _create_table(
         self, name: str, read_capacity: int = 1, write_capacity: int = 1
     ) -> None:
         """
         Create a dynamodb locking table.
+
+        Args:
+            name (str): The name of the table
+            read_capacity (int): The read capacity units
+            write_capacity (int): The write capacity units
         """
         table_key = "LockID"
         self._ddb_client.create_table(
@@ -182,120 +406,7 @@ class S3Backend(BaseBackend):
             TableName=name, WaiterConfig={"Delay": 10, "MaxAttempts": 30}
         )
 
-    def _ensure_backend_bucket(self) -> None:
-        """
-        _ensure_backend_bucket checks for the existence of the backend bucket, and
-        creates it if it doesn't exist, along with setting the appropriate bucket
-        permissions
-        """
-        bucket_present = self._check_bucket_exists(self._authenticator.bucket)
-
-        if bucket_present:
-            click.secho(
-                f"Backend bucket: {self._authenticator.bucket} found", fg="yellow"
-            )
-            return
-
-        if not self._authenticator.create_backend_bucket and not bucket_present:
-            raise BackendError(
-                "Backend bucket not found and --no-create-backend-bucket specified."
-            )
-
-        self._create_bucket(self._authenticator.bucket)
-        self._create_bucket_versioning(self._authenticator.bucket)
-        self._create_bucket_public_access_block(self._authenticator.bucket)
-
-    def _create_bucket(self, name: str) -> None:
-        """
-        _create_bucket creates a new s3 bucket
-        """
-        try:
-            click.secho(f"Creating backend bucket: {name}", fg="yellow")
-            self._s3_client.create_bucket(
-                Bucket=name,
-                CreateBucketConfiguration={
-                    "LocationConstraint": self._authenticator.backend_region
-                },
-                ACL="private",
-            )
-        except botocore.exceptions.ClientError as err:
-            err_str = str(err)
-            if "InvalidLocationConstraint" in err_str:
-                click.secho(
-                    "InvalidLocationConstraint raised when trying to create a bucket. "
-                    "Verify the AWS backend region passed to the worker matches the "
-                    "backend AWS region in the profile.",
-                    fg="red",
-                )
-                raise SystemExit(1)
-            elif "BucketAlreadyExists" in err_str:
-                # Ignore when testing
-                if "PYTEST_CURRENT_TEST" not in os.environ:
-                    click.secho(
-                        f"Bucket {name} already exists, this is not expected since a moment ago it did not",
-                        fg="red",
-                    )
-                    raise SystemExit(1)
-            elif "BucketAlreadyOwnedByYou" not in err_str:
-                raise err
-
-    def _create_bucket_versioning(self, name: str) -> None:
-        """
-        _create_bucket_versioning enables versioning on the bucket
-        """
-        click.secho(f"Enabling versioning on bucket: {name}", fg="yellow")
-        self._s3_client.put_bucket_versioning(
-            Bucket=name, VersioningConfiguration={"Status": "Enabled"}
-        )
-
-    def _create_bucket_public_access_block(self, name: str) -> None:
-        """
-        _create_bucket_public_access_block blocks public access to the bucket
-        """
-        click.secho(f"Blocking public access to bucket: {name}", fg="yellow")
-        self._s3_client.put_public_access_block(
-            Bucket=name,
-            PublicAccessBlockConfiguration={
-                "BlockPublicAcls": True,
-                "IgnorePublicAcls": True,
-                "BlockPublicPolicy": True,
-                "RestrictPublicBuckets": True,
-            },
-        )
-
-    def _check_bucket_exists(self, name: str) -> bool:
-        """
-        check if a supplied bucket exists
-        """
-        try:
-            self._s3_client.head_bucket(Bucket=name)
-            return True
-        except botocore.exceptions.ClientError as err:
-            err_str = str(err)
-            if "Not Found" in err_str:
-                return False
-            raise err
-
-    def _get_bucket_files(self) -> set:
-        """
-        _get_bucket_files returns a set of the keys in the bucket
-        """
-        bucket_files = set()
-        s3_paginator = self._s3_client.get_paginator("list_objects_v2").paginate(
-            Bucket=self._authenticator.bucket,
-            Prefix=self._authenticator.prefix,
-        )
-
-        for page in s3_paginator:
-            if "Contents" in page:
-                for key in page["Contents"]:
-                    # just append the last part of the prefix to the list, as they
-                    # are relative to the base path, and deployment name
-                    bucket_files.add(key["Key"].split("/")[-2])
-
-        return bucket_files
-
-    def _delete_with_versions(self, key):
+    def _delete_with_versions(self, key: str) -> None:
         """
         _delete_with_versions should handle object deletions, and all references / versions of the object
 
@@ -304,292 +415,68 @@ class S3Backend(BaseBackend):
         """
         self._s3_client.delete_object(Bucket=self._authenticator.bucket, Key=key)
 
-    def clean(self, deployment: str, limit: tuple = None) -> None:
+    def _ensure_backend_bucket(self) -> None:
         """
-        clean handles determining the desired items to clean and acts as a director to the
-        internal methods which handle actual resource removal
+        _ensure_backend_bucket checks for the existence of the backend bucket, and
+        creates it if it doesn't exist, along with setting the appropriate bucket
+        permissions
+
+        Raises:
+            BackendError: An error occurred while ensuring the backend bucket
         """
-        if limit:
-            for limit_item in limit:
-                click.secho(
-                    "when using limit, dynamodb tables won't be completely dropped",
-                    fg="yellow",
-                )
-                try:
-                    # the bucket state deployment is part of the s3 prefix
-                    self._clean_bucket_state(definition=limit_item)
-                    # deployment name needs specified to determine the dynamo table
-                    self._clean_locking_state(deployment, definition=limit_item)
-                except BackendError as e:
-                    click.secho(f"error deleting state: {e}", fg="red")
-                    raise SystemExit(1)
+        bucket = click.get_current_context().obj.root_options.backend_bucket
+        create_bucket = self._app_state.root_options.create_backend_bucket
+        bucket_present = self._check_bucket_exists(bucket)
+
+        if bucket_present:
+            log.debug(f"backend bucket {bucket} found")
+            return
+
+        if not create_bucket:
+            raise BackendError(
+                "Backend bucket not found and --no-create-backend-bucket specified."
+            )
+
+        self._create_bucket(self._authenticator.bucket)
+        self._create_bucket_versioning(self._authenticator.bucket)
+        self._create_bucket_public_access_block(self._authenticator.bucket)
+
+    def _ensure_locking_table(self) -> None:
+        """
+        _ensure_locking_table checks for the existence of the locking table, and
+        creates it if it doesn't exist
+        """
+        locking_table_name = f"terraform-{self._deployment}"
+        log.debug(f"checking for locking table: {locking_table_name}")
+
+        if self._check_table_exists(locking_table_name):
+            log.debug(f"DynamoDB lock table {locking_table_name} found, continuing.")
         else:
-            try:
-                self._clean_bucket_state()
-            except BackendError as e:
-                click.secho(f"error deleting state: {e}")
-                raise SystemExit(1)
-            self._clean_locking_state(deployment)
-
-    def hcl(self, name: str) -> str:
-        state_config = []
-        state_config.append('  backend "s3" {')
-        state_config.append(f'    region = "{self._authenticator.backend_region}"')
-        state_config.append(f'    bucket = "{self._authenticator.bucket}"')
-        state_config.append(
-            f'    key = "{self._authenticator.prefix}/{name}/terraform.tfstate"'
-        )
-        state_config.append(f'    dynamodb_table = "terraform-{self._deployment}"')
-        state_config.append('    encrypt = "true"')
-        state_config.append("  }")
-        return "\n".join(state_config)
-
-    def data_hcl(self, remotes: list) -> str:
-        remote_data_config = []
-        if type(remotes) is not list:
-            raise ValueError("remotes must be a list")
-
-        for remote in set(remotes):
-            remote_data_config.append(f'data "terraform_remote_state" "{remote}" {{')
-            remote_data_config.append('  backend = "s3"')
-            remote_data_config.append("  config = {")
-            remote_data_config.append(
-                f'    region = "{self._authenticator.backend_region}"'
+            log.info(
+                f"DynamoDB lock table {locking_table_name} not found, creating, please wait..."
             )
-            remote_data_config.append(f'    bucket = "{self._authenticator.bucket}"')
-            remote_data_config.append(
-                "    key ="
-                f' "{self._authenticator.prefix}/{remote}/terraform.tfstate"'
-            )
-            remote_data_config.append("  }")
-            remote_data_config.append("}\n")
-        return "\n".join(remote_data_config)
+            self._create_table(locking_table_name)
 
-    @staticmethod
-    def filter_keys(paginator, bucket_name, prefix="/", delimiter="/", start_after=""):
+    def _list_bucket_definitions(self) -> set:
         """
-        filter_keys returns just they keys that are needed
-        primarily from: https://stackoverflow.com/questions/30249069/listing-contents-of-a-bucket-with-boto3
+        _get_bucket_files returns a set of the keys in the bucket that correspond
+        to all the definitions in a deployment, the function is poorly named.
         """
-
-        prefix = prefix[1:] if prefix.startswith(delimiter) else prefix
-        start_after = (
-            (start_after or prefix) if prefix.endswith(delimiter) else start_after
+        bucket_files = set()
+        root_options = click.get_current_context().obj.root_options
+        bucket = root_options.backend_bucket
+        prefix = root_options.backend_prefix.format(deployment=self._deployment)
+        log.trace(f"listing definition prefixes in: {bucket}/{prefix}")
+        s3_paginator = self._s3_client.get_paginator("list_objects_v2").paginate(
+            Bucket=bucket, Prefix=prefix
         )
-        try:
-            for page in paginator.paginate(
-                Bucket=bucket_name, Prefix=prefix, StartAfter=start_after
-            ):
-                for content in page.get("Contents", ()):
-                    yield content["Key"]
-        except TypeError:
-            pass
 
+        for page in s3_paginator:
+            if "Contents" in page:
+                for key in page["Contents"]:
+                    # just append the last part of the prefix to the list, as they
+                    # are relative to the base path, and deployment name
+                    bucket_files.add(key["Key"].split("/")[-2])
+        log.trace(f"bucket files: {bucket_files}")
 
-class S3Handler(BaseHandler):
-    """The S3Handler class is a handler for the s3 backend"""
-
-    actions = ["plan", "apply"]
-    required_vars = []
-    _is_ready = False
-
-    def __init__(self, authenticator):
-        try:
-            self.execution_functions = {
-                "plan": {
-                    "check": self._check_plan,
-                    "post": self._post_plan,
-                },
-                "apply": {
-                    "pre": self._pre_apply,
-                },
-            }
-
-            self._authenticator = authenticator
-            self._s3_client = self._authenticator.backend_session.client("s3")
-
-        except Exception as e:
-            raise HandlerError(f"Error initializing S3Handler: {e}")
-
-    def is_ready(self):
-        if not self._is_ready:
-            filename = str(uuid4().hex[:6].upper())
-            if self._s3_client.list_objects(
-                Bucket=self._authenticator.bucket,
-                Prefix=f"{self._authenticator.prefix}/{filename}",
-            ).get("Contents"):
-                raise HandlerError(
-                    f"Error initializing S3Handler, remote file already exists: {filename}"
-                )
-            try:
-                self._s3_client.upload_file(
-                    "/dev/null",
-                    self._authenticator.bucket,
-                    f"{self._authenticator.prefix}/{filename}",
-                )
-            except boto3.exceptions.S3UploadFailedError as e:
-                raise HandlerError(
-                    f"Error initializing S3Handler, could not create file: {e}"
-                )
-            try:
-                self._s3_client.delete_object(
-                    Bucket=self._authenticator.bucket,
-                    Key=f"{self._authenticator.prefix}/{filename}",
-                )
-            except boto3.exceptions.S3UploadFailedError as e:
-                raise HandlerError(
-                    f"Error initializing S3Handler, could not delete file: {e}"
-                )
-            self._is_ready = True
-        return self._is_ready
-
-    def execute(self, action, stage, **kwargs):
-        # save a copy of the planfile to the backend state bucket
-        if action in self.execution_functions.keys():
-            if stage in self.execution_functions[action].keys():
-                self.execution_functions[action][stage](**kwargs)
-        return None
-
-    def _check_plan(self, planfile: Path, definition: str, **kwargs):
-        """check_plan runs while the plan is being checked, it should fetch a file from the backend and store it in the local location"""
-        # ensure planfile does not exist or is zero bytes if it does
-        remotefile = f"{self._authenticator.prefix}/{definition}/{planfile.name}"
-        statefile = f"{self._authenticator.prefix}/{definition}/terraform.tfstate"
-        if planfile.exists():
-            if planfile.stat().st_size == 0:
-                planfile.unlink()
-            else:
-                raise HandlerError(f"planfile already exists: {planfile}")
-
-        if self._s3_get_plan(planfile, remotefile):
-            if not planfile.exists():
-                raise HandlerError(f"planfile not found after download: {planfile}")
-            # verify the lineage and serial from the planfile matches the statefile
-            if not self._verify_lineage(planfile, statefile):
-                click.secho(
-                    "planfile lineage does not match statefile, remote plan is unsuitable and will be removed",
-                    fg="red",
-                )
-                self._s3_delete_plan(remotefile)
-                planfile.unlink()
-            else:
-                click.secho(
-                    f"remote planfile downloaded: s3://{self._authenticator.bucket}/{remotefile} -> {planfile}",
-                    fg="yellow",
-                )
-        return None
-
-    def _post_plan(
-        self, planfile: Path, definition: str, changes: bool = False, **kwargs
-    ):
-        """post_apply runs after the apply is complete, it should upload the planfile to the backend"""
-        logfile = planfile.with_suffix(".log")
-        remotefile = f"{self._authenticator.prefix}/{definition}/{planfile.name}"
-        remotelog = remotefile.replace(".tfplan", ".log")
-        if "text" in kwargs.keys():
-            with open(logfile, "w") as f:
-                f.write(kwargs["text"])
-        if planfile.exists() and changes:
-            if self._s3_put_plan(planfile, remotefile):
-                click.secho(
-                    f"remote planfile uploaded: {planfile} -> s3://{self._authenticator.bucket}/{remotefile}",
-                    fg="yellow",
-                )
-                if self._s3_put_plan(logfile, remotelog):
-                    click.secho(
-                        f"remote logfile uploaded: {logfile} -> s3://{self._authenticator.bucket}/{remotelog}",
-                        fg="yellow",
-                    )
-        return None
-
-    def _pre_apply(self, planfile: Path, definition: str, **kwargs):
-        """_pre_apply runs before the apply is started, it should remove the planfile from the backend"""
-        remotefile = f"{self._authenticator.prefix}/{definition}/{planfile.name}"
-        remotelog = remotefile.replace(".tfplan", ".log")
-        if self._s3_delete_plan(remotefile):
-            click.secho(
-                f"remote planfile removed: s3://{self._authenticator.bucket}/{remotefile}",
-                fg="yellow",
-            )
-        if self._s3_delete_plan(remotelog):
-            click.secho(
-                f"remote logfile removed: s3://{self._authenticator.bucket}/{remotelog}",
-                fg="yellow",
-            )
-        return None
-
-    def _s3_get_plan(self, planfile: Path, remotefile: str) -> bool:
-        """_get_plan downloads the file from s3"""
-        # fetch the planfile from the backend
-        downloaded = False
-        try:
-            self._s3_client.download_file(
-                self._authenticator.bucket, remotefile, planfile
-            )
-            # make sure the local file exists, and is greater than 0 bytes
-            downloaded = True
-        except botocore.exceptions.ClientError as e:
-            if e.response["Error"]["Code"] == "404":
-                click.secho(f"remote plan {remotefile} not found", fg="yellow")
-                pass
-            else:
-                raise HandlerError(f"Error downloading planfile: {e}")
-        return downloaded
-
-    def _s3_put_plan(self, planfile: Path, remotefile: str) -> bool:
-        """_put_plan uploads the file to s3"""
-        uploaded = False
-        # don't upload empty plans
-        if planfile.stat().st_size == 0:
-            return uploaded
-        try:
-            self._s3_client.upload_file(
-                str(planfile), self._authenticator.bucket, remotefile
-            )
-            uploaded = True
-        except botocore.exceptions.ClientError as e:
-            raise HandlerError(f"Error uploading planfile: {e}")
-        return uploaded
-
-    def _s3_delete_plan(self, remotefile: str) -> bool:
-        """_delete_plan removes a remote plan file"""
-        deleted = False
-        try:
-            self._s3_client.delete_object(
-                Bucket=self._authenticator.bucket, Key=remotefile
-            )
-            deleted = True
-        except botocore.exceptions.ClientError as e:
-            raise HandlerError(f"Error deleting planfile: {e}")
-        return deleted
-
-    def _verify_lineage(self, planfile: Path, statefile: str) -> bool:
-        # load the statefile as a json object from the backend
-        state = None
-        try:
-            state = json.loads(
-                self._s3_client.get_object(
-                    Bucket=self._authenticator.bucket, Key=statefile
-                )["Body"].read()
-            )
-        except botocore.exceptions.ClientError as e:
-            raise HandlerError(f"Error downloading statefile: {e}")
-
-        # load the planfile as a json object
-        plan = None
-        try:
-            with ZipFile(str(planfile), "r") as zip:
-                with zip.open("tfstate") as f:
-                    plan = json.loads(f.read())
-        except Exception as e:
-            raise HandlerError(f"Error loading planfile: {e}")
-
-        # compare the lineage and serial from the planfile to the statefile
-        if not (state and plan):
-            return False
-        if state["serial"] != plan["serial"]:
-            return False
-        if state["lineage"] != plan["lineage"]:
-            return False
-
-        return True
+        return bucket_files

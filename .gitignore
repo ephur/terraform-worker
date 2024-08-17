@@ -9,3 +9,6 @@ __pycache__
 htmlcov
 .pytest_cache
 registry.terraform.io/
+.scannerwork/
+coverage.xml
+reports/*

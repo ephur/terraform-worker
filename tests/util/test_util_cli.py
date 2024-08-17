@@ -1,10 +1,11 @@
 from typing import List, Optional
+from unittest.mock import patch
 
 import click
 import pytest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from tfworker.util.cli import pydantic_to_click
+from tfworker.util.cli import pydantic_to_click, validate_host
 
 
 class ATestModel(BaseModel):
@@ -16,7 +17,7 @@ class ATestModel(BaseModel):
     optional_float_field: Optional[float] = None
     bool_field: bool
     optional_bool_field: Optional[bool] = None
-    list_str_field: List[str] = Field(required=True)
+    list_str_field: List[str]
     optional_list_str_field: Optional[List[str]] = []
 
 
@@ -77,3 +78,36 @@ def test_unsupported_type():
         @pydantic_to_click(UnsupportedModel)
         def a_command():
             pass
+
+
+def test_validate_host():
+    """only linux and darwin are supported, and require 64 bit platforms"""
+    with patch("tfworker.util.system.get_platform", return_value=("linux", "amd64")):
+        assert validate_host() is None
+    with patch("tfworker.util.system.get_platform", return_value=("darwin", "amd64")):
+        assert validate_host() is None
+    with patch("tfworker.util.system.get_platform", return_value=("darwin", "arm64")):
+        assert validate_host() is None
+
+
+def test_validate_host_invalid_machine():
+    """ensure invalid machine types fail"""
+    with patch("tfworker.util.cli.get_platform", return_value=("darwin", "i386")):
+        with pytest.raises(NotImplementedError, match="running on i386"):
+            validate_host()
+
+
+def test_validate_host_invalid_os():
+    """ensure invalid os types fail"""
+    with patch("tfworker.util.cli.get_platform", return_value=("windows", "amd64")):
+        with pytest.raises(NotImplementedError, match="running on windows"):
+            validate_host()
+
+
+def test_vlidate_host_invalid_os_machine():
+    """ensure invalid os and machine types fail"""
+    with patch("tfworker.util.cli.get_platform", return_value=("windows", "i386")):
+        with pytest.raises(NotImplementedError) as e:
+            validate_host()
+        assert "running on windows" in str(e.value)
+        assert "running on i386" in str(e.value)
