@@ -1,7 +1,6 @@
 from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, model_validator
-
 from tfworker.constants import (
     TF_PROVIDER_DEFAULT_HOSTNAME,
     TF_PROVIDER_DEFAULT_NAMESPACE,

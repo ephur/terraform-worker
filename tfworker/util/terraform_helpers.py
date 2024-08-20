@@ -5,10 +5,9 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Dict, List
 
 import hcl2
+import tfworker.util.log as log
 from lark.exceptions import UnexpectedToken
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
-
-import tfworker.util.log as log
 from tfworker.exceptions import TFWorkerException
 from tfworker.util.system import get_platform
 

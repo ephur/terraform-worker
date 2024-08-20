@@ -2,10 +2,9 @@ import typing as t
 from enum import Enum
 
 import click
+import tfworker.util.log as log
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import PydanticUndefined
-
-import tfworker.util.log as log
 from tfworker.util.system import get_platform
 
 

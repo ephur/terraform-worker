@@ -85,32 +85,41 @@ class TerraformCommand(BaseCommand):
             self._exec_terraform_action(name=name, action=TerraformAction.INIT)
 
     def terraform_plan(self) -> None:
-        if not self.app_state.terraform_options.plan:
-            log.debug("--no-plan option specified; skipping plan")
-            return
-
         from tfworker.definitions.plan import DefinitionPlan
 
+        def_plan: DefinitionPlan = DefinitionPlan(self.ctx, self.app_state)
         needed: bool
         reason: str
-        def_plan: DefinitionPlan = DefinitionPlan(self.ctx, self.app_state)
+
+        # check for existing plan files that need an apply
+        for name in self.app_state.definitions.keys():
+            def_plan.set_plan_file(self.app_state.definitions[name])
+            needed, reason = def_plan.needs_plan(
+                self.app_state.definitions[name]
+            )
+            if not needed:
+                if "plan file exists" in reason:
+                    for name in self.app_state.definitions.keys():
+                        self.app_state.definitions[name].needs_apply = True
+
+        # if --no-plan is specified, skip the plan, but check for existing plan files that need an apply
+        if not self.app_state.terraform_options.plan:
+            log.debug("--no-plan option specified; skipping plan execution")
+            return
 
         for name in self.app_state.definitions.keys():
             log.info(f"running pre-plan for definition: {name}")
-            def_plan.set_plan_file(self.app_state.definitions[name])
             self._exec_terraform_pre_plan(name=name)
             needed, reason = def_plan.needs_plan(self.app_state.definitions[name])
-
             if not needed:
-                if "plan file exists" in reason:
-                    self.app_state.definitions[name].needs_apply = True
-                log.info(f"definition {name} does not need a plan: {reason}")
+                log.info(f"Plan not needed for definition: {name}, reason: {reason}")
                 continue
 
             log.info(f"definition {name} needs a plan: {reason}")
             self._exec_terraform_plan(name=name)
 
     def terraform_apply_or_destroy(self) -> None:
+        log.trace("entering terraform apply or destroy")
         if self.app_state.terraform_options.destroy:
             action: TerraformAction = TerraformAction.DESTROY
         elif self.app_state.terraform_options.apply:
@@ -120,6 +129,7 @@ class TerraformCommand(BaseCommand):
             return
 
         for name in self.app_state.definitions.keys():
+            log.trace(f"running {action} for definition: {name}")
             if action == TerraformAction.DESTROY:
                 if self.app_state.terraform_options.limit:
                     if name not in self.app_state.terraform_options.limit:
@@ -237,6 +247,8 @@ class TerraformCommand(BaseCommand):
         if result.exit_code == 0:
             log.debug(f"no changes for definition {name}")
             definition.needs_apply = False
+            # remove the empty plan file
+            definition.plan_file.unlink()
 
         if result.exit_code == 1:
             log.error(f"error running terraform plan for {name}")

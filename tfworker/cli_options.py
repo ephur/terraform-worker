@@ -3,6 +3,7 @@ import shutil
 from typing import List, Optional, Union
 
 import click
+import tfworker.util.log as log
 from pydantic import (
     ConfigDict,
     Field,
@@ -11,8 +12,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic_core import InitErrorDetails
-
-import tfworker.util.log as log
 from tfworker import constants as const
 from tfworker.backends import Backends
 from tfworker.types import FreezableBaseModel

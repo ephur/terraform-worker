@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from pydantic import ConfigDict, Field
-
 from tfworker import cli_options
 from tfworker.authenticators import AuthenticatorsCollection
 from tfworker.backends import BaseBackend

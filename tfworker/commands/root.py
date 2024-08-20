@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Any, Dict
 
 import click
-
 import tfworker.util.log as log
 from tfworker.cli_options import CLIOptionsRoot
 

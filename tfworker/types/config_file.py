@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from pydantic import ConfigDict, Field
 
@@ -12,14 +12,14 @@ class GlobalVars(FreezableBaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    terraform_vars: Dict[str, str | bool] = Field(
+    terraform_vars: Dict[str, str | bool | list | dict] = Field(
         {}, description="Variables to pass to terraform via a generated .tfvars file."
     )
-    remote_vars: Dict[str, str | bool] = Field(
+    remote_vars: Dict[str, Tuple[str | bool | list | dict]] = Field(
         {},
         description="Variables which are used to generate local references to remote state vars.",
     )
-    template_vars: Dict[str, str | bool] = Field(
+    template_vars: Dict[str, str | bool | list | dict] = Field(
         {}, description="Variables which are suppled to any jinja templates."
     )
 

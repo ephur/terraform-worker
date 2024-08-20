@@ -8,7 +8,6 @@ import botocore
 import botocore.errorfactory
 import botocore.paginate
 import click
-
 import tfworker.util.log as log
 from tfworker.exceptions import BackendError
 
@@ -16,7 +15,6 @@ from .base import BaseBackend, validate_backend_empty
 
 if TYPE_CHECKING:
     import boto3  # pragma: no cover  # noqa
-
     from tfworker.app_state import AppState  # pragma: no cover  # noqa
     from tfworker.authenticators import (  # pragma: no cover  # noqa
         AuthenticatorsCollection,

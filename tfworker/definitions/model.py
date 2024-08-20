@@ -1,9 +1,8 @@
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
-
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import tfworker.util.log as log
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DefinitionRemoteOptions(BaseModel):
@@ -58,7 +57,7 @@ class Definition(BaseModel):
         {},
         description="Variables which are used to generate local references to remote state vars.",
     )
-    template_vars: Optional[Dict[str, str]] = Field(
+    template_vars: Optional[Dict[str, str | bool | list | dict]] = Field(
         {}, description="Variables which are suppled to any jinja templates."
     )
 
@@ -205,6 +204,18 @@ class Definition(BaseModel):
             Union[List[str], None]: The list of providers used by the definition or none
         """
         return cached_get_used_providers(self.get_target_path(working_dir))
+
+    def existing_planfile(self, working_dir: str) -> bool:
+        """
+        Check if the planfile exists
+
+        Args:
+            working_dir (str): The working directory
+
+        Returns:
+            bool: True if the planfile exists
+        """
+        return self.plan_file and Path(self.plan_file).exists()
 
 
 def cached_get_used_providers(working_dir: str) -> Union[List[str], None]:
