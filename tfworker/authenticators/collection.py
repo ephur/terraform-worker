@@ -2,9 +2,8 @@ import collections
 import threading
 from typing import TYPE_CHECKING
 
-from pydantic import ValidationError
-
 import tfworker.util.log as log
+from pydantic import ValidationError
 from tfworker.exceptions import FrozenInstanceError, UnknownAuthenticator
 
 from .aws import AWSAuthenticator  # noqa

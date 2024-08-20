@@ -1,10 +1,9 @@
 from typing import TYPE_CHECKING, Any, Dict, Union
 
 import click
-from pydantic import BaseModel, ValidationError
-
 import tfworker.commands.config as c
 import tfworker.util.log as log
+from pydantic import BaseModel, ValidationError
 from tfworker.exceptions import BackendError, HandlerError, TFWorkerException
 from tfworker.util.cli import handle_config_error
 

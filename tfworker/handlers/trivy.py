@@ -2,9 +2,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
-from pydantic import BaseModel
-
 import tfworker.util.log as log
+from pydantic import BaseModel
 from tfworker.exceptions import HandlerError
 from tfworker.types.terraform import TerraformAction, TerraformStage
 

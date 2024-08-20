@@ -1,5 +1,4 @@
 import pytest
-
 from tfworker.definitions import Definition, DefinitionsCollection
 from tfworker.exceptions import FrozenInstanceError
 

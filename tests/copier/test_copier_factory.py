@@ -4,7 +4,6 @@ import tempfile
 from unittest.mock import patch
 
 import pytest
-
 from tfworker.copier.factory import Copier, CopyFactory
 
 C_CONFLICTS = ["test.txt", "foo", "test.tf"]
