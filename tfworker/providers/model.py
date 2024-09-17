@@ -8,18 +8,75 @@ from tfworker.constants import (
 
 
 class ProviderRequirements(BaseModel):
+    """
+    Represents the requirements for a provider, such as the version and source.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     version: str
     source: Optional[str] = None
 
 
+class ProviderAlias(BaseModel):
+    """
+    Represents an alias in the provider configuration, such as an AWS region alias.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    vars: Optional[Dict[str, Any]] = None
+    config_blocks: Optional[Dict[str, Any]] = None
+
+
 class ProviderConfig(BaseModel):
+    """
+    Represents the configuration for a provider, such as the requirements, variables, and config blocks.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     requirements: ProviderRequirements
     vars: Optional[Dict[str, Any]] = None
     config_blocks: Optional[Dict[str, Any]] = None
+    aliases: Optional[Dict[str, ProviderAlias]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def merge_aliases(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Merges alias vars and config_blocks, overriding top-level vars and config_blocks
+        for each alias.
+        """
+        aliases = values.get("aliases", {})
+
+        # No aliases, no merging needed
+        if not aliases:
+            return values
+
+        top_level_vars = values.get("vars", {}) or {}
+        top_level_config_blocks = values.get("config_blocks", {}) or {}
+
+        # Process each alias, note we are still working with dictionaries, not Pydantic models yet
+        for alias_name, alias_config in aliases.items():
+            alias_vars = alias_config.get("vars", {})  # Access as a dict
+            alias_config_blocks = alias_config.get(
+                "config_blocks", {}
+            )  # Access as a dict
+
+            # The alias vars should override top-level vars
+            merged_vars = {**top_level_vars, **alias_vars}
+
+            # The alias config_blocks should override top-level config_blocks
+            merged_config_blocks = {**top_level_config_blocks, **alias_config_blocks}
+
+            # Apply the merged vars and config_blocks to the alias
+            alias_config["vars"] = merged_vars
+            alias_config["config_blocks"] = merged_config_blocks
+
+        # Update values with the merged aliases (still as dicts)
+        values["aliases"] = aliases
+        return values
 
 
 class ProviderGID(BaseModel):

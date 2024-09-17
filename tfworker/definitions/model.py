@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 import tfworker.util.log as log
 from pydantic import BaseModel, ConfigDict, Field

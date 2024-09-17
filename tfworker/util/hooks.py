@@ -543,7 +543,10 @@ def _run_terraform_refresh(
         env=env,
     )
     if exit_code != 0:
-        log.warn(f"Could not refresh remote state, hook script may have unexpected results")
+        log.warn(
+            "Could not refresh remote state, hook script may have unexpected results"
+        )
+
 
 def _run_terraform_show(
     terraform_bin: str, working_dir: str, env: Dict[str, str]
