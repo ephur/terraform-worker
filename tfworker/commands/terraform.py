@@ -94,9 +94,7 @@ class TerraformCommand(BaseCommand):
         # check for existing plan files that need an apply
         for name in self.app_state.definitions.keys():
             def_plan.set_plan_file(self.app_state.definitions[name])
-            needed, reason = def_plan.needs_plan(
-                self.app_state.definitions[name]
-            )
+            needed, reason = def_plan.needs_plan(self.app_state.definitions[name])
             if not needed:
                 if "plan file exists" in reason:
                     for name in self.app_state.definitions.keys():

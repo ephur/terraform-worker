@@ -109,7 +109,7 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
 @cli.command()
 @click.argument("deployment", envvar="WORKER_DEPLOYMENT", callback=validate_deployment)
 @click.pass_context
-def env(ctx: click.Context, deployment:str, **kwargs):
+def env(ctx: click.Context, deployment: str, **kwargs):
     """
     Export environment variables for the configured backend
 
