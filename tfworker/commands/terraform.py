@@ -353,6 +353,7 @@ class TerraformCommand(BaseCommand):
                 extra_vars=definition.get_template_vars(
                     self.app_state.loaded_config.global_vars.template_vars
                 ),
+                backend=self.app_state.backend,
             )
         except HookError as e:
             log.error(f"hook execution error on definition {definition.name}: \n{e}")

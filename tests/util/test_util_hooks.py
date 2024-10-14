@@ -60,7 +60,7 @@ class TestGetStateItem:
     def test_get_state_item_from_output_success(self, mock_remote, mock_output):
         mock_output.return_value = '{"key": "value"}'
         result = hooks.get_state_item(
-            "working_dir", {}, "terraform_bin", "state", "item"
+            "working_dir", {}, "terraform_bin", "state", "item", None
         )
         assert result == '{"key": "value"}'
         mock_output.assert_called_once()
@@ -73,7 +73,7 @@ class TestGetStateItem:
     def test_get_state_item_from_remote_success(self, mock_remote, mock_output):
         mock_remote.return_value = '{"key": "value"}'
         result = hooks.get_state_item(
-            "working_dir", {}, "terraform_bin", "state", "item"
+            "working_dir", {}, "terraform_bin", "state", "item", None
         )
         assert result == '{"key": "value"}'
         mock_output.assert_called_once()
@@ -291,7 +291,7 @@ class TestHelperFunctions:
 
         local_env = {}
         hooks._populate_environment_with_terraform_remote_vars(
-            local_env, "working_dir", "terraform_path", False
+            local_env, "working_dir", "terraform_path", False, None
         )
         assert "TF_REMOTE_LOCAL_KEY" in local_env.keys()
         assert "TF_REMOTE_LOCAL_ANOTHER_KEY" in local_env.keys()

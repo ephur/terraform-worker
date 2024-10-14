@@ -10,6 +10,7 @@ import botocore.paginate
 import click
 import tfworker.util.log as log
 from tfworker.exceptions import BackendError
+from tfworker.types import JSONType
 
 from .base import BaseBackend, validate_backend_empty
 
@@ -478,3 +479,34 @@ class S3Backend(BaseBackend):
         log.trace(f"bucket files: {bucket_files}")
 
         return bucket_files
+
+    def get_state(self, remote: str) -> JSONType:
+        """
+        Retrieve the state item from the backend
+
+        Args:
+            remote (str): The remote name
+            item (str): The item name
+
+        Returns:
+            JSONType: A JSON representation of the state item
+        """
+
+        # check if remote is a valid remote
+        if remote not in self.remotes:
+            raise BackendError(f"remote {remote} not found in backend")
+
+        # get the terraform state file from S3
+        state_key = (
+            f"{self._app_state.root_options.backend_prefix}/{remote}/terraform.tfstate"
+        )
+        log.debug(f"getting state file: {state_key}")
+        state_obj = self._s3_client.get_object(
+            Bucket=self._app_state.root_options.backend_bucket, Key=state_key
+        )
+
+        # load the state file as JSON
+        with closing(state_obj["Body"]) as body:
+            state = json.load(body)
+
+        return state

@@ -8,6 +8,7 @@ from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import storage
 from google.cloud.exceptions import Conflict, NotFound
 from tfworker.exceptions import BackendError
+from tfworker.types import JSONType
 
 from .base import BaseBackend, validate_backend_empty
 
@@ -192,3 +193,6 @@ class GCSBackend(BaseBackend):
             remote_data_config.append("  }")
             remote_data_config.append("}")
         return "\n".join(remote_data_config)
+
+    def get_state(self, remote: str) -> JSONType:
+        raise NotImplementedError
