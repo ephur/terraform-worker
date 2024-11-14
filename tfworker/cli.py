@@ -139,6 +139,7 @@ def register_plugins():
     # from tfworker.handlers.bitbucket import BitbucketHandler  # noqa: F401
     # from tfworker.handlers.s3 import S3Handler  # noqa: F401
     # from tfworker.handlers.trivy import TrivyHandler  # noqa: F401
+    # from tfworker.handlers.trivy import SnykHandler  # noqa: F401
     # Register Copiers
     log.trace("registering copiers")
     import tfworker.copier  # noqa: F401
