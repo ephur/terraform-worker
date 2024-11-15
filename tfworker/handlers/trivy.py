@@ -53,7 +53,7 @@ class TrivyHandler(BaseHandler):
 
         # ensure trivy is runnable
         if not self._trivy_runable(self._path):
-            if self.required:
+            if self._required:
                 raise HandlerError(
                     f"Trivy is not runnable at {self._path}", terminate=True
                 )

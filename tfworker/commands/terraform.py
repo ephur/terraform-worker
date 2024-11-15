@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Dict, Union
 
 import tfworker.util.hooks as hooks
@@ -255,6 +256,7 @@ class TerraformCommand(BaseCommand):
         if result.exit_code == 2:
             log.debug(f"terraform plan for {name} indicates changes")
             definition.needs_apply = True
+            self._generate_plan_output_json(name)
 
         try:
             log.trace(f"executing post plan handlers for definition {name}")
@@ -277,6 +279,32 @@ class TerraformCommand(BaseCommand):
             TerraformStage.POST,
             result,
         )
+
+    def _generate_plan_output_json(self, name) -> None:
+        """
+        Generate a plan file in JSON format using the binary plan_file
+        """
+        log.debug(f"generating JSON plan file for {name}")
+        definition: Definition = self.app_state.definitions[name]
+
+        working_dir: str = definition.get_target_path(
+            self.app_state.root_options.working_dir
+        )
+
+        result: TerraformResult = TerraformResult(
+            *pipe_exec(
+                f"{self.app_state.terraform_options.terraform_bin} show -json {definition.plan_file}",
+                cwd=working_dir,
+                env=self.terraform_config.env,
+                stream_output=False
+            )
+        )
+
+        planfile = Path(definition.plan_file)
+        jsonfile = planfile.with_suffix(".tfplan.json")
+
+        log.trace(f"writing json plan file {jsonfile}")
+        result.log_file(jsonfile.resolve())
 
     def _run(
         self,
