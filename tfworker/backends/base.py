@@ -91,6 +91,19 @@ class BaseBackend(metaclass=ABCMeta):
         """
         pass  # pragma: no cover
 
+    @abstractmethod
+    def get_state(self, remote: str) -> JSONType:
+        """
+        Get the state file from the backend, for a remote.
+
+        Args:
+            deployment (str): The deployment name
+
+        Returns:
+            JSONType: The state from the backend
+        """
+        pass
+
 
 def validate_backend_empty(state: JSONType) -> bool:
     """

@@ -6,7 +6,6 @@ from typing import Tuple
 from unittest import mock
 
 import pytest
-
 from tfworker.copier import GitCopier
 
 C_CONFLICTS = ["test.txt", "foo", "test.tf"]

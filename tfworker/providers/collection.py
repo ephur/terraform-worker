@@ -3,10 +3,9 @@ import threading
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Dict, List
 
+import tfworker.util.log as log
 from pydantic import GetCoreSchemaHandler, ValidationError
 from pydantic_core import CoreSchema, core_schema
-
-import tfworker.util.log as log
 from tfworker.exceptions import FrozenInstanceError
 
 if TYPE_CHECKING:
@@ -114,6 +113,7 @@ class ProvidersCollection(Mapping):
         Returns:
             str: HCL code for the specified providers.
         """
+        log.trace(f"Generating HCL for providers: {includes}")
         if includes is None:
             includes = list(self._providers.keys())
 

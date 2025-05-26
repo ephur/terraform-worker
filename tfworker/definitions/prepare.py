@@ -3,7 +3,6 @@ from os import environ
 from typing import TYPE_CHECKING, Dict, Union
 
 import jinja2
-
 import tfworker.util.log as log
 from tfworker.constants import (
     RESERVED_FILES,
@@ -77,7 +76,11 @@ class DefinitionPrepare:
             template_path=template_path, jinja_globals=self._get_template_vars(name)
         )
         for template_file in jinja_env.list_templates(filter_func=filter_templates):
-            write_template_file(jinja_env=jinja_env, template_path=template_path, template_file=template_file)
+            write_template_file(
+                jinja_env=jinja_env,
+                template_path=template_path,
+                template_file=template_file,
+            )
 
     def create_local_vars(self, name: str) -> None:
         """Create local vars from remote data sources"""
@@ -353,7 +356,7 @@ def vars_typer(v, inner=False):
     elif isinstance(v, list):
         rval = []
         for val in v:
-            result = Definition.vars_typer(val, inner=True)
+            result = vars_typer(val, inner=True)
             try:
                 rval.append(result.strip('"').strip("'"))
             except AttributeError:
@@ -365,7 +368,7 @@ def vars_typer(v, inner=False):
     elif isinstance(v, dict):
         rval = {}
         for k, val in v.items():
-            result = Definition.vars_typer(val, inner=True)
+            result = vars_typer(val, inner=True)
             try:
                 rval[k] = result.strip('"').strip("'")
             except AttributeError:

@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 import click
-from pydantic import ValidationError
-
 import tfworker.util.log as log
+from pydantic import ValidationError
 from tfworker.app_state import AppState
 from tfworker.cli_options import CLIOptionsClean, CLIOptionsRoot, CLIOptionsTerraform
 from tfworker.commands.clean import CleanCommand
@@ -102,16 +101,15 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
 
     # Prepare the provider cache
     tfc.prep_providers()
-    # @TODO: Determine how much of this should be executed here, versus
-    # orchestrated in the TerraformCommand classes .exec method
     tfc.terraform_init()
     tfc.terraform_plan()
     tfc.terraform_apply_or_destroy()
 
 
 @cli.command()
+@click.argument("deployment", envvar="WORKER_DEPLOYMENT", callback=validate_deployment)
 @click.pass_context
-def env(ctx: click.Context, **kwargs):
+def env(ctx: click.Context, deployment: str, **kwargs):
     """
     Export environment variables for the configured backend
 
@@ -121,7 +119,7 @@ def env(ctx: click.Context, **kwargs):
     the worker will execute them. This can be helpful when doing manual
     state management
     """
-    env = EnvCommand()
+    env = EnvCommand(deployment=deployment)
     env.exec()
 
 
@@ -141,6 +139,7 @@ def register_plugins():
     # from tfworker.handlers.bitbucket import BitbucketHandler  # noqa: F401
     # from tfworker.handlers.s3 import S3Handler  # noqa: F401
     # from tfworker.handlers.trivy import TrivyHandler  # noqa: F401
+    # from tfworker.handlers.trivy import SnykHandler  # noqa: F401
     # Register Copiers
     log.trace("registering copiers")
     import tfworker.copier  # noqa: F401

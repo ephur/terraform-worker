@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import CoreSchema, core_schema
@@ -16,6 +16,7 @@ class BaseProvider:
         self.config_blocks = config.config_blocks or {}
         self.version = config.requirements.version
         self.source = config.requirements.source or f"hashicorp/{self.tag}"
+        self.aliases = config.aliases or {}
         self._field_filter = []
 
     def __str__(self):
@@ -29,37 +30,54 @@ class BaseProvider:
 
     def hcl(self) -> str:
         result = []
-        provider_vars = {}
-        config_block = {}
 
-        # setup data for provider variables and config blocks
-        try:
-            for k, v in self.vars.items():
-                if k not in self._field_filter:
-                    provider_vars[k] = v
-        except (KeyError, TypeError):
-            """No provider vars were set."""
-            pass
-        for k, v in self.config_blocks.items():
-            config_block[k] = v
+        # Helper function to generate the HCL block for a provider or alias
+        def generate_provider_block(
+            tag: str,
+            provider_vars: Dict[str, Any],
+            config_blocks: Dict[str, Any],
+            alias_name: Optional[str] = None,
+        ) -> str:
+            block = []
+            block.append(f'provider "{tag}" {{')
 
-        # inject provider block
-        result.append(f'provider "{self.tag}" {{')
+            # If it's an alias, inject the alias line
+            if alias_name:
+                block.append(f'  alias = "{alias_name}"')
 
-        # inject provider variables
-        for k, v in provider_vars.items():
-            if v and '"' not in v:
-                result.append(f'  {k} = "{v}"')
-            else:
-                result.append(f"  {k} = {v}")
+            # Inject provider variables
+            for k, v in provider_vars.items():
+                if v and '"' not in v:
+                    block.append(f'  {k} = "{v}"')
+                else:
+                    block.append(f"  {k} = {v}")
 
-        # inject provider config blocks
-        for k in self.config_blocks.keys():
-            result.append(f"  {k} {{")
-            result.append(self._hclify(self.config_blocks[k], depth=4))
-            result.append("  }")
+            # Inject provider config blocks
+            for k in config_blocks.keys():
+                block.append(f"  {k} {{")
+                block.append(self._hclify(config_blocks[k], depth=4))
+                block.append("  }")
 
-        result.append("}\n")
+            block.append("}\n")
+            return "\n".join(block)
+
+        # Main provider block (no alias)
+        result.append(
+            generate_provider_block(self.tag, self.vars or {}, self.config_blocks or {})
+        )
+
+        # Alias provider blocks, if any
+        if hasattr(self, "aliases") and self.aliases:
+            for alias_name, alias_config in self.aliases.items():
+                result.append(
+                    generate_provider_block(
+                        self.tag,
+                        alias_config.vars or {},
+                        alias_config.config_blocks or {},
+                        alias_name=alias_name,
+                    )
+                )
+
         return "\n".join(result)
 
     def required(self):

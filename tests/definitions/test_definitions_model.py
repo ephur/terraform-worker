@@ -1,5 +1,4 @@
 import pytest
-
 from tfworker.definitions.model import Definition, DefinitionRemoteOptions
 
 

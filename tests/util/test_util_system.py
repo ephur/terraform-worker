@@ -1,7 +1,6 @@
 from unittest import mock
 
 import pytest
-
 from tfworker.util.system import get_platform, pipe_exec, strip_ansi
 
 

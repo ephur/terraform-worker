@@ -3,7 +3,6 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 from pydantic_core import InitErrorDetails
-
 from tfworker.authenticators.base import BaseAuthenticator, BaseAuthenticatorConfig
 from tfworker.authenticators.collection import AuthenticatorsCollection
 from tfworker.exceptions import FrozenInstanceError, UnknownAuthenticator

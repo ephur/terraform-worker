@@ -2,13 +2,13 @@ import json
 from typing import TYPE_CHECKING
 
 import click
+import tfworker.util.log as log
 from google.api_core import page_iterator
 from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import storage
 from google.cloud.exceptions import Conflict, NotFound
-
-import tfworker.util.log as log
 from tfworker.exceptions import BackendError
+from tfworker.types import JSONType
 
 from .base import BaseBackend, validate_backend_empty
 
@@ -193,3 +193,6 @@ class GCSBackend(BaseBackend):
             remote_data_config.append("  }")
             remote_data_config.append("}")
         return "\n".join(remote_data_config)
+
+    def get_state(self, remote: str) -> JSONType:
+        raise NotImplementedError
