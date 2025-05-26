@@ -1,6 +1,13 @@
 # terraform-worker
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
+![CI](https://github.com/ephur/terraform-worker/actions/workflows/ci.yml/badge.svg)
+![Coverage](https://img.shields.io/badge/coverage-60%25-yellow)
+![Python](https://img.shields.io/badge/python-3.11-blue)
+![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
+![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)
+![Linted: flake8](https://img.shields.io/badge/linted-flake8-green)
+![Built with Poetry](https://img.shields.io/badge/built%20with-poetry-blue)
 
 **terraform-worker** is a command-line tool purpose-built for orchestrating large-scale, modular Terraform deployments. It enables precise control over provider versions, remote state scaffolding, and shared configuration logic — ideal for enterprise infrastructure teams managing complex environments across multiple workspaces and deployment stages.
 
