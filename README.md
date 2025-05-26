@@ -1,10 +1,27 @@
 # terraform-worker
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
+
 
 **terraform-worker** is a command-line tool purpose-built for orchestrating large-scale, modular Terraform deployments. It enables precise control over provider versions, remote state scaffolding, and shared configuration logic — ideal for enterprise infrastructure teams managing complex environments across multiple workspaces and deployment stages.
 
 Unlike tools such as `terragrunt`, this is not a drop-in wrapper — `terraform-worker` introduces a new structure and workflow model, optimized for maintainability, scalability, and declarative control, and integration with CI/CD pipelines.
 
 ---
+
+## 📖 Table of Contents
+
+- [🚀 Features](#-features)
+- [🔄 Example Workflow](#-example-workflow)
+- [📌 Configuration Notes](#-configuration-notes)
+- [🧠 How It Works](#-how-it-works)
+- [🧪 Development & Testing](#-development--testing)
+- [📤 Releasing](#-releasing)
+- [🛠 Troubleshooting](#-troubleshooting)
+- [🪝 Hook Scripts](#-hook-scripts)
+- [🔒 Assuming a Role (AWS)](#-assuming-a-role-aws)
+- [📚 Documentation](#-documentation)
+- [🧭 Design Philosophy](#-design-philosophy)
+- [🔗 License](#-license)
 
 ## 🚀 Features
 
@@ -218,6 +235,17 @@ open ./docs/build/index.html
 While it excels at scale, it’s also a powerful CLI for individuals who need structure without sacrificing flexibility.
 
 ---
-## 🔗 License
 
+## 🔐 Legal Summary — Apache License 2.0
 Apache License 2.0 — see [LICENSE](./LICENSE) for details.
+
+This project is licensed under the Apache License 2.0, which means:
+
+- ✅ You can use the code freely, including in commercial applications
+- ✅ You can modify it, fork it, and redistribute it
+- ✅ You **do not** have to open source your own modifications
+- ✅ It includes a patent grant to protect you from contributors asserting patent claims
+- ❗ You **must** include a copy of the license and provide proper attribution
+- ❗ You **must** note significant changes if you modify the code
+
+This license is designed to encourage broad use while protecting both users and contributors.
