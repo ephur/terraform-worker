@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 import click
-import tfworker.util.log as log
 from pydantic import ValidationError
+
+import tfworker.util.log as log
 from tfworker.app_state import AppState
 from tfworker.cli_options import CLIOptionsClean, CLIOptionsRoot, CLIOptionsTerraform
 from tfworker.commands.clean import CleanCommand

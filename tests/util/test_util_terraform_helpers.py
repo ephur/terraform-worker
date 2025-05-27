@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from packaging.specifiers import SpecifierSet
+
 from tfworker.exceptions import TFWorkerException
 from tfworker.providers import ProviderGID
 from tfworker.providers.collection import ProvidersCollection

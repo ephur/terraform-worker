@@ -5,6 +5,7 @@ import pytest
 from botocore.exceptions import NoCredentialsError
 from moto import mock_aws
 from pydantic import ValidationError
+
 from tfworker.authenticators import AWSAuthenticator, AWSAuthenticatorConfig
 from tfworker.authenticators.aws import (
     _assume_role_session,

@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+
 import tfworker.util.log as log
 
 REDACTED_ITEMS = ["aws_secret_access_key", "aws_session_token", "aws_profile"]

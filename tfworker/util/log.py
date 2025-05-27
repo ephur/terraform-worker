@@ -4,6 +4,7 @@ from functools import partial
 from typing import Any, Dict, List, Union
 
 from click import secho
+
 from tfworker.constants import REDACTED_ITEMS
 
 
@@ -29,7 +30,6 @@ def log(
     Args:
         msg ()
     """
-    global log_level
     level_colors = {
         log_level.TRACE: "cyan",
         log_level.DEBUG: "blue",
