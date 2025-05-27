@@ -6,6 +6,7 @@ import boto3
 import click
 import pytest
 from moto import mock_aws
+
 from tfworker.app_state import AppState
 from tfworker.authenticators import AuthenticatorsCollection
 from tfworker.cli_options import CLIOptionsClean, CLIOptionsRoot, CLIOptionsTerraform

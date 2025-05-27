@@ -4,6 +4,7 @@ from unittest.mock import patch
 import click
 import pytest
 from pydantic import BaseModel
+
 from tfworker.util.cli import pydantic_to_click, validate_host
 
 

@@ -1,4 +1,5 @@
 import pytest
+
 from tfworker.definitions import Definition, DefinitionsCollection
 from tfworker.definitions.prepare import DefinitionPrepare
 from tfworker.exceptions import ReservedFileError, TFWorkerException

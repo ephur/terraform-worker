@@ -8,10 +8,11 @@ from typing import Any, Dict, List, Type, Union
 import click
 import hcl2
 import jinja2
-import tfworker.util.log as log
 import yaml
 from jinja2.runtime import StrictUndefined
 from pydantic import BaseModel, ValidationError
+
+import tfworker.util.log as log
 from tfworker.app_state import AppState
 from tfworker.types.config_file import ConfigFile
 from tfworker.util.cli import handle_config_error

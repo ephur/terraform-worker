@@ -31,3 +31,19 @@ clean:
 	@rm -rf build dist .eggs terraform_worker.egg-info
 	@find . -name *.pyc -exec rm {} \;
 	@find . -name __pycache__ -type d -exec rmdir {} \;
+
+triage-export:
+	@echo "📥 Exporting open, untriaged issues for AI review..."
+	gh issue list --repo ephur/terraform-worker --state open --limit 1000 --json number,title,body,labels | \
+	jq '[.[] | select(.labels | all(.name != "triaged"))]' > open_issues.json
+	@echo "✅ Issues written to open_issues.json"
+
+triage-preview:
+	@echo "🔍 Previewing untriaged issue titles..."
+	@if [ ! -f open_issues.json ]; then \
+		$(MAKE) triage-export; \
+	fi
+	jq -r '.[] | "\(.number): \(.title)"' open_issues.json
+
+ready: lint format test
+	@echo "✅ All checks passed. You are ready to commit or push."

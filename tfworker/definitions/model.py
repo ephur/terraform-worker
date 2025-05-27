@@ -1,8 +1,9 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-import tfworker.util.log as log
 from pydantic import BaseModel, ConfigDict, Field
+
+import tfworker.util.log as log
 
 
 class DefinitionRemoteOptions(BaseModel):

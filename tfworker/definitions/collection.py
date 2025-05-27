@@ -2,9 +2,10 @@ import threading
 from collections.abc import Mapping
 from typing import Dict, List
 
-import tfworker.util.log as log
 from pydantic import GetCoreSchemaHandler, ValidationError
 from pydantic_core import CoreSchema, core_schema
+
+import tfworker.util.log as log
 from tfworker.exceptions import FrozenInstanceError
 from tfworker.util.cli import handle_config_error
 

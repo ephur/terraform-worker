@@ -296,7 +296,7 @@ class TerraformCommand(BaseCommand):
                 f"{self.app_state.terraform_options.terraform_bin} show -json {definition.plan_file}",
                 cwd=working_dir,
                 env=self.terraform_config.env,
-                stream_output=False
+                stream_output=False,
             )
         )
 

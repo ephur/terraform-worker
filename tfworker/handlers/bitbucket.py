@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Union
 from atlassian.bitbucket import Cloud
 from pydantic import BaseModel, Field
 from pydantic_settings import SettingsConfigDict
+
 from tfworker.exceptions import HandlerError
 from tfworker.types.terraform import TerraformAction, TerraformStage
 

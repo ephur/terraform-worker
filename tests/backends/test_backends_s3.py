@@ -3,8 +3,9 @@ from unittest.mock import patch
 import boto3
 import botocore
 import pytest
-import tfworker.util.log as log
 from moto import mock_aws
+
+import tfworker.util.log as log
 from tfworker.backends.s3 import S3Backend
 from tfworker.exceptions import BackendError
 
