@@ -28,7 +28,7 @@ class SnykConfig(BaseModel):
     severity: str = "HIGH,CRITICAL"
     skip_dirs: list = ["**/examples"]
     skip_planfile: bool = False
-    skip_definition: bool = False
+    skip_definition: bool = True
     stream_output: bool = True
     exempt_definitions: list = []
 
