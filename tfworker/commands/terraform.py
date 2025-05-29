@@ -296,7 +296,7 @@ class TerraformCommand(BaseCommand):
                 f"{self.app_state.terraform_options.terraform_bin} show -json {definition.plan_file}",
                 cwd=working_dir,
                 env=self.terraform_config.env,
-                stream_output=False
+                stream_output=False,
             )
         )
 
@@ -378,6 +378,7 @@ class TerraformCommand(BaseCommand):
                 self.terraform_config.terraform_bin,
                 b64_encode=self.terraform_config.b64_encode,
                 debug=self.terraform_config.debug,
+                disable_remote_state_vars=definition.hooks_disable_remotes,
                 extra_vars=definition.get_template_vars(
                     self.app_state.loaded_config.global_vars.template_vars
                 ),

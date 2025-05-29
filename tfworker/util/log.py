@@ -29,7 +29,6 @@ def log(
     Args:
         msg ()
     """
-    global log_level
     level_colors = {
         log_level.TRACE: "cyan",
         log_level.DEBUG: "blue",

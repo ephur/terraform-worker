@@ -168,6 +168,7 @@ def hook_exec(
     b64_encode: bool = False,
     extra_vars: Dict[str, str] = None,
     backend: "BaseBackend" = None,
+    disable_remote_state_vars: bool = False,
 ) -> None:
     """
     Coordinates the execution of a hook script. This function is responsible for finding and executing
@@ -195,9 +196,10 @@ def hook_exec(
     _populate_environment_with_terraform_variables(
         local_env, working_dir, terraform_path, b64_encode
     )
-    _populate_environment_with_terraform_remote_vars(
-        local_env, working_dir, terraform_path, b64_encode, backend
-    )
+    if not disable_remote_state_vars:
+        _populate_environment_with_terraform_remote_vars(
+            local_env, working_dir, terraform_path, b64_encode, backend
+        )
     _populate_environment_with_extra_vars(local_env, extra_vars, b64_encode)
     _execute_hook_script(hook_script, phase, command, working_dir, local_env, debug)
 
