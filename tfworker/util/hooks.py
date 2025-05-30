@@ -18,6 +18,26 @@ from tfworker.constants import (
 from tfworker.exceptions import HookError
 from tfworker.types.terraform import TerraformAction, TerraformStage
 from tfworker.util.system import pipe_exec
+from typing import List, Tuple, Union
+
+# --- Safe pipe_exec wrapper ---
+def safe_pipe_exec(
+    args: Union[str, List[str]],
+    stdin: str = None,
+    cwd: str = None,
+    env: Dict[str, str] = None,
+    stream_output: bool = False,
+) -> Tuple[int, Union[bytes, None], Union[bytes, None]]:
+    """
+    A wrapper around pipe_exec that checks environment variables for unsafe types before calling pipe_exec.
+    """
+    if env is not None:
+        bad_env = {k: v for k, v in env.items() if not isinstance(v, str)}
+        if bad_env:
+            for k, v in bad_env.items():
+                log.error(f"Invalid env var for pipe_exec: {k}={v!r} ({type(v).__name__})")
+            raise HookError("Environment contains non-string values, aborting pipe_exec")
+    return pipe_exec(args, stdin=stdin, cwd=cwd, env=env, stream_output=stream_output)
 
 if TYPE_CHECKING:
     from tfworker.backends.base import BaseBackend
@@ -100,7 +120,7 @@ def _get_state_item_from_output(
     """
     base_dir, _ = os.path.split(working_dir)
     try:
-        (exit_code, stdout, stderr) = pipe_exec(
+        (exit_code, stdout, stderr) = safe_pipe_exec(
             f"{terraform_bin} output -json -no-color {item}",
             cwd=f"{base_dir}/{state}",
             env=env,
@@ -342,6 +362,13 @@ def _set_hook_env_var(
         value (str): The value of the variable.
         b64_encode (bool, optional): If True, the value will be base64 encoded. Defaults to False.
     """
+    # JSON-encode complex types for EXTRA vars if not already a string
+    if var_type == TFHookVarType.EXTRA and not isinstance(value, str):
+        try:
+            value = json.dumps(value)
+        except Exception:
+            value = str(value)
+
     key_replace_items = {" ": "", '"': "", "-": "_", ".": "_"}
     val_replace_items = {" ": "", '"': "", "\n": ""}
 
@@ -367,6 +394,7 @@ def _execute_hook_script(
     phase: str,
     command: str,
     working_dir: str,
+
     local_env: Dict[str, str],
     debug: bool,
     stream_output: bool = False,
@@ -386,7 +414,8 @@ def _execute_hook_script(
         HookError: If the hook script execution fails.
     """
     hook_dir = os.path.join(working_dir, "hooks")
-    exit_code, stdout, stderr = pipe_exec(
+    log.trace(f"Executing hook script: {hook_script} in {hook_dir} with params {phase} {command} ")
+    exit_code, stdout, stderr = safe_pipe_exec(
         f"{hook_script} {phase} {command}",
         cwd=hook_dir,
         env=local_env,
@@ -587,7 +616,7 @@ def _run_terraform_refresh(
         HookError: If there is an error refreshing the terraform state.
     """
     log.trace(f"Refreshing remote state for {working_dir}")
-    exit_code, _, stderr = pipe_exec(
+    exit_code, _, stderr = safe_pipe_exec(
         f"{terraform_bin} apply -auto-approve -refresh-only",
         cwd=working_dir,
         env=env,
@@ -613,7 +642,7 @@ def _run_terraform_show(
     Raises:
         HookError: If there is an error reading the terraform state.
     """
-    exit_code, stdout, stderr = pipe_exec(
+    exit_code, stdout, stderr = safe_pipe_exec(
         f"{terraform_bin} show -json",
         cwd=working_dir,
         env=env,

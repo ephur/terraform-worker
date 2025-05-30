@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from shlex import quote as shlex_quote
 from typing import TYPE_CHECKING, Dict, Union
 
 import tfworker.util.hooks as hooks
@@ -9,6 +10,7 @@ from tfworker.commands.base import BaseCommand
 from tfworker.definitions import Definition
 from tfworker.exceptions import HandlerError, HookError, TFWorkerException
 from tfworker.types.terraform import TerraformAction, TerraformStage
+from tfworker.util.terraform import quote_index_brackets
 from tfworker.util.system import pipe_exec
 
 if TYPE_CHECKING:
@@ -241,6 +243,12 @@ class TerraformCommand(BaseCommand):
         definition: Definition = self.app_state.definitions[name]
 
         log.trace(f"running terraform plan for definition {name}")
+
+        if self._app_state.terraform_options.target:
+            log.info(
+                f"targeting resources: {', '.join(self._app_state.terraform_options.target)}"
+            )
+
         result = self._run(name, TerraformAction.PLAN)
 
         if result.exit_code == 0:
@@ -318,7 +326,7 @@ class TerraformCommand(BaseCommand):
             f"handling terraform command: {action} for definition {definition_name}"
         )
         definition: Definition = self.app_state.definitions[definition_name]
-        params: dict = self.terraform_config.get_params(
+        params: str = self.terraform_config.get_params(
             action, plan_file=definition.plan_file
         )
 
@@ -504,9 +512,16 @@ class TerraformCommandConfig:
         plan_action = " -destroy" if self.action == TerraformAction.DESTROY else ""
         read_only = "-lockfile=readonly" if self.strict_locking else ""
 
+        target_args = ""
+        if command == TerraformAction.PLAN and self._app_state.terraform_options.target:
+            target_args = " " + " ".join(
+                f"--target={shlex_quote(quote_index_brackets(target))}"
+                for target in self._app_state.terraform_options.target
+            )
+
         return {
             TerraformAction.INIT: f"-input=false {color_str} {read_only} -plugin-dir={self._app_state.terraform_options.provider_cache}",
-            TerraformAction.PLAN: f"-input=false {color_str} {plan_action} -detailed-exitcode -out {plan_file}",
+            TerraformAction.PLAN: f"-input=false {color_str} {plan_action} -detailed-exitcode -out {plan_file}{target_args}",
             TerraformAction.APPLY: f"-input=false {color_str} -auto-approve {plan_file}",
             TerraformAction.DESTROY: f"-input=false {color_str} -auto-approve",
         }[command]

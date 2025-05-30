@@ -236,7 +236,6 @@ class TestHookExec:
         mock_execute.assert_called_once()
 
 
-
 # Helper function tests
 class TestHelperFunctions:
     @mock.patch(
