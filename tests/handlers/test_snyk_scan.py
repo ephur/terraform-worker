@@ -133,8 +133,7 @@ class TestSnykHandler:
     def test_execute_pre_plan_fail(self):
         # Mock out the snyk call with a failure script
         shutil.copy(Path(mock_snyk_failure_path), Path(snyk_path))
-
-        config = SnykConfig(path=snyk_path, required=True)
+        config = SnykConfig(path=snyk_path, required=True, skip_definition=False)
 
         with pytest.raises(HandlerError):
             SnykHandler(config).execute(
@@ -170,11 +169,12 @@ class TestSnykHandler:
         # Mock out the snyk call with a faliure script
         # We want to ensure it got called, so we'll expect the failure as an exception
         shutil.copy(Path(mock_snyk_failure_path), Path(snyk_path))
+        Path(snyk_path).chmod(0o755)
 
         result = TerraformResult(
             2, "Plan has changes".encode("utf-8"), "".encode("utf-8")
         )
-        config = SnykConfig(path=snyk_path, required=True)
+        config = SnykConfig(path=snyk_path, required=True, skip_definition=False)
         handler = SnykHandler(config)
 
         with pytest.raises(HandlerError):

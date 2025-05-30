@@ -168,11 +168,15 @@ class SnykHandler(BaseHandler):
         Returns:
             None
         """
+        if exit_code == 0:
+            log.debug(f"snyk scan exit code: {exit_code}")
+            log.debug(f"stdout: {stdout.decode('UTF-8')}")
+            log.debug(f"stderr: {stderr.decode('UTF-8')}")
+
         if exit_code != 0:
             log.error(f"snyk scan failed with exit code {exit_code}")
-            if self._stream_output is False:
-                log.error(f"stdout: {stdout.decode('UTF-8')}")
-                log.error(f"stderr: {stderr.decode('UTF-8')}")
+            log.error(f"stdout: {stdout.decode('UTF-8')}")
+            log.error(f"stderr: {stderr.decode('UTF-8')}")
 
             if self._required:
                 planfile = definition.plan_file
