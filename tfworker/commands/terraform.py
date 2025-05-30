@@ -515,7 +515,7 @@ class TerraformCommandConfig:
         target_args = ""
         if command == TerraformAction.PLAN and self._app_state.terraform_options.target:
             target_args = " " + " ".join(
-                f"--target={shlex_quote(quote_index_brackets(target))}"
+                f"-target={shlex_quote(quote_index_brackets(target))}"
                 for target in self._app_state.terraform_options.target
             )
 
