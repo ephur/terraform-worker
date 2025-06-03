@@ -59,6 +59,8 @@ class Definition(BaseModel):
         {},
         description="Variables which are used to generate local references to remote state vars.",
     )
+    squelch_plan_output: bool = False
+    squelch_apply_output: bool = False
     template_vars: Optional[Dict[str, str | bool | list | dict]] = Field(
         {}, description="Variables which are suppled to any jinja templates."
     )
