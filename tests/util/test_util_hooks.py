@@ -202,6 +202,39 @@ class TestHookExec:
         mock_extra_vars.assert_called_once()
         mock_execute.assert_called_once()
 
+    @mock.patch("tfworker.util.hooks._prepare_environment")
+    @mock.patch("tfworker.util.hooks._find_hook_script")
+    @mock.patch("tfworker.util.hooks._populate_environment_with_terraform_variables")
+    @mock.patch("tfworker.util.hooks._populate_environment_with_terraform_remote_vars")
+    @mock.patch("tfworker.util.hooks._populate_environment_with_extra_vars")
+    @mock.patch("tfworker.util.hooks._execute_hook_script")
+    def test_hook_exec_remotes_disabled(
+        self,
+        mock_execute,
+        mock_extra_vars,
+        mock_remote_vars,
+        mock_terraform_vars,
+        mock_find_script,
+        mock_prepare_env,
+    ):
+        mock_find_script.return_value = "hook_script"
+        hooks.hook_exec(
+            "phase",
+            "command",
+            "working_dir",
+            {},
+            "terraform_path",
+            debug=True,
+            b64_encode=True,
+            disable_remote_state_vars=True,
+        )
+        mock_prepare_env.assert_called_once()
+        mock_find_script.assert_called_once()
+        mock_terraform_vars.assert_called_once()
+        mock_remote_vars.assert_not_called()
+        mock_extra_vars.assert_called_once()
+        mock_execute.assert_called_once()
+
 
 # Helper function tests
 class TestHelperFunctions:

@@ -345,11 +345,33 @@ class CLIOptionsTerraform(FreezableBaseModel):
         json_schema_extra={"env": "WORKER_COLOR"},
         description="Colorize the output from terraform command",
     )
+    target: Optional[List[str]] = Field(
+        None,
+        json_schema_extra={"env": "WORKER_TARGET"},
+        description="Target specific resources for apply/destroy, can be specified multiple times",
+    )
     backend_use_all_remotes: bool = Field(
         False,
         json_schema_extra={"env": "WORKER_BACKEND_USE_ALL_REMOTES"},
         description="Generate remote data sources based on all definition paths present in the backend",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_target(cls, values):
+        if "target" in values and isinstance(values["target"], str):
+            values["target"] = [
+                t.strip() for t in values["target"].split(",") if t.strip()
+            ]
+        elif "target" in values and isinstance(values["target"], list):
+            new_items = []
+            for item in values["target"]:
+                if isinstance(item, str) and "," in item:
+                    new_items.extend(t.strip() for t in item.split(",") if t.strip())
+                else:
+                    new_items.append(item)
+            values["target"] = new_items
+        return values
 
     @model_validator(mode="before")
     @classmethod
@@ -374,6 +396,32 @@ class CLIOptionsTerraform(FreezableBaseModel):
             )
         if errors:
             raise ValidationError.from_exception_data("apply_and_destroy", errors)
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_target_requires_plan(cls, values):
+        errors = []
+        if values.get("target") and not values.get("plan", True):
+            for t in values.get("target", []):
+                errors.append(
+                    InitErrorDetails(
+                        loc=("--target", "--target"),
+                        input=t,
+                        ctx={"error": "--target cannot be used with --no-plan"},
+                        type="value_error",
+                    )
+                )
+            errors.append(
+                InitErrorDetails(
+                    loc=("--plan", "--plan"),
+                    input=False,
+                    ctx={"error": "--target cannot be used with --no-plan"},
+                    type="value_error",
+                )
+            )
+        if errors:
+            raise ValidationError.from_exception_data("target_requires_plan", errors)
         return values
 
     @field_validator("terraform_bin")

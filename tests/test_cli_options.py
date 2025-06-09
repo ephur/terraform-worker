@@ -324,6 +324,32 @@ class TestCLIOptionsTerraform:
         with pytest.raises(ValueError):
             c.CLIOptionsTerraform(limit=["module1", "module2"])
 
+    def test_validate_target_with_plan_enabled(self):
+        cli_options = c.CLIOptionsTerraform(target=["module.resource"], plan=True)
+        assert cli_options.target == ["module.resource"]
+
+    def test_validate_target_with_plan_default(self):
+        cli_options = c.CLIOptionsTerraform(target=["module.resource"])
+        assert cli_options.target == ["module.resource"]
+
+    def test_validate_target_with_no_plan(self):
+        with pytest.raises(ValueError):
+            c.CLIOptionsTerraform(target=["module.resource"], plan=False)
+
+    def test_validate_target_csv(self):
+        cli_options = c.CLIOptionsTerraform(target="module1.resource,module2.resource")
+        assert sorted(cli_options.target) == sorted(
+            ["module1.resource", "module2.resource"]
+        )
+
+    def test_validate_target_csv_in_list(self):
+        cli_options = c.CLIOptionsTerraform(
+            target=["module1.resource,module2.resource", "module3.resource"]
+        )
+        assert sorted(cli_options.target) == sorted(
+            ["module1.resource", "module2.resource", "module3.resource"]
+        )
+
 
 class TestCLIOptionsClean:
     """

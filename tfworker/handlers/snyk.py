@@ -1,9 +1,9 @@
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
-from pydantic import BaseModel
 
 import tfworker.util.log as log
+from pydantic import BaseModel
 from tfworker.exceptions import HandlerError
 from tfworker.types.terraform import TerraformAction, TerraformStage
 from tfworker.util.system import pipe_exec
@@ -14,6 +14,7 @@ from .registry import HandlerRegistry
 if TYPE_CHECKING:
     from tfworker.commands.terraform import TerraformResult
     from tfworker.definitions.model import Definition
+
 
 class SnykConfig(BaseModel):
     args: dict = {}
@@ -27,9 +28,10 @@ class SnykConfig(BaseModel):
     severity: str = "HIGH,CRITICAL"
     skip_dirs: list = ["**/examples"]
     skip_planfile: bool = False
-    skip_definition: bool = False
+    skip_definition: bool = True
     stream_output: bool = True
     exempt_definitions: list = []
+
 
 @HandlerRegistry.register("snyk")
 class SnykHandler(BaseHandler):
@@ -80,19 +82,19 @@ class SnykHandler(BaseHandler):
             None
         """
         # pre plan; snyk scan the generated definition source
-        if (action == TerraformAction.PLAN and stage == TerraformStage.PRE):
+        if action == TerraformAction.PLAN and stage == TerraformStage.PRE:
             definition_path = definition.get_target_path(working_dir=working_dir)
             if definition_path is None:
                 raise HandlerError(
                     "definition_path is not provided, can't scan",
                     terminate=self._required,
                 )
-            
+
             definition_name = definition.name
             if self._skip_definition or definition_name in self._exempt_definitions:
                 log.info(f"Skipping snyk scan of definition: {definition_name}")
                 return None
-            
+
             log.info(f"scanning definition with snyk: {definition_path}")
             self._scan(definition, Path(definition_path))
 
@@ -111,12 +113,12 @@ class SnykHandler(BaseHandler):
             if self._skip_planfile:
                 log.info(f"Skipping snyk scan of planfile: {planfile}")
                 return None
-            
+
             definition_name = definition.name
             if self._skip_definition or definition_name in self._exempt_definitions:
                 log.info(f"Skipping snyk scan of definition: {definition_name}")
                 return None
-            
+
             jsonfile = Path(planfile).with_suffix(".tfplan.json")
             log.info(f"scanning planfile with snyk: {jsonfile}")
             self._scan(definition, Path(jsonfile))
@@ -154,7 +156,7 @@ class SnykHandler(BaseHandler):
         snyk_args.append("test")
         snyk_args.append(str(Path(target_path).resolve()))
         return snyk_args
-    
+
     def _handle_results(self, exit_code, stdout, stderr, definition):
         """Handle the results of the snyk scan
 
@@ -166,11 +168,15 @@ class SnykHandler(BaseHandler):
         Returns:
             None
         """
+        if exit_code == 0:
+            log.debug(f"snyk scan exit code: {exit_code}")
+            log.debug(f"stdout: {stdout.decode('UTF-8')}")
+            log.debug(f"stderr: {stderr.decode('UTF-8')}")
+
         if exit_code != 0:
             log.error(f"snyk scan failed with exit code {exit_code}")
-            if self._stream_output is False:
-                log.error(f"stdout: {stdout.decode('UTF-8')}")
-                log.error(f"stderr: {stderr.decode('UTF-8')}")
+            log.error(f"stdout: {stdout.decode('UTF-8')}")
+            log.error(f"stderr: {stderr.decode('UTF-8')}")
 
             if self._required:
                 planfile = definition.plan_file
