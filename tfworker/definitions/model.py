@@ -31,6 +31,7 @@ class Definition(BaseModel):
         default_factory=DefinitionRemoteOptions,
         description="Options for the remote path of the definition",
     )
+    hooks_disable_remotes: bool = False
     ignore_global_vars: bool = False
     ignored_global_terraform_vars: Optional[List[str]] = Field(
         [], description="List of global vars to ignore."
