@@ -301,7 +301,10 @@ class TestS3BackendDataHcl:
 
 class TestS3BackendHcl:
     @mock_aws
-    def test_hcl_success(self, mock_authenticators, mock_click_context):
+    def test_hcl_success_dynamodb(
+        self, mock_authenticators, mock_click_context, mocker
+    ):
+        mocker.patch("tfworker.util.terraform.version_at_least", return_value=False)
         backend = S3Backend(mock_authenticators, "test-deployment")
         result = backend.hcl("test-deployment")
         assert 'backend "s3" {' in result
@@ -310,6 +313,15 @@ class TestS3BackendHcl:
         assert 'key = "prefix/test-deployment/terraform.tfstate"' in result
         assert 'dynamodb_table = "terraform-test-deployment"' in result
         assert 'encrypt = "true"' in result
+
+    @mock_aws
+    def test_hcl_success_lockfile(
+        self, mock_authenticators, mock_click_context, mocker
+    ):
+        mocker.patch("tfworker.util.terraform.version_at_least", return_value=True)
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        result = backend.hcl("test-deployment")
+        assert "use_lockfile = true" in result
 
 
 class TestS3BackendFilterKeys:
@@ -561,3 +573,19 @@ class TestS3BackendCreateBucket:
         ):
             with pytest.raises(SystemExit):
                 backend._create_bucket("test-bucket")
+
+
+class TestS3BackendEnsureBackendBucket:
+    @mock_aws
+    def test_ensure_backend_bucket_creates_bucket(
+        self, mock_authenticators, mock_click_context
+    ):
+        delattr(mock_authenticators["aws"], "bucket")
+        delattr(mock_authenticators["aws"], "prefix")
+        s3 = boto3.client("s3", region_name="us-east-1")
+        assert s3.list_buckets()["Buckets"] == []
+
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        buckets = [b["Name"] for b in s3.list_buckets()["Buckets"]]
+        assert "test-bucket" in buckets
+

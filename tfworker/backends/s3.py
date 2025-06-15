@@ -9,6 +9,7 @@ import botocore.errorfactory
 import botocore.paginate
 import click
 import tfworker.util.log as log
+import tfworker.util.terraform as tf_util
 from tfworker.exceptions import BackendError
 from tfworker.types import JSONType
 
@@ -170,7 +171,15 @@ class S3Backend(BaseBackend):
         state_config.append(
             f'    key = "{rendered_prefix}/{deployment}/terraform.tfstate"'
         )
-        state_config.append(f'    dynamodb_table = "terraform-{self._deployment}"')
+        if tf_util.version_at_least(
+            self._app_state.terraform_version
+            or self._app_state.terraform_options.terraform_bin,
+            1,
+            12,
+        ):
+            state_config.append("    use_lockfile = true")
+        else:
+            state_config.append(f'    dynamodb_table = "terraform-{self._deployment}"')
         state_config.append('    encrypt = "true"')
         state_config.append("  }\n")
         return "\n".join(state_config)
@@ -261,16 +270,21 @@ class S3Backend(BaseBackend):
         """
         s3_paginator = self._s3_client.get_paginator("list_objects_v2")
 
+        rendered_prefix = self._app_state.root_options.backend_prefix.format(
+            deployment=self._deployment
+        )
         if definition is None:
-            prefix = self._authenticator.prefix
+            prefix = rendered_prefix
         else:
-            prefix = f"{self._authenticator.prefix}/{definition}"
+            prefix = f"{rendered_prefix}/{definition}"
+
+        bucket = self._app_state.root_options.backend_bucket
 
         for s3_object in self.filter_keys(
-            s3_paginator, self._authenticator.bucket, prefix
+            s3_paginator, bucket, prefix
         ):
             backend_file = self._s3_client.get_object(
-                Bucket=self._authenticator.bucket, Key=s3_object
+                Bucket=bucket, Key=s3_object
             )
             body = backend_file["Body"]
             with closing(backend_file["Body"]):
@@ -412,7 +426,8 @@ class S3Backend(BaseBackend):
         note: in initial testing this isn't required, but is inconsistent with how S3 delete markers, and the boto
         delete object call work there may be some configurations that require extra handling.
         """
-        self._s3_client.delete_object(Bucket=self._authenticator.bucket, Key=key)
+        bucket = self._app_state.root_options.backend_bucket
+        self._s3_client.delete_object(Bucket=bucket, Key=key)
 
     def _ensure_backend_bucket(self) -> None:
         """
@@ -436,9 +451,9 @@ class S3Backend(BaseBackend):
                 "Backend bucket not found and --no-create-backend-bucket specified."
             )
 
-        self._create_bucket(self._authenticator.bucket)
-        self._create_bucket_versioning(self._authenticator.bucket)
-        self._create_bucket_public_access_block(self._authenticator.bucket)
+        self._create_bucket(bucket)
+        self._create_bucket_versioning(bucket)
+        self._create_bucket_public_access_block(bucket)
 
     def _ensure_locking_table(self) -> None:
         """

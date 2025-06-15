@@ -1,5 +1,10 @@
+import os
 import pytest
 from tfworker import cli_options as c
+
+skip_permissions = pytest.mark.skipif(
+    os.geteuid() == 0, reason="permission tests require non-root user"
+)
 
 
 class TestCLIOptionsRoot:
@@ -51,6 +56,7 @@ class TestCLIOptionsRoot:
         with pytest.raises(ValueError):
             c.CLIOptionsRoot(config_file=str(config_file))
 
+    @skip_permissions
     def test_config_file_is_not_readable(self, tmp_path):
         config_file = tmp_path / "config.yaml"
         config_file.touch()
@@ -114,6 +120,7 @@ class TestCLIOptionsRoot:
         with pytest.raises(ValueError):
             c.CLIOptionsRoot(repository_path=None)
 
+    @skip_permissions
     def test_repository_path_not_writable(self, tmp_path):
         repository_path = tmp_path / "dir"
         repository_path.mkdir()
@@ -122,6 +129,7 @@ class TestCLIOptionsRoot:
             c.CLIOptionsRoot(repository_path=str(repository_path))
         repository_path.chmod(0o755)
 
+    @skip_permissions
     def test_repository_path_not_readable(self, tmp_path):
         repository_path = tmp_path / "dir"
         repository_path.mkdir()
@@ -149,6 +157,7 @@ class TestCLIOptionsRoot:
         cli_options = c.CLIOptionsRoot(working_dir=None)
         assert cli_options.working_dir is None
 
+    @skip_permissions
     def test_working_dir_not_writable(self, tmp_path):
         working_dir = tmp_path / "dir"
         working_dir.mkdir()
@@ -157,6 +166,7 @@ class TestCLIOptionsRoot:
             c.CLIOptionsRoot(working_dir=str(working_dir))
         working_dir.chmod(0o755)
 
+    @skip_permissions
     def test_working_dir_not_readable(self, tmp_path):
         working_dir = tmp_path / "dir"
         working_dir.mkdir()
@@ -208,6 +218,7 @@ class TestCLIOptionsTerraform:
         with pytest.raises(ValueError):
             c.CLIOptionsTerraform(terraform_bin=None)
 
+    @skip_permissions
     def test_validate_terraform_bin_not_executable(self, tmp_path):
         terraform_bin = tmp_path / "terraform"
         terraform_bin.touch()
@@ -235,6 +246,7 @@ class TestCLIOptionsTerraform:
         cli_options = c.CLIOptionsTerraform(provider_cache=None)
         assert cli_options.provider_cache is None
 
+    @skip_permissions
     def test_validate_provider_cache_not_writable(self, tmp_path):
         provider_cache = tmp_path / "dir"
         provider_cache.mkdir()
@@ -243,6 +255,7 @@ class TestCLIOptionsTerraform:
             c.CLIOptionsTerraform(provider_cache=str(provider_cache))
         provider_cache.chmod(0o755)
 
+    @skip_permissions
     def test_validate_provider_cache_not_readable(self, tmp_path):
         provider_cache = tmp_path / "dir"
         provider_cache.mkdir()
@@ -270,6 +283,7 @@ class TestCLIOptionsTerraform:
         cli_options = c.CLIOptionsTerraform(plan_file_path=None)
         assert cli_options.plan_file_path is None
 
+    @skip_permissions
     def test_validate_plan_file_path_not_writable(self, tmp_path):
         plan_file_path = tmp_path / "dir"
         plan_file_path.mkdir()
@@ -278,6 +292,7 @@ class TestCLIOptionsTerraform:
             c.CLIOptionsTerraform(plan_file_path=str(plan_file_path))
         plan_file_path.chmod(0o755)
 
+    @skip_permissions
     def test_validate_plan_file_path_not_readable(self, tmp_path):
         plan_file_path = tmp_path / "dir"
         plan_file_path.mkdir()

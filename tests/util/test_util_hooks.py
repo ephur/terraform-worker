@@ -285,7 +285,11 @@ class TestHelperFunctions:
             True,
         )
         mock_pipe_exec.assert_called_once_with(
-            "hook_script pre plan", cwd="working_dir/hooks", env={}, stream_output=False
+            "hook_script pre plan",
+            stdin=None,
+            cwd="working_dir/hooks",
+            env={},
+            stream_output=False,
         )
         captured = capsys.readouterr()
         captured_lines = captured.out.splitlines()

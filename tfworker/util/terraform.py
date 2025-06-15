@@ -3,7 +3,7 @@
 # the TerraformCommand class, making it easier to test and maintain
 import re
 from functools import lru_cache
-from typing import Dict, List, Union
+from typing import Dict, List, Tuple, Union
 
 import click
 import tfworker.util.log as log
@@ -53,6 +53,19 @@ def get_terraform_version(terraform_bin: str, validation=False) -> tuple[int, in
         if validation:
             validation_exit()
         click_exit()
+
+
+def version_at_least(
+    terraform_bin: str | Tuple[int, int], major: int, minor: int
+) -> bool:
+    """Return True if the terraform version is at least the given version."""
+
+    if isinstance(terraform_bin, tuple):
+        current_major, current_minor = terraform_bin
+    else:
+        current_major, current_minor = get_terraform_version(terraform_bin)
+
+    return (current_major, current_minor) >= (major, minor)
 
 
 def mirror_providers(
@@ -189,6 +202,7 @@ def find_required_providers(
     if len(required_providers) == 0:
         return None
     return required_providers
+
 
 @lru_cache
 def quote_index_brackets(resource: str) -> str:
