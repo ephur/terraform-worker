@@ -1,19 +1,20 @@
 import json
 from unittest.mock import MagicMock, patch
-import pytest
-from tfworker.exceptions import HandlerError
 
 import boto3
+import pytest
 from moto import mock_aws
 
 from tfworker.commands.terraform import TerraformResult
 from tfworker.definitions import Definition
+from tfworker.exceptions import HandlerError
 from tfworker.handlers import QueueRule, SQSConfig, SQSHandler
 from tfworker.types import TerraformAction, TerraformStage
 
 
 class TestSQSHandlerTargetQueues:
-    def test_basic_filters(self):
+    @patch("tfworker.handlers.sqs.SQSHandler._validate_queues", return_value=None)
+    def test_basic_filters(self, _mock_validate):
         config = SQSConfig(
             queues=["q"], actions=[TerraformAction.APPLY], stages=[TerraformStage.POST]
         )
@@ -25,7 +26,8 @@ class TestSQSHandlerTargetQueues:
             handler._target_queues(TerraformAction.PLAN, TerraformStage.PRE, None) == []
         )
 
-    def test_result_filter(self):
+    @patch("tfworker.handlers.sqs.SQSHandler._validate_queues", return_value=None)
+    def test_result_filter(self, _mock_validate):
         config = SQSConfig(queues=["q"], results=[0])
         handler = SQSHandler(config)
         ok = TerraformResult(0, b"ok", b"")
@@ -38,7 +40,8 @@ class TestSQSHandlerTargetQueues:
             == []
         )
 
-    def test_advanced_rules(self):
+    @patch("tfworker.handlers.sqs.SQSHandler._validate_queues", return_value=None)
+    def test_advanced_rules(self, _mock_validate):
         config = SQSConfig(
             queues={
                 "q1": QueueRule(
@@ -67,59 +70,8 @@ class TestSQSHandlerTargetQueues:
 
 
 class TestSQSHandlerBuildMessage:
-    def test_include_plan(self, tmp_path):
-        plan_file = tmp_path / "plan.tfplan"
-        plan_file.write_text("plan content")
-        definition = Definition(name="def", path="path", plan_file=str(plan_file))
-        result = TerraformResult(0, b"stdout", b"")
-        config = SQSConfig(queues=["q"], include_plan=True)
-        handler = SQSHandler(config)
-        msg = json.loads(
-            handler._build_message(
-                TerraformAction.PLAN,
-                TerraformStage.POST,
-                "deploy",
-                definition,
-                str(tmp_path),
-                result,
-            )
-        )
-        assert msg["plan"] == "plan content"
-
-@mock_aws
-def test_is_ready_validates_queues():
-    session = boto3.Session()
-    sqs = session.client("sqs", region_name="us-east-1")
-    queue_url = sqs.create_queue(QueueName="test")["QueueUrl"]
-
-    auths = {"aws": MagicMock(session=session)}
-    app_state = MagicMock()
-    app_state.authenticators = auths
-    ctx = MagicMock(obj=app_state)
-
-    with patch("click.get_current_context", return_value=ctx):
-        config = SQSConfig(queues=[queue_url])
-        handler = SQSHandler(config)
-        assert handler.is_ready() is True
-
-
-@mock_aws
-def test_is_ready_missing_queue():
-    session = boto3.Session()
-    sqs = session.client("sqs", region_name="us-east-1")
-    existing_url = sqs.create_queue(QueueName="test")["QueueUrl"]
-
-    auths = {"aws": MagicMock(session=session)}
-    app_state = MagicMock()
-    app_state.authenticators = auths
-    ctx = MagicMock(obj=app_state)
-
-    with patch("click.get_current_context", return_value=ctx):
-        config = SQSConfig(queues=[existing_url, "https://sqs.us-east-1.amazonaws.com/123456789012/missing"])
-        handler = SQSHandler(config)
-        with pytest.raises(HandlerError):
-            handler.is_ready()
-    def test_include_plan(self, tmp_path):
+    @patch("tfworker.handlers.sqs.SQSHandler._validate_queues", return_value=None)
+    def test_include_plan(self, _mock_validate, tmp_path):
         plan_file = tmp_path / "plan.tfplan"
         plan_file.write_text("plan content")
         definition = Definition(name="def", path="path", plan_file=str(plan_file))
@@ -139,33 +91,70 @@ def test_is_ready_missing_queue():
         assert msg["plan"] == "plan content"
 
 
-@mock_aws
-def test_execute_sends_message():
-    session = boto3.Session()
-    sqs = session.client("sqs", region_name="us-east-1")
-    queue_url = sqs.create_queue(QueueName="test")["QueueUrl"]
+class TestSQSHandlerIsReady:
+    @mock_aws
+    def test_validates_queues(self):
+        session = boto3.Session()
+        sqs = session.client("sqs", region_name="us-east-1")
+        queue_url = sqs.create_queue(QueueName="test")["QueueUrl"]
 
-    auths = {"aws": MagicMock(session=session)}
-    app_state = MagicMock()
-    app_state.authenticators = auths
-    app_state.working_dir = "."
-    ctx = MagicMock(obj=app_state)
+        auths = {"aws": MagicMock(session=session)}
+        app_state = MagicMock()
+        app_state.authenticators = auths
+        ctx = MagicMock(obj=app_state)
 
-    with patch("click.get_current_context", return_value=ctx):
-        config = SQSConfig(queues=[queue_url])
-        handler = SQSHandler(config)
-        result = TerraformResult(0, b"stdout", b"")
-        handler.execute(
-            TerraformAction.APPLY,
-            TerraformStage.POST,
-            "deploy",
-            Definition(name="def", path="path"),
-            app_state.working_dir,
-            result,
-        )
+        with patch("click.get_current_context", return_value=ctx):
+            config = SQSConfig(queues=[queue_url])
+            handler = SQSHandler(config)
+            assert handler.is_ready() is True
 
-    resp = sqs.receive_message(QueueUrl=queue_url)
-    assert len(resp.get("Messages", [])) == 1
-    body = json.loads(resp["Messages"][0]["Body"])
-    assert body["definition"] == "def"
-    assert body["exit_code"] == 0
+    @mock_aws
+    def test_missing_queue(self):
+        session = boto3.Session()
+        sqs = session.client("sqs", region_name="us-east-1")
+        existing_url = sqs.create_queue(QueueName="test")["QueueUrl"]
+
+        auths = {"aws": MagicMock(session=session)}
+        app_state = MagicMock()
+        app_state.authenticators = auths
+        ctx = MagicMock(obj=app_state)
+
+        with patch("click.get_current_context", return_value=ctx):
+            config = SQSConfig(
+                queues=[existing_url, "https://sqs.us-east-1.amazonaws.com/123456789012/missing"]
+            )
+            with pytest.raises(HandlerError):
+                SQSHandler(config)
+
+
+class TestSQSHandlerExecute:
+    @mock_aws
+    def test_execute_sends_message(self):
+        session = boto3.Session()
+        sqs = session.client("sqs", region_name="us-east-1")
+        queue_url = sqs.create_queue(QueueName="test")["QueueUrl"]
+
+        auths = {"aws": MagicMock(session=session)}
+        app_state = MagicMock()
+        app_state.authenticators = auths
+        app_state.working_dir = "."
+        ctx = MagicMock(obj=app_state)
+
+        with patch("click.get_current_context", return_value=ctx):
+            config = SQSConfig(queues=[queue_url])
+            handler = SQSHandler(config)
+            result = TerraformResult(0, b"stdout", b"")
+            handler.execute(
+                TerraformAction.APPLY,
+                TerraformStage.POST,
+                "deploy",
+                Definition(name="def", path="path"),
+                app_state.working_dir,
+                result,
+            )
+
+        resp = sqs.receive_message(QueueUrl=queue_url)
+        assert len(resp.get("Messages", [])) == 1
+        body = json.loads(resp["Messages"][0]["Body"])
+        assert body["definition"] == "def"
+        assert body["exit_code"] == 0

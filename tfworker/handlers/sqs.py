@@ -201,7 +201,7 @@ class SQSHandler(BaseHandler):
 
     def _validate_queues(self) -> None:
         try:
-            existing = self._sqs_client.list_queues().get("QueueUrls", [])
+            existing = self.sqs_client.list_queues().get("QueueUrls", [])
         except Exception as e:
             raise HandlerError(f"Unable to list SQS queues: {e}")
         missing = [q for q in self._queue_urls() if q not in existing]
