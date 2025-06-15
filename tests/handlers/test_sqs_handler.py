@@ -67,7 +67,24 @@ class TestSQSHandlerTargetQueues:
 
 
 class TestSQSHandlerBuildMessage:
-
+    def test_include_plan(self, tmp_path):
+        plan_file = tmp_path / "plan.tfplan"
+        plan_file.write_text("plan content")
+        definition = Definition(name="def", path="path", plan_file=str(plan_file))
+        result = TerraformResult(0, b"stdout", b"")
+        config = SQSConfig(queues=["q"], include_plan=True)
+        handler = SQSHandler(config)
+        msg = json.loads(
+            handler._build_message(
+                TerraformAction.PLAN,
+                TerraformStage.POST,
+                "deploy",
+                definition,
+                str(tmp_path),
+                result,
+            )
+        )
+        assert msg["plan"] == "plan content"
 
 @mock_aws
 def test_is_ready_validates_queues():

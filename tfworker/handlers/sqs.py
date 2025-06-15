@@ -31,31 +31,6 @@ from typing import TYPE_CHECKING, Dict, List, Union
 import click
 from pydantic import BaseModel, Field
 from tfworker.exceptions import HandlerError
-
-        self._ready = False
-            self._validate_queues()
-    def _queue_urls(self) -> List[str]:
-        if isinstance(self.config.queues, list):
-            return self.config.queues
-        return list(self.config.queues.keys())
-
-    def _validate_queues(self) -> None:
-        try:
-            existing = self._sqs_client.list_queues().get("QueueUrls", [])
-        except Exception as e:
-            raise HandlerError(f"Unable to list SQS queues: {e}")
-        missing = [q for q in self._queue_urls() if q not in existing]
-        if missing:
-            raise HandlerError(
-                f"SQS queues not found: {', '.join(missing)}"
-            )
-
-    def is_ready(self) -> bool:
-        if not self._ready:
-            _ = self.sqs_client
-            self._ready = True
-        return self._ready
-
 from tfworker.types.terraform import TerraformAction, TerraformStage
 
 from .base import BaseHandler
@@ -100,7 +75,8 @@ class SQSHandler(BaseHandler):
         self.config = config
         self._app_state = None
         self._sqs_client = None
-        self._ready = True
+        self._ready = False
+        self._validate_queues()
 
     @property
     def app_state(self):
@@ -116,6 +92,14 @@ class SQSHandler(BaseHandler):
                 raise ValueError("AWS authenticator not available")
             self._sqs_client = aws.session.client("sqs")
         return self._sqs_client
+
+
+    def is_ready(self) -> bool:
+        if not self._ready:
+            _ = self.sqs_client
+            self._ready = True
+        return self._ready
+
 
     def execute(
         self,
@@ -209,3 +193,19 @@ class SQSHandler(BaseHandler):
             except OSError as e:  # pragma: no cover
                 log.error(f"Unable to read plan file {definition.plan_file}: {e}")
         return json.dumps(payload)
+
+    def _queue_urls(self) -> List[str]:
+        if isinstance(self.config.queues, list):
+            return self.config.queues
+        return list(self.config.queues.keys())
+
+    def _validate_queues(self) -> None:
+        try:
+            existing = self._sqs_client.list_queues().get("QueueUrls", [])
+        except Exception as e:
+            raise HandlerError(f"Unable to list SQS queues: {e}")
+        missing = [q for q in self._queue_urls() if q not in existing]
+        if missing:
+            raise HandlerError(
+                f"SQS queues not found: {', '.join(missing)}"
+            )
