@@ -585,7 +585,6 @@ class TestS3BackendEnsureBackendBucket:
         s3 = boto3.client("s3", region_name="us-east-1")
         assert s3.list_buckets()["Buckets"] == []
 
-        backend = S3Backend(mock_authenticators, "test-deployment")
+        S3Backend(mock_authenticators, "test-deployment")
         buckets = [b["Name"] for b in s3.list_buckets()["Buckets"]]
         assert "test-bucket" in buckets
-

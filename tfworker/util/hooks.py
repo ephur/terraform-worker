@@ -20,6 +20,7 @@ from tfworker.types.terraform import TerraformAction, TerraformStage
 from tfworker.util.system import pipe_exec
 from typing import List, Tuple, Union
 
+
 # --- Safe pipe_exec wrapper ---
 def safe_pipe_exec(
     args: Union[str, List[str]],
@@ -38,6 +39,7 @@ def safe_pipe_exec(
                 log.error(f"Invalid env var for pipe_exec: {k}={v!r} ({type(v).__name__})")
             raise HookError("Environment contains non-string values, aborting pipe_exec")
     return pipe_exec(args, stdin=stdin, cwd=cwd, env=env, stream_output=stream_output)
+
 
 if TYPE_CHECKING:
     from tfworker.backends.base import BaseBackend
