@@ -121,7 +121,10 @@ class TestSQSHandlerIsReady:
 
         with patch("click.get_current_context", return_value=ctx):
             config = SQSConfig(
-                queues=[existing_url, "https://sqs.us-east-1.amazonaws.com/123456789012/missing"]
+                queues=[
+                    existing_url,
+                    "https://sqs.us-east-1.amazonaws.com/123456789012/missing",
+                ]
             )
             with pytest.raises(HandlerError):
                 SQSHandler(config)

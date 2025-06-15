@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING, Dict, List, Union
 
 import click
 from pydantic import BaseModel, Field
+
+import tfworker.util.log as log
 from tfworker.exceptions import HandlerError
 from tfworker.types.terraform import TerraformAction, TerraformStage
 
@@ -93,13 +95,11 @@ class SQSHandler(BaseHandler):
             self._sqs_client = aws.session.client("sqs")
         return self._sqs_client
 
-
     def is_ready(self) -> bool:
         if not self._ready:
             _ = self.sqs_client
             self._ready = True
         return self._ready
-
 
     def execute(
         self,
@@ -206,6 +206,4 @@ class SQSHandler(BaseHandler):
             raise HandlerError(f"Unable to list SQS queues: {e}")
         missing = [q for q in self._queue_urls() if q not in existing]
         if missing:
-            raise HandlerError(
-                f"SQS queues not found: {', '.join(missing)}"
-            )
+            raise HandlerError(f"SQS queues not found: {', '.join(missing)}")
