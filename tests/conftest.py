@@ -140,6 +140,7 @@ def mock_app_state(
     mock_state.loaded_config.worker_options = {}
     mock_state.loaded_config.global_vars = GlobalVars()
     mock_state.working_dir = str(tmpdir)
+    mock_state.terraform_version = (1, 13)
 
     return mock_state
 
@@ -165,6 +166,7 @@ def mock_app_state_backend_west(
     mock_state.loaded_config.definitions = {}
     mock_state.loaded_config.handlers = {}
     mock_state.working_dir = str(tmpdir)
+    mock_state.terraform_version = (1, 13)
     return mock_state
 
 

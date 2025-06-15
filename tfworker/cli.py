@@ -9,6 +9,7 @@ from tfworker.commands.config import log_limiter
 from tfworker.commands.env import EnvCommand
 from tfworker.commands.root import RootCommand
 from tfworker.commands.terraform import TerraformCommand
+import tfworker.util.terraform as tf_util
 from tfworker.util.cli import (
     handle_option_error,
     pydantic_to_click,
@@ -95,6 +96,9 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
         handle_option_error(e)
 
     ctx.obj.terraform_options = options
+    ctx.obj.terraform_version = tf_util.get_terraform_version(
+        options.terraform_bin or "terraform"
+    )
     log.info(f"building Deployment: {deployment}")
     log_limiter()
     tfc = TerraformCommand(deployment=deployment)

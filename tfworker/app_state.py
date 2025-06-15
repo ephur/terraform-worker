@@ -65,6 +65,10 @@ class AppState(FreezableBaseModel):
         None,
         description="These options are passed to the terraform command, they control the terraform orchestration.",
     )
+    terraform_version: tuple[int, int] | None = Field(
+        None,
+        description="Detected terraform version as a (major, minor) tuple.",
+    )
     working_dir: Path | None = Field(
         None,
         description="The working directory is the root of where all filesystem actions are handled within the application.",
@@ -87,3 +91,4 @@ class AppState(FreezableBaseModel):
         self.providers.freeze() if self.providers else None
         self.root_options.freeze() if self.root_options else None
         self.terraform_options.freeze() if self.terraform_options else None
+        # terraform_version is a tuple, nothing to freeze
