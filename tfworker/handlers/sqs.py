@@ -30,8 +30,32 @@ from typing import TYPE_CHECKING, Dict, List, Union
 
 import click
 from pydantic import BaseModel, Field
+from tfworker.exceptions import HandlerError
 
-import tfworker.util.log as log
+        self._ready = False
+            self._validate_queues()
+    def _queue_urls(self) -> List[str]:
+        if isinstance(self.config.queues, list):
+            return self.config.queues
+        return list(self.config.queues.keys())
+
+    def _validate_queues(self) -> None:
+        try:
+            existing = self._sqs_client.list_queues().get("QueueUrls", [])
+        except Exception as e:
+            raise HandlerError(f"Unable to list SQS queues: {e}")
+        missing = [q for q in self._queue_urls() if q not in existing]
+        if missing:
+            raise HandlerError(
+                f"SQS queues not found: {', '.join(missing)}"
+            )
+
+    def is_ready(self) -> bool:
+        if not self._ready:
+            _ = self.sqs_client
+            self._ready = True
+        return self._ready
+
 from tfworker.types.terraform import TerraformAction, TerraformStage
 
 from .base import BaseHandler

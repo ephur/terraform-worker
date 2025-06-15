@@ -1,5 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
+import pytest
+from tfworker.exceptions import HandlerError
 
 import boto3
 from moto import mock_aws
@@ -65,6 +67,41 @@ class TestSQSHandlerTargetQueues:
 
 
 class TestSQSHandlerBuildMessage:
+
+
+@mock_aws
+def test_is_ready_validates_queues():
+    session = boto3.Session()
+    sqs = session.client("sqs", region_name="us-east-1")
+    queue_url = sqs.create_queue(QueueName="test")["QueueUrl"]
+
+    auths = {"aws": MagicMock(session=session)}
+    app_state = MagicMock()
+    app_state.authenticators = auths
+    ctx = MagicMock(obj=app_state)
+
+    with patch("click.get_current_context", return_value=ctx):
+        config = SQSConfig(queues=[queue_url])
+        handler = SQSHandler(config)
+        assert handler.is_ready() is True
+
+
+@mock_aws
+def test_is_ready_missing_queue():
+    session = boto3.Session()
+    sqs = session.client("sqs", region_name="us-east-1")
+    existing_url = sqs.create_queue(QueueName="test")["QueueUrl"]
+
+    auths = {"aws": MagicMock(session=session)}
+    app_state = MagicMock()
+    app_state.authenticators = auths
+    ctx = MagicMock(obj=app_state)
+
+    with patch("click.get_current_context", return_value=ctx):
+        config = SQSConfig(queues=[existing_url, "https://sqs.us-east-1.amazonaws.com/123456789012/missing"])
+        handler = SQSHandler(config)
+        with pytest.raises(HandlerError):
+            handler.is_ready()
     def test_include_plan(self, tmp_path):
         plan_file = tmp_path / "plan.tfplan"
         plan_file.write_text("plan content")
