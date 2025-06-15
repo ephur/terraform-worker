@@ -29,9 +29,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Union
 
 import click
-import tfworker.util.log as log
 from pydantic import BaseModel, Field
 
+import tfworker.util.log as log
 from tfworker.types.terraform import TerraformAction, TerraformStage
 
 from .base import BaseHandler

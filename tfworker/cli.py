@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 import click
-import tfworker.util.log as log
 from pydantic import ValidationError
+
+import tfworker.util.log as log
+import tfworker.util.terraform as tf_util
 from tfworker.app_state import AppState
 from tfworker.cli_options import CLIOptionsClean, CLIOptionsRoot, CLIOptionsTerraform
 from tfworker.commands.clean import CleanCommand
@@ -9,7 +11,6 @@ from tfworker.commands.config import log_limiter
 from tfworker.commands.env import EnvCommand
 from tfworker.commands.root import RootCommand
 from tfworker.commands.terraform import TerraformCommand
-import tfworker.util.terraform as tf_util
 from tfworker.util.cli import (
     handle_option_error,
     pydantic_to_click,

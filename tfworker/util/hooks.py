@@ -7,7 +7,7 @@ import json
 import os
 import re
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union
 
 import tfworker.util.log as log
 from tfworker.constants import (
@@ -18,7 +18,6 @@ from tfworker.constants import (
 from tfworker.exceptions import HookError
 from tfworker.types.terraform import TerraformAction, TerraformStage
 from tfworker.util.system import pipe_exec
-from typing import List, Tuple, Union
 
 
 # --- Safe pipe_exec wrapper ---
@@ -36,8 +35,12 @@ def safe_pipe_exec(
         bad_env = {k: v for k, v in env.items() if not isinstance(v, str)}
         if bad_env:
             for k, v in bad_env.items():
-                log.error(f"Invalid env var for pipe_exec: {k}={v!r} ({type(v).__name__})")
-            raise HookError("Environment contains non-string values, aborting pipe_exec")
+                log.error(
+                    f"Invalid env var for pipe_exec: {k}={v!r} ({type(v).__name__})"
+                )
+            raise HookError(
+                "Environment contains non-string values, aborting pipe_exec"
+            )
     return pipe_exec(args, stdin=stdin, cwd=cwd, env=env, stream_output=stream_output)
 
 
@@ -396,7 +399,6 @@ def _execute_hook_script(
     phase: str,
     command: str,
     working_dir: str,
-
     local_env: Dict[str, str],
     debug: bool,
     stream_output: bool = False,
@@ -416,7 +418,9 @@ def _execute_hook_script(
         HookError: If the hook script execution fails.
     """
     hook_dir = os.path.join(working_dir, "hooks")
-    log.trace(f"Executing hook script: {hook_script} in {hook_dir} with params {phase} {command} ")
+    log.trace(
+        f"Executing hook script: {hook_script} in {hook_dir} with params {phase} {command} "
+    )
     exit_code, stdout, stderr = safe_pipe_exec(
         f"{hook_script} {phase} {command}",
         cwd=hook_dir,

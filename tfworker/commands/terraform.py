@@ -10,8 +10,8 @@ from tfworker.commands.base import BaseCommand
 from tfworker.definitions import Definition
 from tfworker.exceptions import HandlerError, HookError, TFWorkerException
 from tfworker.types.terraform import TerraformAction, TerraformStage
-from tfworker.util.terraform import quote_index_brackets
 from tfworker.util.system import pipe_exec
+from tfworker.util.terraform import quote_index_brackets
 
 if TYPE_CHECKING:
     from tfworker.app_state import AppState

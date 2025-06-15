@@ -1,42 +1,67 @@
 import json
+from unittest.mock import MagicMock, patch
 
 import boto3
 from moto import mock_aws
-from unittest.mock import MagicMock, patch
+
 from tfworker.commands.terraform import TerraformResult
 from tfworker.definitions import Definition
-from tfworker.handlers import SQSHandler, SQSConfig, QueueRule
+from tfworker.handlers import QueueRule, SQSConfig, SQSHandler
 from tfworker.types import TerraformAction, TerraformStage
 
 
 class TestSQSHandlerTargetQueues:
     def test_basic_filters(self):
-        config = SQSConfig(queues=["q"], actions=[TerraformAction.APPLY], stages=[TerraformStage.POST])
+        config = SQSConfig(
+            queues=["q"], actions=[TerraformAction.APPLY], stages=[TerraformStage.POST]
+        )
         handler = SQSHandler(config)
-        assert handler._target_queues(TerraformAction.APPLY, TerraformStage.POST, None) == ["q"]
-        assert handler._target_queues(TerraformAction.PLAN, TerraformStage.PRE, None) == []
+        assert handler._target_queues(
+            TerraformAction.APPLY, TerraformStage.POST, None
+        ) == ["q"]
+        assert (
+            handler._target_queues(TerraformAction.PLAN, TerraformStage.PRE, None) == []
+        )
 
     def test_result_filter(self):
         config = SQSConfig(queues=["q"], results=[0])
         handler = SQSHandler(config)
         ok = TerraformResult(0, b"ok", b"")
         fail = TerraformResult(1, b"fail", b"")
-        assert handler._target_queues(TerraformAction.APPLY, TerraformStage.POST, ok) == ["q"]
-        assert handler._target_queues(TerraformAction.APPLY, TerraformStage.POST, fail) == []
+        assert handler._target_queues(
+            TerraformAction.APPLY, TerraformStage.POST, ok
+        ) == ["q"]
+        assert (
+            handler._target_queues(TerraformAction.APPLY, TerraformStage.POST, fail)
+            == []
+        )
 
     def test_advanced_rules(self):
         config = SQSConfig(
             queues={
-                "q1": QueueRule(actions=[TerraformAction.PLAN], stages=[TerraformStage.PRE]),
-                "q2": QueueRule(actions=[TerraformAction.APPLY], stages=[TerraformStage.POST], results=[0]),
+                "q1": QueueRule(
+                    actions=[TerraformAction.PLAN], stages=[TerraformStage.PRE]
+                ),
+                "q2": QueueRule(
+                    actions=[TerraformAction.APPLY],
+                    stages=[TerraformStage.POST],
+                    results=[0],
+                ),
             }
         )
         handler = SQSHandler(config)
-        assert handler._target_queues(TerraformAction.PLAN, TerraformStage.PRE, None) == ["q1"]
+        assert handler._target_queues(
+            TerraformAction.PLAN, TerraformStage.PRE, None
+        ) == ["q1"]
         ok = TerraformResult(0, b"ok", b"")
-        assert handler._target_queues(TerraformAction.APPLY, TerraformStage.POST, ok) == ["q2"]
+        assert handler._target_queues(
+            TerraformAction.APPLY, TerraformStage.POST, ok
+        ) == ["q2"]
         fail = TerraformResult(1, b"fail", b"")
-        assert handler._target_queues(TerraformAction.APPLY, TerraformStage.POST, fail) == []
+        assert (
+            handler._target_queues(TerraformAction.APPLY, TerraformStage.POST, fail)
+            == []
+        )
 
 
 class TestSQSHandlerBuildMessage:

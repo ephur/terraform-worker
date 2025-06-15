@@ -7,6 +7,7 @@ from zipfile import ZipFile
 import boto3
 import botocore
 import click
+
 import tfworker.util.log as log
 from tfworker.backends import Backends
 from tfworker.exceptions import HandlerError
