@@ -6,6 +6,7 @@ from functools import lru_cache
 from typing import Dict, List, Tuple, Union
 
 import click
+
 import tfworker.util.log as log
 import tfworker.util.terraform_helpers as tfhelpers
 from tfworker.constants import (

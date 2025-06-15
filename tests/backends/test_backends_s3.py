@@ -3,8 +3,9 @@ from unittest.mock import patch
 import boto3
 import botocore
 import pytest
-import tfworker.util.log as log
 from moto import mock_aws
+
+import tfworker.util.log as log
 from tfworker.backends.s3 import S3Backend
 from tfworker.exceptions import BackendError
 
@@ -585,7 +586,6 @@ class TestS3BackendEnsureBackendBucket:
         s3 = boto3.client("s3", region_name="us-east-1")
         assert s3.list_buckets()["Buckets"] == []
 
-        backend = S3Backend(mock_authenticators, "test-deployment")
+        S3Backend(mock_authenticators, "test-deployment")
         buckets = [b["Name"] for b in s3.list_buckets()["Buckets"]]
         assert "test-bucket" in buckets
-

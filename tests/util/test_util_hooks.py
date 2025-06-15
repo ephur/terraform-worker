@@ -1,6 +1,7 @@
 from unittest import mock
 
 import pytest
+
 import tfworker.util.hooks as hooks
 from tfworker.exceptions import HookError
 from tfworker.types.terraform import TerraformAction, TerraformStage

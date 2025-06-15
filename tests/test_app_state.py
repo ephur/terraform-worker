@@ -1,4 +1,5 @@
 import pytest
+
 from tfworker.app_state import AppState
 from tfworker.cli_options import CLIOptionsTerraform
 from tfworker.exceptions import FrozenInstanceError

@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+
 from tfworker.commands.terraform import TerraformResult
 from tfworker.definitions import Definition
 from tfworker.exceptions import HandlerError

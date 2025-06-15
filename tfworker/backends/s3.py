@@ -8,6 +8,7 @@ import botocore
 import botocore.errorfactory
 import botocore.paginate
 import click
+
 import tfworker.util.log as log
 import tfworker.util.terraform as tf_util
 from tfworker.exceptions import BackendError
@@ -17,6 +18,7 @@ from .base import BaseBackend, validate_backend_empty
 
 if TYPE_CHECKING:
     import boto3  # pragma: no cover  # noqa
+
     from tfworker.app_state import AppState  # pragma: no cover  # noqa
     from tfworker.authenticators import (  # pragma: no cover  # noqa
         AuthenticatorsCollection,
@@ -280,12 +282,8 @@ class S3Backend(BaseBackend):
 
         bucket = self._app_state.root_options.backend_bucket
 
-        for s3_object in self.filter_keys(
-            s3_paginator, bucket, prefix
-        ):
-            backend_file = self._s3_client.get_object(
-                Bucket=bucket, Key=s3_object
-            )
+        for s3_object in self.filter_keys(s3_paginator, bucket, prefix):
+            backend_file = self._s3_client.get_object(Bucket=bucket, Key=s3_object)
             body = backend_file["Body"]
             with closing(backend_file["Body"]):
                 backend = json.load(body)

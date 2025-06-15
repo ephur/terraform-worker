@@ -2,11 +2,12 @@ import json
 from typing import TYPE_CHECKING
 
 import click
-import tfworker.util.log as log
 from google.api_core import page_iterator
 from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import storage
 from google.cloud.exceptions import Conflict, NotFound
+
+import tfworker.util.log as log
 from tfworker.exceptions import BackendError
 from tfworker.types import JSONType
 
