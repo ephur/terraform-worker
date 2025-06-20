@@ -51,14 +51,11 @@ class DefinitionsCollection(Mapping):
                 except ValidationError as e:
                     handle_config_error(e)
 
-                if config.always_apply or config.always_include:
-                    log.trace(
-                        f"definition {definition} is set to always_[apply|include]"
-                    )
-                elif len(limiter) > 0 and definition not in limiter:
-                    log.trace(f"definition {definition} not in limiter, skipping")
-                    continue
-
+                if len(limiter) > 0 and definition not in limiter:
+                    if not config.always_include:
+                        log.trace(f"definition {definition} not in limiter, skipping")
+                        continue
+                    log.trace(f"definition {definition} has always_include")
                 log.trace(f"adding definition {definition} to definitions")
                 self._definitions[definition] = config
             self._initialized = True

@@ -399,32 +399,6 @@ class CLIOptionsTerraform(FreezableBaseModel):
             raise ValidationError.from_exception_data("apply_and_destroy", errors)
         return values
 
-    @model_validator(mode="before")
-    @classmethod
-    def validate_target_requires_plan(cls, values):
-        errors = []
-        if values.get("target") and not values.get("plan", True):
-            for t in values.get("target", []):
-                errors.append(
-                    InitErrorDetails(
-                        loc=("--target", "--target"),
-                        input=t,
-                        ctx={"error": "--target cannot be used with --no-plan"},
-                        type="value_error",
-                    )
-                )
-            errors.append(
-                InitErrorDetails(
-                    loc=("--plan", "--plan"),
-                    input=False,
-                    ctx={"error": "--target cannot be used with --no-plan"},
-                    type="value_error",
-                )
-            )
-        if errors:
-            raise ValidationError.from_exception_data("target_requires_plan", errors)
-        return values
-
     @field_validator("terraform_bin")
     @classmethod
     def validate_terraform_bin(cls, fpath: Union[str, None]) -> Union[str, None]:
