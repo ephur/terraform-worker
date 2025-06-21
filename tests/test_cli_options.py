@@ -349,10 +349,6 @@ class TestCLIOptionsTerraform:
         cli_options = c.CLIOptionsTerraform(target=["module.resource"])
         assert cli_options.target == ["module.resource"]
 
-    def test_validate_target_with_no_plan(self):
-        with pytest.raises(ValueError):
-            c.CLIOptionsTerraform(target=["module.resource"], plan=False)
-
     def test_validate_target_csv(self):
         cli_options = c.CLIOptionsTerraform(target="module1.resource,module2.resource")
         assert sorted(cli_options.target) == sorted(

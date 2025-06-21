@@ -94,7 +94,8 @@ class TerraformCommand(BaseCommand):
         needed: bool
         reason: str
 
-        # check for existing plan files that need an apply
+        # check for existing plan files that need an apply; do this before skipping
+        # the plan, still need to ensure if they are ready for an apply
         for name in self.app_state.definitions.keys():
             def_plan.set_plan_file(self.app_state.definitions[name])
             needed, reason = def_plan.needs_plan(self.app_state.definitions[name])
@@ -103,7 +104,7 @@ class TerraformCommand(BaseCommand):
                     for name in self.app_state.definitions.keys():
                         self.app_state.definitions[name].needs_apply = True
 
-        # if --no-plan is specified, skip the plan, but check for existing plan files that need an apply
+        # if --no-plan is specified, skip the plan regardless
         if not self.app_state.terraform_options.plan:
             log.debug("--no-plan option specified; skipping plan execution")
             return
@@ -118,6 +119,12 @@ class TerraformCommand(BaseCommand):
 
             log.info(f"definition {name} needs a plan: {reason}")
             self._exec_terraform_plan(name=name)
+            if getattr(self.app_state.definitions[name], "always_apply", False):
+                log.info(
+                    f"definition {name} has always_apply set; applying immediately after plan"
+                )
+                self._exec_terraform_action(name=name, action=TerraformAction.APPLY)
+                self.app_state.definitions[name].needs_apply = False
 
     def terraform_apply_or_destroy(self) -> None:
         log.trace("entering terraform apply or destroy")
@@ -137,7 +144,8 @@ class TerraformCommand(BaseCommand):
                         log.info(f"skipping destroy for definition: {name}")
                         continue
             log.trace(
-                f"running {action} for definition: {name} if needs_apply is True, value is: {self.app_state.definitions[name].needs_apply}"
+                f"running {action} for definition: {name} if needs_apply is True, "
+                f"needs_apply value: {self.app_state.definitions[name].needs_apply}"
             )
             if self.app_state.definitions[name].needs_apply:
                 log.info(f"running apply for definition: {name}")
@@ -252,10 +260,15 @@ class TerraformCommand(BaseCommand):
         result = self._run(name, TerraformAction.PLAN)
 
         if result.exit_code == 0:
-            log.debug(f"no changes for definition {name}")
-            definition.needs_apply = False
-            # remove the empty plan file
-            definition.plan_file.unlink()
+            if definition.always_apply:
+                log.debug(f"no changes for definition {name}; but always_apply is set")
+                result.exit_code = 2
+            else:
+                log.debug(
+                    f"no changes for definition {name}; not applying and removing plan file"
+                )
+                definition.needs_apply = False
+                definition.plan_file.unlink(missing_ok=True)
 
         if result.exit_code == 1:
             log.error(f"error running terraform plan for {name}")
@@ -326,6 +339,7 @@ class TerraformCommand(BaseCommand):
             f"handling terraform command: {action} for definition {definition_name}"
         )
         definition: Definition = self.app_state.definitions[definition_name]
+        stream_output: bool = self.terraform_config.stream_output
         params: str = self.terraform_config.get_params(
             action, plan_file=definition.plan_file
         )
@@ -334,16 +348,27 @@ class TerraformCommand(BaseCommand):
             self.app_state.root_options.working_dir
         )
 
-        log.debug(
-            f"cmd: {self.app_state.terraform_options.terraform_bin} {action} {params}"
+        log.info(
+            f"running cmd: {self.app_state.terraform_options.terraform_bin} {action} {params}"
         )
+
+        if definition.squelch_apply_output and action == TerraformAction.APPLY:
+            log.debug(
+                f"squelching output for apply command on definition {definition_name}"
+            )
+            stream_output = False
+        elif definition.squelch_plan_output and action == TerraformAction.PLAN:
+            log.debug(
+                f"squelching output for plan command on definition {definition_name}"
+            )
+            stream_output = False
 
         result: TerraformResult = TerraformResult(
             *pipe_exec(
                 f"{self.app_state.terraform_options.terraform_bin} {action} {params}",
                 cwd=working_dir,
                 env=self.terraform_config.env,
-                stream_output=self.terraform_config.stream_output,
+                stream_output=stream_output,
             )
         )
 
@@ -513,11 +538,16 @@ class TerraformCommandConfig:
         read_only = "-lockfile=readonly" if self.strict_locking else ""
 
         target_args = ""
-        if command == TerraformAction.PLAN and self._app_state.terraform_options.target:
-            target_args = " " + " ".join(
-                f"-target={shlex_quote(quote_index_brackets(target))}"
-                for target in self._app_state.terraform_options.target
-            )
+        if self._app_state.terraform_options.target:
+            if command != TerraformAction.PLAN:
+                log.warn(
+                    f"--target option is only valid for plan, ignoring for {command.value}"
+                )
+            else:
+                target_args = " " + " ".join(
+                    f"-target={shlex_quote(quote_index_brackets(target))}"
+                    for target in self._app_state.terraform_options.target
+                )
 
         return {
             TerraformAction.INIT: f"-input=false {color_str} {read_only} -plugin-dir={self._app_state.terraform_options.provider_cache}",
