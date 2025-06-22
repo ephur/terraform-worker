@@ -18,6 +18,13 @@ class BaseHandler(metaclass=ABCMeta):
     actions = []
     config_model = BaseConfig
     _ready = False
+    # default_priority can be overridden by subclasses to influence ordering
+    # when handlers are executed. lower values indicate higher priority.
+    default_priority: dict = {}
+    # dependencies allow a handler to specify other handlers that must run
+    # before it for a given action and stage. Format:
+    # {TerraformAction: {TerraformStage: ["handler_name", ...]}}
+    dependencies: dict = {}
 
     @abstractmethod
     def __init__(self, config: BaseModel) -> None:

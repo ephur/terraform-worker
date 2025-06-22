@@ -28,6 +28,10 @@ class S3Handler(BaseHandler):
     actions = [TerraformAction.PLAN, TerraformAction.APPLY]
     config_model = BaseConfig
     _ready = False
+    default_priority = {
+        TerraformAction.PLAN: 10,
+        TerraformAction.APPLY: 10,
+    }
 
     def __init__(self, _: BaseConfig = None):
         # defer properties until they are loaded

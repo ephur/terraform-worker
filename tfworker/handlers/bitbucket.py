@@ -44,6 +44,9 @@ class BitbucketHandler(BaseHandler):
     actions = [TerraformAction.PLAN]
     config_model = BitbucketConfig
     ready = False
+    default_priority = {
+        TerraformAction.PLAN: 90,
+    }
 
     def __init__(self, config: BitbucketConfig) -> None:
         # ensure all of the required variables are set
