@@ -192,6 +192,16 @@ class SQSHandler(BaseHandler):
                     payload["plan"] = f.read()
             except OSError as e:  # pragma: no cover
                 log.error(f"Unable to read plan file {definition.plan_file}: {e}")
+
+        # attach handler results if available
+        try:
+            handlers = self.app_state.handlers
+            if handlers:
+                res = handlers.get_results(action=action, stage=stage)
+                if res:
+                    payload["handler_results"] = [r.model_dump() for r in res]
+        except Exception:
+            pass
         return json.dumps(payload)
 
     def _queue_urls(self) -> List[str]:

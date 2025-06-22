@@ -6,3 +6,4 @@ from .s3 import S3Handler  # pragma: no cover # noqa
 from .snyk import SnykConfig, SnykHandler  # pragma: no cover # noqa
 from .sqs import QueueRule, SQSConfig, SQSHandler  # pragma: no cover # noqa
 from .trivy import TrivyConfig, TrivyHandler  # pragma: no cover # noqa
+from .results import BaseHandlerResult  # pragma: no cover # noqa

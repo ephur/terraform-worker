@@ -33,6 +33,7 @@ from tfworker.types.terraform import TerraformAction, TerraformStage
 
 from .base import BaseHandler
 from .registry import HandlerRegistry
+from .results import BaseHandlerResult
 
 if TYPE_CHECKING:  # pragma: no cover
     from tfworker.commands.terraform import TerraformResult
@@ -164,6 +165,12 @@ class OpenAIConfig(BaseModel):
         return list(self.tasks.keys())
 
 
+class OpenAIResult(BaseHandlerResult):
+    task: OpenAITask
+    file: str
+    content: str
+
+
 @HandlerRegistry.register("openai")
 class OpenAIHandler(BaseHandler):
     """Analyze terraform plans using OpenAI."""
@@ -195,7 +202,7 @@ class OpenAIHandler(BaseHandler):
         definition: "Definition",
         working_dir: str,
         result: Union["TerraformResult", None] = None,
-    ) -> None:  # pragma: no cover - entry point
+    ) -> List[OpenAIResult] | None:  # pragma: no cover - entry point
         log.debug(
             f"OpenAIHandler.execute called with action={action}, stage={stage}, deployment={deployment}, working_dir={working_dir}"
         )
@@ -205,7 +212,7 @@ class OpenAIHandler(BaseHandler):
             and result is not None
             and result.has_changes()
         ):
-            return
+            return None
 
         planfile = definition.plan_file
         if planfile is None:
@@ -223,7 +230,7 @@ class OpenAIHandler(BaseHandler):
         else:
             plan_text = result.stdout_str
 
-        # Loop over enabled tasks from config.tasks dictionary
+        results: List[OpenAIResult] = []
         for task, settings in self._tasks.items():
             prompt = f"{settings.prompt}\n{plan_text}"
             output = self._invoke_openai(settings.model.value, prompt)
@@ -233,6 +240,17 @@ class OpenAIHandler(BaseHandler):
             out_file = jsonfile.with_suffix(suffix)
             Path(out_file).write_text(output)
             log.debug(f"OpenAI {task.value} written to: {out_file}")
+            results.append(
+                OpenAIResult(
+                    handler="openai",
+                    action=action,
+                    stage=stage,
+                    task=task,
+                    file=str(out_file),
+                    content=output,
+                )
+            )
+        return results
 
     def _invoke_openai(self, model: str, prompt: str) -> str:
         log.trace(f"Submitting prompt to OpenAI model={model}, prompt:\n{prompt}")
