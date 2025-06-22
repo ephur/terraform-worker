@@ -171,6 +171,9 @@ class OpenAIHandler(BaseHandler):
     actions = [TerraformAction.PLAN]
     config_model = OpenAIConfig
     _ready = False
+    default_priority = {
+        TerraformAction.PLAN: 50,
+    }
 
     def __init__(self, config: OpenAIConfig) -> None:
         for field in config.__class__.model_fields:

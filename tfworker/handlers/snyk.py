@@ -43,6 +43,9 @@ class SnykHandler(BaseHandler):
     actions = [TerraformAction.PLAN]
     config_model = SnykConfig
     _ready = False
+    default_priority = {
+        TerraformAction.PLAN: 50,
+    }
 
     def __init__(self, config: BaseModel) -> None:
         # configure the handler

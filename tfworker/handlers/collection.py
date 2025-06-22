@@ -78,6 +78,62 @@ class HandlersCollection(Mapping):
         except KeyError:
             raise UnknownHandler(provider=value)
 
+    def _ordered_handlers(
+        self, action: "TerraformAction", stage: "TerraformStage"
+    ) -> list[tuple[str, "BaseHandler"]]:
+        """Return handlers ordered by dependencies and priority."""
+        # Filter handlers that are ready for this action
+        handlers = {
+            name: h
+            for name, h in self._handlers.items()
+            if h is not None and action in h.actions and h.is_ready()
+        }
+
+        if not handlers:
+            return []
+
+        # Build priority map
+        priorities = {
+            name: getattr(h, "default_priority", {}).get(action, 100)
+            for name, h in handlers.items()
+        }
+
+        # Build dependency edges
+        edges: dict[str, set[str]] = {name: set() for name in handlers}
+        indegree = {n: 0 for n in handlers}
+        for name, h in handlers.items():
+            deps = getattr(h, "dependencies", {}).get(action, {}).get(stage, [])
+            for dep in deps:
+                if dep in handlers:
+                    edges[dep].add(name)
+                    indegree[name] += 1
+
+        # Kahn's algorithm with priority ordering
+
+        ready = [n for n, d in indegree.items() if d == 0]
+        ready.sort(key=lambda n: priorities.get(n, 100))
+
+        ordered: list[str] = []
+        while ready:
+            n = ready.pop(0)
+            ordered.append(n)
+            for m in edges[n]:
+                indegree[m] -= 1
+                if indegree[m] == 0:
+                    # insert maintaining priority order
+                    index = 0
+                    while (
+                        index < len(ready) and priorities[ready[index]] <= priorities[m]
+                    ):
+                        index += 1
+                    ready.insert(index, m)
+
+        if len(ordered) != len(handlers):
+            log.error("Cycle detected in handler dependencies; using priority order")
+            ordered = sorted(handlers, key=lambda n: priorities.get(n, 100))
+
+        return [(name, handlers[name]) for name in ordered]
+
     def exec_handlers(
         self,
         action: "TerraformAction",
@@ -98,19 +154,15 @@ class HandlersCollection(Mapping):
             raise HandlerError(f"Invalid action {action}")
         if stage not in TerraformStage:
             raise HandlerError(f"Invalid stage {stage}")
-        for name, handler in self._handlers.items():
-            if handler is not None:
-                if action in handler.actions and handler.is_ready():
-                    log.trace(
-                        f"Executing handler {name} for {definition.name} action {action} and stage {stage}"
-                    )
-                    handler.execute(
-                        action=action,
-                        stage=stage,
-                        deployment=deployment,
-                        definition=definition,
-                        working_dir=working_dir,
-                        result=result,
-                    )
-                else:
-                    log.trace(f"Handler {name} is not ready for action {action}")
+        for name, handler in self._ordered_handlers(action, stage):
+            log.trace(
+                f"Executing handler {name} for {definition.name} action {action} and stage {stage}"
+            )
+            handler.execute(
+                action=action,
+                stage=stage,
+                deployment=deployment,
+                definition=definition,
+                working_dir=working_dir,
+                result=result,
+            )
