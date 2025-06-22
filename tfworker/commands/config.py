@@ -5,13 +5,12 @@ import os
 import pathlib
 from typing import Any, Dict, List, Type, Union
 
-from mergedeep import merge
-
 import click
 import hcl2
 import jinja2
 import yaml
 from jinja2.runtime import StrictUndefined
+from mergedeep import merge
 from pydantic import BaseModel, ValidationError
 
 import tfworker.util.log as log
@@ -22,7 +21,9 @@ from tfworker.util.cli import handle_config_error
 from .. import cli_options
 
 
-def load_config(config_file: Union[str, List[str]], config_vars: Dict[str, str]) -> ConfigFile:
+def load_config(
+    config_file: Union[str, List[str]], config_vars: Dict[str, str]
+) -> ConfigFile:
     """Load one or more configuration files and merge them.
 
     Later files override values from earlier ones.
