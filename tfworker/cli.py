@@ -48,8 +48,7 @@ def cli(ctx: click.Context, **kwargs):
     app_state = AppState(root_options=options)
     ctx.obj = app_state
     register_plugins()
-    RootCommand()
-    log.trace("finished intializing root command")
+    log.trace("initialized root options")
 
 
 @cli.command()
@@ -64,6 +63,8 @@ def clean(ctx: click.Context, deployment: str, **kwargs):  # noqa: E501
     the backend such as S3 buckets, DynamoDB tables, etc. This command will
     verify the state is empty, and then remove those traces from the backend.
     """
+    RootCommand()
+
     try:
         options = CLIOptionsClean.model_validate(kwargs)
     except ValidationError as e:
@@ -90,6 +91,8 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
     which can share common parameters and a fixed set of providers.
     """
     # @TODO: Add support for a --target flag to target specific IDs in a definition
+
+    RootCommand()
 
     try:
         options = CLIOptionsTerraform.model_validate(kwargs)
@@ -124,6 +127,7 @@ def env(ctx: click.Context, deployment: str, **kwargs):
     the worker will execute them. This can be helpful when doing manual
     state management
     """
+    RootCommand()
     env = EnvCommand(deployment=deployment)
     env.exec()
 

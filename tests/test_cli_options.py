@@ -46,7 +46,24 @@ class TestCLIOptionsRoot:
         config_file = tmp_path / "config.yaml"
         config_file.write_text("config")
         cli_options = c.CLIOptionsRoot(config_file=str(config_file))
-        assert cli_options.config_file == str(config_file)
+        assert cli_options.config_file == [str(config_file)]
+
+    def test_multiple_config_files(self, tmp_path):
+        config_file1 = tmp_path / "config1.yaml"
+        config_file2 = tmp_path / "config2.yaml"
+        config_file1.write_text("config1")
+        config_file2.write_text("config2")
+        cli_options = c.CLIOptionsRoot(
+            config_file=[str(config_file1), str(config_file2)]
+        )
+        assert cli_options.config_file == [str(config_file1), str(config_file2)]
+
+    def test_any_config_file_does_not_exist(self, tmp_path):
+        config_file1 = tmp_path / "config1.yaml"
+        config_file2 = tmp_path / "config2.yaml"
+        config_file1.write_text("config1")
+        with pytest.raises(ValueError):
+            c.CLIOptionsRoot(config_file=[str(config_file1), str(config_file2)])
 
     def test_config_does_not_exist(self):
         with pytest.raises(ValueError):

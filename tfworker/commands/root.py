@@ -30,9 +30,10 @@ class RootCommand:
         options = app_state.root_options
         app_state.working_dir = self._resolve_working_dir(options.working_dir)
         log.debug(f"working directory: {app_state.working_dir}")
-        log.debug(f"loading config file: {options.config_file}")
+        log.debug(f"loading config file(s): {options.config_file}")
         app_state.loaded_config = load_config(
-            options.config_file, self._prepare_template_vars(options)
+            options.config_file,
+            self._prepare_template_vars(options),
         )
         log.safe_trace(f"loaded config: {app_state.loaded_config}")
         # update the app_config with configuration from the command line
