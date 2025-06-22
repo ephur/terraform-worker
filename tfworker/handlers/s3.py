@@ -29,11 +29,8 @@ class S3Handler(BaseHandler):
     config_model = BaseConfig
     _ready = False
     default_priority = {
-        TerraformAction.PLAN: 20,
-        TerraformAction.APPLY: 20,
-    }
-    dependencies = {
-        TerraformAction.PLAN: {TerraformStage.POST: ["openai"]},
+        TerraformAction.PLAN: 10,
+        TerraformAction.APPLY: 10,
     }
 
     def __init__(self, _: BaseConfig = None):
