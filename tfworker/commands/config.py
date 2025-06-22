@@ -5,6 +5,8 @@ import os
 import pathlib
 from typing import Any, Dict, List, Type, Union
 
+from mergedeep import merge
+
 import click
 import hcl2
 import jinja2
@@ -20,27 +22,30 @@ from tfworker.util.cli import handle_config_error
 from .. import cli_options
 
 
-def load_config(config_file: str, config_vars: Dict[str, str]) -> ConfigFile:
-    """
-    Load the configuration file.
+def load_config(config_file: Union[str, List[str]], config_vars: Dict[str, str]) -> ConfigFile:
+    """Load one or more configuration files and merge them.
 
-    Args:
-        config_file (str): The path to the configuration file.
-        config_vars (Dict[str, str]): A dictionary of configuration variables.
-
-    Returns:
-        Dict[str, Any]: The loaded configuration.
+    Later files override values from earlier ones.
     """
-    log.trace(f"loading config file: {config_file}")
-    rendered_config = _process_template(config_file, _get_full_config_vars(config_vars))
-    log.safe_trace(f"rendered config: {json.dumps(rendered_config)}")
-    if config_file.endswith(".hcl"):
-        loaded_config: Dict[Any, Any] = hcl2.loads(rendered_config)["terraform"]
-    else:
-        loaded_config: Dict[Any, Any] = yaml.safe_load(rendered_config)["terraform"]
+
+    config_files = [config_file] if isinstance(config_file, str) else config_file
+    merged_config: Dict[str, Any] = {}
+    full_vars = _get_full_config_vars(config_vars)
+
+    for cf in config_files:
+        log.trace(f"loading config file: {cf}")
+        rendered = _process_template(cf, full_vars)
+        log.safe_trace(f"rendered config: {rendered}")
+
+        if cf.endswith(".hcl"):
+            loaded: Dict[str, Any] = hcl2.loads(rendered)["terraform"]
+        else:
+            loaded = yaml.safe_load(rendered)["terraform"]
+
+        merge(merged_config, loaded)
 
     try:
-        parsed_config = ConfigFile.model_validate(loaded_config)
+        parsed_config = ConfigFile.model_validate(merged_config)
     except ValidationError as e:
         handle_config_error(e)
 

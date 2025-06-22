@@ -93,10 +93,10 @@ class CLIOptionsRoot(FreezableBaseModel):
     create_backend_bucket: bool = Field(
         True, description="Create the backend bucket if it does not exist"
     )
-    config_file: str = Field(
-        const.DEFAULT_CONFIG,
+    config_file: List[str] = Field(
+        [const.DEFAULT_CONFIG],
         json_schema_extra={"env": "WORKER_CONFIG_FILE"},
-        description="Path to the configuration file",
+        description="Path to one or more configuration files",
     )
     config_var: Optional[List[str]] = Field(
         [],
@@ -159,29 +159,30 @@ class CLIOptionsRoot(FreezableBaseModel):
         if isinstance(backend, Backends):
             return backend
 
-    @field_validator("config_file")
+    @field_validator("config_file", mode="before")
     @classmethod
-    def validate_config_file(cls, fpath: str) -> str:
-        """Validates the config file exists, and is readable
+    def validate_config_file(cls, fpath: Union[str, List[str]]) -> List[str]:
+        """Validate that each config file exists and is readable.
 
-        Args:
-            fpath (str): The path to the config file
-
-        Returns:
-            str: The absolute path to the config file
-
-        Raises:
-            ValueError: If the file does not exist or is not readable
+        Parameters may be provided as a single string, a comma separated list,
+        or an actual list.  The return value is always a list of absolute
+        paths with the order preserved.
         """
-        if not os.path.isabs(fpath):
-            fpath = os.path.abspath(fpath)
-        if os.path.isdir(fpath):
-            raise ValueError(f"Config file {fpath} is a directory!")
-        if not os.path.isfile(fpath):
-            raise ValueError(f"Config file {fpath} does not exist!")
-        if not os.access(fpath, os.R_OK):
-            raise ValueError(f"Config file {fpath} is not readable!")
-        return fpath
+        files: List[str] = []
+        if isinstance(fpath, str):
+            fpath = [p.strip() for p in fpath.split(",") if p.strip()]
+
+        for fp in fpath:
+            if not os.path.isabs(fp):
+                fp = os.path.abspath(fp)
+            if os.path.isdir(fp):
+                raise ValueError(f"Config file {fp} is a directory!")
+            if not os.path.isfile(fp):
+                raise ValueError(f"Config file {fp} does not exist!")
+            if not os.access(fp, os.R_OK):
+                raise ValueError(f"Config file {fp} is not readable!")
+            files.append(fp)
+        return files
 
     @field_validator("gcp_creds_path")
     @classmethod
@@ -506,8 +507,13 @@ def validate_limit(values):
     errors = []
     config = click.get_current_context().obj.loaded_config
     if config is not None:
+        if isinstance(config, dict):
+            defs = config.get("definitions", {})
+        else:
+            defs = getattr(config, "definitions", {})
+
         for item in values["limit"]:
-            if item not in config.definitions.keys():
+            if item not in defs.keys():
                 errors.append(
                     InitErrorDetails(
                         loc=("--limit", "--limit"),
