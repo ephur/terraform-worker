@@ -36,7 +36,9 @@ class TestHandlerHelpers:
             def items(self):
                 return list(super().items())
 
-        handlers = HandlerDict({"h": mock.Mock(is_ready=False), "g": mock.Mock(is_ready=True)})
+        handlers = HandlerDict(
+            {"h": mock.Mock(is_ready=False), "g": mock.Mock(is_ready=True)}
+        )
         b._check_handlers_ready(handlers)
         assert "h" not in handlers and "g" in handlers
 
@@ -185,7 +187,9 @@ class TestInitFunctions:
             "tfworker.handlers.registry.HandlerRegistry.get_handler_config_model",
             return_value=Dummy(),
         )
-        mocker.patch("tfworker.commands.base.handle_config_error", side_effect=SystemExit)
+        mocker.patch(
+            "tfworker.commands.base.handle_config_error", side_effect=SystemExit
+        )
         with pytest.raises(SystemExit):
             b._validate_handler_config("h", {})
 

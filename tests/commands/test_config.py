@@ -1,8 +1,3 @@
-import json
-from pathlib import Path
-
-import pytest
-
 from tfworker.commands import config as c
 from tfworker.types.config_file import ConfigFile
 
