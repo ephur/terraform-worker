@@ -34,6 +34,7 @@ class HandlersCollection(Mapping):
         """
         if not hasattr(self, "_initialized"):
             self._handlers = dict()
+            self._results = []
             if handlers:
                 for k, v in handlers.items():
                     log.trace(f"Adding handler {k} to handlers collection")
@@ -56,6 +57,29 @@ class HandlersCollection(Mapping):
         if self._frozen:
             raise FrozenInstanceError("Cannot modify a frozen instance.")
         self._handlers[key] = value
+
+    # result store helpers
+    @property
+    def results(self):
+        return self._results
+
+    def add_result(self, result):
+        self._results.append(result)
+
+    def get_results(self, handler_name=None, action=None, stage=None):
+        res = []
+        for r in self._results:
+            if handler_name is not None and r.handler != handler_name:
+                continue
+            if action is not None and r.action != action:
+                continue
+            if stage is not None and r.stage != stage:
+                continue
+            res.append(r)
+        return res
+
+    def find_results(self, field, value):
+        return [r for r in self._results if getattr(r, field, None) == value]
 
     def freeze(self):
         """
@@ -158,7 +182,7 @@ class HandlersCollection(Mapping):
             log.trace(
                 f"Executing handler {name} for {definition.name} action {action} and stage {stage}"
             )
-            handler.execute(
+            ret = handler.execute(
                 action=action,
                 stage=stage,
                 deployment=deployment,
@@ -166,3 +190,9 @@ class HandlersCollection(Mapping):
                 working_dir=working_dir,
                 result=result,
             )
+            if ret is not None:
+                if isinstance(ret, list):
+                    for r in ret:
+                        self.add_result(r)
+                else:
+                    self.add_result(ret)
