@@ -122,7 +122,9 @@ class S3Handler(BaseHandler):
 
     def get_remote_file(self, name: str) -> str:
         """get_remote_file returns the remote file path for a given name"""
-        return f"{self.prefix}/{name}/terraform.tfplan"
+        run_id = self.app_state.root_options.run_id
+        run_prefix = f"{run_id}/" if run_id else ""
+        return f"{self.prefix}/{run_prefix}{name}/terraform.tfplan"
 
     def execute(
         self,

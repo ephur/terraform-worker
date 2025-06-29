@@ -38,6 +38,14 @@ class TestCLIOptionsRoot:
         cli_options = c.CLIOptionsRoot(log_level="debug")
         assert cli_options.log_level == "DEBUG"
 
+    def test_run_id_default_none(self):
+        cli_options = c.CLIOptionsRoot()
+        assert cli_options.run_id is None
+
+    def test_run_id_set(self):
+        cli_options = c.CLIOptionsRoot(run_id="abc123")
+        assert cli_options.run_id == "abc123"
+
     def test_cli_options_with_invalid_log_level(self):
         with pytest.raises(ValueError):
             c.CLIOptionsRoot(log_level="invalid_log_level")
