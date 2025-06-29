@@ -26,6 +26,12 @@ dep-test: init-dev
 	poetry run pytest --disable-socket
 	poetry run coverage report --fail-under=60 -m --skip-empty
 
+typecheck: init-dev
+	poetry run mypy -p tfworker
+
+typecheck-report: init-dev
+	-poetry run mypy tfworker | tee mypy-report.txt
+
 clean:
 	@echo "removing python temporary and build files "
 	@rm -rf build dist .eggs terraform_worker.egg-info
