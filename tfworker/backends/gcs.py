@@ -8,8 +8,8 @@ from google.cloud import storage
 from google.cloud.exceptions import Conflict, NotFound
 
 import tfworker.util.log as log
+from tfworker.custom_types import JSONType
 from tfworker.exceptions import BackendError
-from tfworker.types import JSONType
 
 from .base import BaseBackend, validate_backend_empty
 

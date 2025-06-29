@@ -10,7 +10,7 @@ from moto import mock_aws
 from tfworker.app_state import AppState
 from tfworker.authenticators import AuthenticatorsCollection
 from tfworker.cli_options import CLIOptionsClean, CLIOptionsRoot, CLIOptionsTerraform
-from tfworker.types.config_file import ConfigFile, GlobalVars
+from tfworker.custom_types.config_file import ConfigFile, GlobalVars
 
 
 @pytest.fixture(scope="function")

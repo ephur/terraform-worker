@@ -15,7 +15,7 @@ from pydantic_core import InitErrorDetails
 import tfworker.util.log as log
 from tfworker import constants as const
 from tfworker.backends import Backends
-from tfworker.types import FreezableBaseModel
+from tfworker.custom_types import FreezableBaseModel
 from tfworker.util.terraform import get_terraform_version
 
 

@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from tfworker.types.terraform import TerraformAction, TerraformStage
+from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 
 
 class BaseHandlerResult(BaseModel):

@@ -1,5 +1,5 @@
 from tfworker.commands import config as c
-from tfworker.types.config_file import ConfigFile
+from tfworker.custom_types.config_file import ConfigFile
 
 
 class TestLoadConfig:

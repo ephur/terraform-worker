@@ -5,10 +5,10 @@ from pydantic import ConfigDict, Field
 from tfworker import cli_options
 from tfworker.authenticators import AuthenticatorsCollection
 from tfworker.backends import BaseBackend
+from tfworker.custom_types import ConfigFile, FreezableBaseModel
 from tfworker.definitions import DefinitionsCollection
 from tfworker.handlers.collection import HandlersCollection
 from tfworker.providers import ProvidersCollection
-from tfworker.types import ConfigFile, FreezableBaseModel
 
 
 class AppState(FreezableBaseModel):

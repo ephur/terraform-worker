@@ -7,9 +7,9 @@ import tfworker.util.hooks as hooks
 import tfworker.util.log as log
 import tfworker.util.terraform as tf_util
 from tfworker.commands.base import BaseCommand
+from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.definitions import Definition
 from tfworker.exceptions import HandlerError, HookError, TFWorkerException
-from tfworker.types.terraform import TerraformAction, TerraformStage
 from tfworker.util.system import pipe_exec
 from tfworker.util.terraform import quote_index_brackets
 

@@ -1,8 +1,8 @@
 from abc import ABCMeta, abstractmethod
 from typing import TYPE_CHECKING
 
+from tfworker.custom_types import JSONType
 from tfworker.exceptions import BackendError
-from tfworker.types import JSONType
 
 if TYPE_CHECKING:
     from tfworker.authenticators import (  # pragma: no cover  # noqa

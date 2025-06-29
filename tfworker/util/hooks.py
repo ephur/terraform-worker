@@ -15,8 +15,8 @@ from tfworker.constants import (
     WORKER_LOCALS_FILENAME,
     WORKER_TFVARS_FILENAME,
 )
+from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import HookError
-from tfworker.types.terraform import TerraformAction, TerraformStage
 from tfworker.util.system import pipe_exec
 
 

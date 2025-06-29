@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.handlers.openai import (
     HandlerError,
     OpenAIConfig,
@@ -10,7 +11,6 @@ from tfworker.handlers.openai import (
     OpenAITaskSettings,
     SummaryLevel,
 )
-from tfworker.types.terraform import TerraformAction, TerraformStage
 
 
 class DummyDefinition:

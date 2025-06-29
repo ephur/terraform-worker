@@ -10,8 +10,8 @@ import click
 
 import tfworker.util.log as log
 from tfworker.backends import Backends
+from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import HandlerError
-from tfworker.types.terraform import TerraformAction, TerraformStage
 
 from .base import BaseConfig, BaseHandler
 from .registry import HandlerRegistry

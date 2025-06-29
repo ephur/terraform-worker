@@ -1,8 +1,8 @@
 import pytest
 
+from tfworker.custom_types import TerraformAction, TerraformStage
 from tfworker.handlers.base import BaseHandler
 from tfworker.handlers.collection import HandlersCollection
-from tfworker.types import TerraformAction, TerraformStage
 
 ORDER = []
 

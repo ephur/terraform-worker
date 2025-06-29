@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import TYPE_CHECKING, Tuple
 
-from tfworker.types.terraform import TerraformAction
+from tfworker.custom_types.terraform import TerraformAction
 
 if TYPE_CHECKING:
     from click import Context  # pragma: no cover  # noqa: F401

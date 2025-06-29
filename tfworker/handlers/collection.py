@@ -7,8 +7,8 @@ from tfworker.exceptions import FrozenInstanceError, HandlerError, UnknownHandle
 
 if TYPE_CHECKING:
     from tfworker.commands.terraform import TerraformResult
+    from tfworker.custom_types import TerraformAction, TerraformStage
     from tfworker.definitions.model import Definition
-    from tfworker.types import TerraformAction, TerraformStage
 
     from .base import BaseHandler  # noqa: F401
 
@@ -170,7 +170,7 @@ class HandlersCollection(Mapping):
         """
         exec_handlers is used to execute a specific action on all handlers.
         """
-        from tfworker.types import TerraformAction, TerraformStage
+        from tfworker.custom_types import TerraformAction, TerraformStage
 
         handler: BaseHandler
 
