@@ -5,10 +5,10 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from tfworker.commands.terraform import TerraformResult
+from tfworker.custom_types import TerraformAction, TerraformStage
 from tfworker.definitions import Definition
 from tfworker.exceptions import HandlerError
 from tfworker.handlers import SnykConfig, SnykHandler
-from tfworker.types import TerraformAction, TerraformStage
 
 mock_path_exists = Mock()
 mock_path_exists_fn = Mock(return_value=True)

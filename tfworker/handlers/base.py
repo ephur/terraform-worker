@@ -5,8 +5,8 @@ from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from tfworker.commands.terraform import TerraformResult
+    from tfworker.custom_types import TerraformAction, TerraformStage
     from tfworker.definitions.model import Definition
-    from tfworker.types import TerraformAction, TerraformStage
 
 
 class BaseConfig(BaseModel): ...  # noqa

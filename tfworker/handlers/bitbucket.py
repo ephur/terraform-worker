@@ -4,8 +4,8 @@ from atlassian.bitbucket import Cloud
 from pydantic import BaseModel, Field
 from pydantic_settings import SettingsConfigDict
 
+from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import HandlerError
-from tfworker.types.terraform import TerraformAction, TerraformStage
 
 from .base import BaseHandler
 from .registry import HandlerRegistry

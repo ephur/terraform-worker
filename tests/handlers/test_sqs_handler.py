@@ -6,10 +6,10 @@ import pytest
 from moto import mock_aws
 
 from tfworker.commands.terraform import TerraformResult
+from tfworker.custom_types import TerraformAction, TerraformStage
 from tfworker.definitions import Definition
 from tfworker.exceptions import HandlerError
 from tfworker.handlers import QueueRule, SQSConfig, SQSHandler
-from tfworker.types import TerraformAction, TerraformStage
 
 
 class TestSQSHandlerTargetQueues:

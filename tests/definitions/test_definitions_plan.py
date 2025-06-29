@@ -1,8 +1,8 @@
 from pathlib import Path
 
+from tfworker.custom_types import TerraformAction
 from tfworker.definitions.model import Definition
 from tfworker.definitions.plan import DefinitionPlan
-from tfworker.types import TerraformAction
 
 mock_definition = Definition(name="def1", path="./path")
 

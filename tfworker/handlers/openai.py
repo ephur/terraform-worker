@@ -28,8 +28,8 @@ import openai
 from pydantic import BaseModel, Field, model_validator
 
 import tfworker.util.log as log
+from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import HandlerError
-from tfworker.types.terraform import TerraformAction, TerraformStage
 
 from .base import BaseHandler
 from .registry import HandlerRegistry

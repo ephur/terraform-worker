@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING, Union
 from pydantic import BaseModel
 
 import tfworker.util.log as log
+from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import HandlerError
-from tfworker.types.terraform import TerraformAction, TerraformStage
 from tfworker.util.system import pipe_exec
 
 from .base import BaseHandler

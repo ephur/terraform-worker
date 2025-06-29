@@ -1,6 +1,6 @@
+from tfworker.custom_types import TerraformAction, TerraformStage
 from tfworker.handlers import BaseHandler, HandlersCollection
 from tfworker.handlers.results import BaseHandlerResult
-from tfworker.types import TerraformAction, TerraformStage
 
 
 class DummyResult(BaseHandlerResult):

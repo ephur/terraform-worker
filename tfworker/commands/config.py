@@ -15,7 +15,7 @@ from pydantic import BaseModel, ValidationError
 
 import tfworker.util.log as log
 from tfworker.app_state import AppState
-from tfworker.types.config_file import ConfigFile
+from tfworker.custom_types.config_file import ConfigFile
 from tfworker.util.cli import handle_config_error
 
 from .. import cli_options
@@ -85,7 +85,7 @@ def log_limiter() -> None:
 
 def get_cli_options_model_classes() -> List[Type[BaseModel]]:
     """
-    Get all model classes from tfworker.types.cli_options that inherit from BaseModel
+    Get all model classes from tfworker.custom_types.cli_options that inherit from BaseModel
     and have names prefixed with 'CLIOptions'.
 
     Returns:

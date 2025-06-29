@@ -9,9 +9,9 @@ from tfworker.commands.terraform import (
     TerraformCommandConfig,
     TerraformResult,
 )
+from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.definitions.model import Definition
 from tfworker.exceptions import HandlerError, HookError, TFWorkerException
-from tfworker.types.terraform import TerraformAction, TerraformStage
 
 
 class DummyAppState:
