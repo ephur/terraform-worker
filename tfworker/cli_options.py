@@ -90,6 +90,11 @@ class CLIOptionsRoot(FreezableBaseModel):
         json_schema_extra={"env": "WORKER_BACKEND_USE_ALL_REMOTES"},
         description="Generate remote data sources based on all definition paths present in the backend",
     )
+    run_id: Optional[str] = Field(
+        None,
+        json_schema_extra={"env": "WORKER_RUN_ID"},
+        description="When set, prefix remote plan files with this id",
+    )
     create_backend_bucket: bool = Field(
         True, description="Create the backend bucket if it does not exist"
     )

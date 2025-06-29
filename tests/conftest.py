@@ -49,6 +49,7 @@ def mock_cli_options_root():
     mock_root.backend_plans = False
     mock_root.backend_prefix = "prefix"
     mock_root.create_backend_bucket = True
+    mock_root.run_id = None
     mock_root.config_var = {}
     return mock_root
 
@@ -63,6 +64,7 @@ def mock_cli_options_root_backend_west():
     mock_root.backend_plans = False
     mock_root.backend_prefix = "prefix"
     mock_root.create_backend_bucket = True
+    mock_root.run_id = None
     return mock_root
 
 
