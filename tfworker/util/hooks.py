@@ -7,7 +7,7 @@ import json
 import os
 import re
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import tfworker.util.log as log
 from tfworker.constants import (
@@ -23,9 +23,9 @@ from tfworker.util.system import pipe_exec
 # --- Safe pipe_exec wrapper ---
 def safe_pipe_exec(
     args: Union[str, List[str]],
-    stdin: str = None,
-    cwd: str = None,
-    env: Dict[str, str] = None,
+    stdin: Optional[str] = None,
+    cwd: Optional[str] = None,
+    env: Optional[Dict[str, str]] = None,
     stream_output: bool = False,
 ) -> Tuple[int, Union[bytes, None], Union[bytes, None]]:
     """
@@ -138,7 +138,7 @@ def _get_state_item_from_output(
 
     if exit_code != 0:
         raise HookError(
-            f"Error reading remote state item {state}.{item}, details: {stderr.decode()}"
+            f"Error reading remote state item {state}.{item}, details: {stderr.decode() if stderr else ''}"
         )
 
     if stdout is None:
@@ -191,8 +191,8 @@ def hook_exec(
     terraform_path: str,
     debug: bool = False,
     b64_encode: bool = False,
-    extra_vars: Dict[str, str] = None,
-    backend: "BaseBackend" = None,
+    extra_vars: Optional[Dict[str, str]] = None,
+    backend: Optional["BaseBackend"] = None,
     disable_remote_state_vars: bool = False,
 ) -> None:
     """
@@ -217,7 +217,7 @@ def hook_exec(
         extra_vars = {}
 
     local_env = _prepare_environment(env, terraform_path)
-    hook_script = _find_hook_script(working_dir, phase, command)
+    hook_script = _find_hook_script(working_dir, str(phase), str(command))
     _populate_environment_with_terraform_variables(
         local_env, working_dir, terraform_path, b64_encode
     )
@@ -226,7 +226,9 @@ def hook_exec(
             local_env, working_dir, terraform_path, b64_encode, backend
         )
     _populate_environment_with_extra_vars(local_env, extra_vars, b64_encode)
-    _execute_hook_script(hook_script, phase, command, working_dir, local_env, debug)
+    _execute_hook_script(
+        hook_script, str(phase), str(command), working_dir, local_env, debug
+    )
 
 
 def _find_hook_script(working_dir: str, phase: str, command: str) -> str:
@@ -297,7 +299,7 @@ def _populate_environment_with_terraform_remote_vars(
     working_dir: str,
     terraform_path: str,
     b64_encode: bool,
-    backend: "BaseBackend",
+    backend: Optional["BaseBackend"],
 ) -> None:
     """
     Populates the environment with Terraform variables.
@@ -318,7 +320,7 @@ def _populate_environment_with_terraform_remote_vars(
     # this regex looks for variables in the form of:
     # <var_name, ITEM> = data.terraform_remote_state.<the name of a remote definition, STATE>.outputs.<the name of an output, STATE_ITEM>
     r = re.compile(
-        r"\s*(?P<item>\w+)\s*\=.+data\.terraform_remote_state\.(?P<state>\w+)\.outputs\.(?P<state_item>\w+)\s*"
+        r"\s*(?P<item>\w+)\s*\=.+data\\.terraform_remote_state\\.(?P<state>\w+)\\.outputs\\.(?P<state_item>\w+)\\s*"
     )
 
     for line in contents.splitlines():
@@ -327,12 +329,13 @@ def _populate_environment_with_terraform_remote_vars(
             item = m.group("item")
             state = m.group("state")
             state_item = m.group("state_item")
-            state_value = get_state_item(
-                working_dir, local_env, terraform_path, state, state_item, backend
-            )
-            _set_hook_env_var(
-                local_env, TFHookVarType.REMOTE, item, state_value, b64_encode
-            )
+            if backend:
+                state_value = get_state_item(
+                    working_dir, local_env, terraform_path, state, state_item, backend
+                )
+                _set_hook_env_var(
+                    local_env, TFHookVarType.REMOTE, item, state_value, b64_encode
+                )
 
 
 def _populate_environment_with_extra_vars(
@@ -354,7 +357,7 @@ def _set_hook_env_var(
     local_env: Dict[str, str],
     var_type: TFHookVarType,
     key: str,
-    value: str,
+    value: Any,
     b64_encode: bool = False,
 ) -> None:
     """
@@ -374,8 +377,8 @@ def _set_hook_env_var(
         except Exception:
             value = str(value)
 
-    key_replace_items = {" ": "", '"': "", "-": "_", ".": "_"}
-    val_replace_items = {" ": "", '"': "", "\n": ""}
+    key_replace_items = {" ": "", "\"": "", "-": "_", ".": "_"}
+    val_replace_items = {" ": "", "\"": "", "\n": ""}
 
     for k, v in key_replace_items.items():
         key = key.replace(k, v)
@@ -389,9 +392,10 @@ def _set_hook_env_var(
             value = str(value).upper()
 
     if b64_encode:
-        value = base64.b64encode(value.encode())
-
-    local_env[f"{var_type}_{key.upper()}"] = value
+        value_bytes = str(value).encode()
+        local_env[f"{var_type}_{key.upper()}"] = base64.b64encode(value_bytes).decode()
+    else:
+        local_env[f"{var_type}_{key.upper()}"] = str(value)
 
 
 def _execute_hook_script(
@@ -412,7 +416,7 @@ def _execute_hook_script(
         command (str): The command to execute.
         working_dir (str): The working directory of the Terraform definition.
         local_env (Dict[str, str]): The environment variables.
-        debug (bool): If True, debug information will be printed.
+        debug (bool): If True, debug information will be printed. Defaults to False.
 
     Raises:
         HookError: If the hook script execution fails.
@@ -432,10 +436,12 @@ def _execute_hook_script(
         log.debug(f"Results from hook script: {hook_script}")
         log.debug(f"exit code: {exit_code}")
         if not stream_output:
-            for line in stdout.decode().splitlines():
-                log.debug(f"stdout: {line}")
-            for line in stderr.decode().splitlines():
-                log.debug(f"stderr: {line}")
+            if stdout:
+                for line in stdout.decode().splitlines():
+                    log.debug(f"stdout: {line}")
+            if stderr:
+                for line in stderr.decode().splitlines():
+                    log.debug(f"stderr: {line}")
 
     if exit_code != 0:
         raise HookError(
@@ -468,13 +474,15 @@ def _get_state_item_from_remote(
         HookError: If the state item cannot be found or read.
     """
     cache_file = _make_state_cache(working_dir, env, terraform_bin, state, backend)
+    if not cache_file:
+        raise HookError("could not make state cache")
     state_cache = _read_state_cache(cache_file)
     remote_state = _find_remote_state(state_cache, state)
 
     return _get_item_from_remote_state(remote_state, state, item)
 
 
-def _get_state_cache_name(working_dir: str, state: str | None = None) -> str:
+def _get_state_cache_name(working_dir: str, state: Optional[str] = None) -> str:
     """
     Get the name of the state cache file.
 
@@ -497,7 +505,7 @@ def _make_state_cache(
     state: str,
     backend: "BaseBackend",
     refresh: bool = False,
-) -> str:
+) -> Optional[str]:
     """
     Create a cache of the terraform state file.
 
@@ -532,6 +540,7 @@ def _make_state_cache(
             return state_cache
         except NotImplementedError:
             raise HookError("all methods to make the state cache failed")
+    return None
 
 
 def _read_state_cache(cache_file: str) -> Dict[str, Any]:
@@ -628,7 +637,9 @@ def _run_terraform_refresh(
         env=env,
     )
     if exit_code != 0:
-        raise HookError(f"Error refreshing terraform state, details: {stderr}")
+        raise HookError(
+            f"Error refreshing terraform state, details: {stderr.decode() if stderr else ''}"
+        )
 
 
 def _run_terraform_show(
@@ -654,7 +665,11 @@ def _run_terraform_show(
         env=env,
     )
     if exit_code != 0:
-        raise HookError(f"Error reading terraform state, details: {stderr}")
+        raise HookError(
+            f"Error reading terraform state, details: {stderr.decode() if stderr else ''}"
+        )
+    if not stdout:
+        raise HookError("Error reading terraform state; output is empty")
     try:
         json.loads(stdout)
     except json.JSONDecodeError:
@@ -662,7 +677,9 @@ def _run_terraform_show(
     return stdout.decode()
 
 
-def _write_state_cache(state_cache: str, state_json: str) -> None:
+def _write_state_cache(
+    state_cache: str, state_json: str
+) -> None:
     """
     Write the state JSON to the cache file.
 

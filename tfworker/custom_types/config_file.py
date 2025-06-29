@@ -13,14 +13,14 @@ class GlobalVars(FreezableBaseModel):
     model_config = ConfigDict(extra="forbid")
 
     terraform_vars: Dict[str, str | bool | list | dict] = Field(
-        {}, description="Variables to pass to terraform via a generated .tfvars file."
+        default_factory=dict, description="Variables to pass to terraform via a generated .tfvars file."
     )
     remote_vars: Dict[str, Tuple[str | bool | list | dict]] = Field(
-        {},
+        default_factory=dict,
         description="Variables which are used to generate local references to remote state vars.",
     )
     template_vars: Dict[str, str | bool | list | dict] = Field(
-        {}, description="Variables which are suppled to any jinja templates."
+        default_factory=dict, description="Variables which are suppled to any jinja templates."
     )
 
 
@@ -32,17 +32,17 @@ class ConfigFile(FreezableBaseModel):
     model_config = ConfigDict(extra="forbid")
 
     definitions: Dict[str, Any] = Field(
-        {}, description="The definition configurations."
+        default_factory=dict, description="The definition configurations."
     )
     global_vars: Optional[GlobalVars] = Field(
         default_factory=GlobalVars,
         description="Global variables that are used in the configuration file.",
     )
-    providers: Dict[str, Any] = Field({}, description="The provider configurations.")
+    providers: Dict[str, Any] = Field(default_factory=dict, description="The provider configurations.")
     worker_options: Dict[str, str | bool] = Field(
-        {}, description="The base worker options, overlaps with command line options"
+        default_factory=dict, description="The base worker options, overlaps with command line options"
     )
-    handlers: Dict[str, Any] = Field({}, description="The handler configurations.")
+    handlers: Dict[str, Any] = Field(default_factory=dict, description="The handler configurations.")
 
     def freeze(self):
         super().freeze()

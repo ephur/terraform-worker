@@ -1,8 +1,8 @@
 import shlex
-from typing import Dict
+from typing import Dict, Type
 
-import boto3
-from botocore.credentials import Credentials
+import boto3 # type: ignore
+from botocore.credentials import Credentials # type: ignore
 from pydantic import model_validator
 
 import tfworker.util.log as log
@@ -99,7 +99,7 @@ class AWSAuthenticator(BaseAuthenticator):
     """
 
     tag: str = "aws"
-    config_model: BaseAuthenticatorConfig = AWSAuthenticatorConfig
+    config_model: Type[AWSAuthenticatorConfig]
 
     def __init__(self, auth_config: AWSAuthenticatorConfig) -> None:
         """

@@ -1,6 +1,6 @@
 import threading
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Dict, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
 import tfworker.util.log as log
 from tfworker.exceptions import FrozenInstanceError, HandlerError, UnknownHandler
@@ -34,7 +34,7 @@ class HandlersCollection(Mapping):
         """
         if not hasattr(self, "_initialized"):
             self._handlers = dict()
-            self._results = []
+            self._results: List[Any] = []
             if handlers:
                 for k, v in handlers.items():
                     log.trace(f"Adding handler {k} to handlers collection")

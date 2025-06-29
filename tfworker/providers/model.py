@@ -1,5 +1,9 @@
 from typing import Any, Dict, Optional
 
+from packaging.specifiers import SpecifierSet
+
+from packaging.specifiers import SpecifierSet
+
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from tfworker.constants import (
@@ -15,7 +19,7 @@ class ProviderRequirements(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    version: str
+    version: SpecifierSet
     source: Optional[str] = None
 
 
@@ -96,7 +100,7 @@ class ProviderGID(BaseModel):
 
 
 class Provider(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_arbitrary_types=True)
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     gid: ProviderGID

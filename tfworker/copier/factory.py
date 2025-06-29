@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Callable, Type
+from typing import Callable, Dict, Optional, Type
 
 
 class CopyFactory:
     """The factory class for creating copiers"""
 
-    registry = {}
+    registry: Dict[str, Type["Copier"]] = {}
 
     @classmethod
     def register(cls, name: str) -> Callable[[Type["Copier"]], Type["Copier"]]:
@@ -57,7 +57,7 @@ class CopyFactory:
 class Copier(ABC):
     """The base class for definition copiers"""
 
-    _register_name: str = None
+    _register_name: Optional[str] = None
 
     def __init__(self, source: str, **kwargs):
         self._source = source
@@ -113,8 +113,10 @@ class Copier(ABC):
             raise ValueError("no destination provided")
         if "destination" in kwargs:
             d = kwargs["destination"]
-        else:
+        elif hasattr(self, "_destination"):
             d = self._destination
+        else:
+            raise ValueError("no destination provided")
 
         if make_dir:
             make_d = Path(d)

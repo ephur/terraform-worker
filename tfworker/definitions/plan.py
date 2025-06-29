@@ -37,15 +37,16 @@ class DefinitionPlan:
             str: The absolute path to the plan file
         """
         if self._app_state.terraform_options.plan_file_path:
-            plan_base: str = Path(
+            plan_base: Path = Path(
                 f"{self._app_state.terraform_options.plan_file_path}/{self._app_state.deployment}"
             ).resolve()
         else:
-            plan_base: str = Path(f"{self._app_state.working_dir}/plans").resolve()
+            plan_base: Path = Path(f"{self._app_state.working_dir}/plans").resolve()
 
         plan_base.mkdir(parents=True, exist_ok=True)
         plan_file: Path = plan_base / f"{definition.name}.tfplan"
-        definition.plan_file = plan_file.resolve()
+        definition.plan_file = str(plan_file.resolve())
+        return str(definition.plan_file)
 
     def needs_plan(self, definition: "Definition") -> Tuple[bool, str]:
         """

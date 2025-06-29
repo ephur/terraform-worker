@@ -2,7 +2,7 @@ import json
 import os
 import pathlib
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import hcl2
 from lark.exceptions import UnexpectedToken
@@ -22,18 +22,18 @@ if TYPE_CHECKING:
     )
 
 
-def _not_in_cache(gid: "ProviderGID", version: str, cache_dir: str) -> bool:
+def _not_in_cache(gid: "ProviderGID", version: str, cache_dir: pathlib.Path) -> bool:
     """
     Check if the provider is not in the cache directory.
 
     Args:
         provider (str): The provider to check.
-        cache_dir (str): The cache directory.
+        cache_dir (pathlib.Path): The cache directory.
 
     Returns:
         bool: True if the provider is not in the cache directory.
     """
-    provider_dir = pathlib.Path(cache_dir) / gid.hostname / gid.namespace / gid.type
+    provider_dir = pathlib.Path(cache_dir) / (gid.hostname or "") / (gid.namespace or "") / gid.type
     platform = get_platform()
     if not provider_dir.exists():
         return True
@@ -49,13 +49,13 @@ def _not_in_cache(gid: "ProviderGID", version: str, cache_dir: str) -> bool:
     return False
 
 
-def _get_cached_hash(gid: "ProviderGID", version: str, cache_dir: str) -> str:
+def _get_cached_hash(gid: "ProviderGID", version: str, cache_dir: pathlib.Path) -> str:
     """
     Get the hash of the cached provider.
 
     Args:
         provider (str): The provider to get the hash for.
-        cache_dir (str): The cache directory.
+        cache_dir (pathlib.Path): The cache directory.
 
     Returns:
         str: The hash of the cached provider.
@@ -123,23 +123,23 @@ def _create_mirror_configuration(
     return "\n".join(tf_string)
 
 
-def _get_provider_cache_dir(gid: "ProviderGID", cache_dir: str) -> str:
+def _get_provider_cache_dir(gid: "ProviderGID", cache_dir: pathlib.Path) -> pathlib.Path:
     """
     Get the cache directory for a provider.
 
     Args:
         gid (ProviderGID): The provider GID.
-        cache_dir (str): The cache directory.
+        cache_dir (pathlib.Path): The cache directory.
 
     Returns:
-        str: The cache directory for the provider.
+        pathlib.Path: The cache directory for the provider.
     """
-    return pathlib.Path(cache_dir) / gid.hostname / gid.namespace / gid.type
+    return pathlib.Path(cache_dir) / (gid.hostname or "") / (gid.namespace or "") / gid.type
 
 
 def _find_required_providers(
     search_dir: str,
-) -> Dict[str, Dict[str, "ProviderRequirements"]]:
+) -> Dict[str, "ProviderRequirements"]:
     """
     Find all of the specified required providers in the search directory.
 
@@ -147,9 +147,9 @@ def _find_required_providers(
         search_dir (str): The directory to search for required providers.
 
     Returns:
-        Dict[str, Dict[str, ProviderRequirements]]: A dictionary of required providers.
+        Dict[str, ProviderRequirements]: A dictionary of required providers.
     """
-    providers = {}
+    providers: Dict[str, "ProviderRequirements"] = {}
     for root, _, files in os.walk(search_dir, followlinks=True):
         for file in files:
             if file.endswith(".tf"):
@@ -179,12 +179,12 @@ def _parse_required_providers(content: dict) -> Dict[str, "ProviderRequirements"
         content (dict): The content to parse.
 
     Returns:
-        Dict[str, Dict[str, str]]: The required providers.
+        Dict[str, ProviderRequirements]: The required providers.
     """
     if "terraform" not in content:
         return {}
 
-    providers = {}
+    providers: Dict[str, "ProviderRequirements"] = {}
     terraform_blocks = content["terraform"]
 
     for block in terraform_blocks:
@@ -195,32 +195,33 @@ def _parse_required_providers(content: dict) -> Dict[str, "ProviderRequirements"
     return providers
 
 
-def _update_parsed_providers(providers: dict, parsed_providers: dict):
+def _update_parsed_providers(providers: Dict[str, "ProviderRequirements"], parsed_providers: Dict[str, Any]):
     """
     Update the providers with the parsed providers.
 
     Args:
-        providers (dict): The providers to update.
-        parsed_providers (dict): The parsed providers to update with.
+        providers (Dict[str, ProviderRequirements]): The providers to update.
+        parsed_providers (Dict[str, Any]): The parsed providers to update with.
 
     Raises:
         TFWorkerException: If there are conflicting sources for the same provider.
     """
     for k, v in parsed_providers.items():
         if k not in providers:
-            new_provider = {
-                "source": v.get("source", ""),
-                "version": _get_specifier_set(v.get("version", "")),
-            }
+            new_provider = ProviderRequirements(
+                source=v.get("source", ""),
+                version=_get_specifier_set(v.get("version", "")) # Convert SpecifierSet to string
+            )
             providers[k] = new_provider
             continue
-        if v.get("source") is not None and providers[k].get("source") is not None:
-            if v["source"] != providers[k]["source"]:
+        if v.get("source") is not None and providers[k].source is not None:
+            if v["source"] != providers[k].source:
                 raise TFWorkerException(
-                    f"provider {k} has conflicting sources: {v['source']} and {providers[k]['source']}"
+                    f"provider {k} has conflicting sources: {v["source"]} and {providers[k].source}"
                 )
         if v.get("version") is not None:
-            providers[k]["version"] = providers[k]["version"] & _get_specifier_set(
+            # Ensure providers[k].version is a SpecifierSet before performing intersection
+            providers[k].version = providers[k].version & _get_specifier_set(
                 v["version"]
             )
     return providers

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Type
 
 from pydantic import BaseModel
 
@@ -17,7 +18,7 @@ class BaseAuthenticator(ABC):
     """
 
     tag: str
-    config_model: BaseAuthenticatorConfig
+    config_model: Type[BaseAuthenticatorConfig]
 
     @abstractmethod
     def __init__(self, auth_config: BaseAuthenticatorConfig): ...  # noqa

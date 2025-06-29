@@ -188,7 +188,7 @@ def get_provider_gid_from_source(source: str) -> ProviderGID:
 # @lru_cache
 def find_required_providers(
     search_dir: str,
-) -> Union[None, Dict[str, List[Dict[str, str]]]]:
+) -> Dict[str, "ProviderRequirements"]:
     """
     Find all the required providers in the search directory.
 

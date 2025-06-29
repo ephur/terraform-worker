@@ -32,7 +32,7 @@ def handle_option_error(e: ValidationError) -> None:
         error_message.append(str(e))
 
     # use .format to work around python f-string limitation of not being able to use \n
-    # log.msg(f"{'\\n  '.join(error_message)}", log.LogLevel.ERROR)
+    # log.msg(f"{\'\\n  \'.join(error_message)}", log.LogLevel.ERROR)
     log.error("{}".format("\n  ".join(error_message)))
     click.get_current_context().exit(1)
 
@@ -67,7 +67,9 @@ def handle_config_error(e: ValidationError) -> None:
     click.get_current_context().exit(1)
 
 
-def pydantic_to_click(pydantic_model: t.Type[BaseModel]) -> click.Command:
+def pydantic_to_click(
+    pydantic_model: t.Type[BaseModel],
+) -> t.Callable[..., t.Any]:
     """Convert a Pydantic model to a Click command.
 
     There are some limitations on types that are supported, custom validation
