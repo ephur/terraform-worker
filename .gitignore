@@ -13,3 +13,6 @@ registry.terraform.io/
 coverage.xml
 reports/*
 plans*
+
+# go tool related build files
+tfworker-hcl2json

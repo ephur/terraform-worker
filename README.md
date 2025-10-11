@@ -221,4 +221,35 @@ To build HTML documentation:
 % make clean && make html
 ```
 
+### Optional: Native HCL (Go) Parser
+
+For improved compatibility with HCL2/Terraform syntax, tfworker can use a small Go helper that leverages HashiCorp's native HCL parser.
+
+- Build the helper (requires Go 1.20+):
+  - `go build -o tfworker-hcl2json ./tools/hcl2json`
+  - Put `tfworker-hcl2json` on your PATH or set `TFWORKER_HCL_BIN` to its full path.
+
+- Engine selection:
+  - Default (auto): If the helper is found via `TFWORKER_HCL_BIN` or your `PATH`, tfworker uses the Go parser; otherwise it uses `python-hcl2`.
+  - Forced: Set `TFWORKER_HCL_ENGINE=go` or `TFWORKER_HCL_ENGINE=python` to force a specific engine. If set to `go` but the helper is missing, tfworker errors out.
+
+- Batch parsing: tfworker batches `.tf` files when discovering required providers and sends them to the Go helper in one process (`--multi`), improving performance on large repos. Python fallback parses files individually.
+
+### Go Development
+
+For the small Go helper in `tools/hcl2json/`:
+
+- Commit module files: Always commit both `go.mod` and `go.sum`.
+- First-time setup: If `go.sum` is missing, run:
+  - `(cd tools/hcl2json && go mod tidy)`
+  - Commit the generated `go.sum`.
+- Make targets:
+  - `make go-build` builds the helper into `./tfworker-hcl2json`.
+  - `make go-test` runs `go test` under `tools/hcl2json`.
+  - If Go isn’t installed or `go.sum` is missing, the Makefile prints guidance and skips Go steps.
+- One system Go: Use a single up-to-date Go (1.22+) on your machine.
+- Optional vendoring (air-gapped builds):
+  - `cd tools/hcl2json && go mod vendor`
+  - Build with `-mod=vendor` if needed; otherwise vendoring is not required.
+
 The documentation can be viewed locally by open `./docs/build/index.html` in a browser.

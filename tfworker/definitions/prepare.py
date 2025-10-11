@@ -1,6 +1,6 @@
 import json
 from os import environ
-from typing import TYPE_CHECKING, Dict, Union
+from typing import TYPE_CHECKING, Dict, List, Union
 
 import jinja2
 
@@ -38,6 +38,7 @@ class DefinitionPrepare:
 
     def __init__(self, app_state: "AppState"):
         self._app_state: "AppState" = app_state
+        self._used_providers_cache: Dict[tuple[str, str], Union[List[str], None]] = {}
 
     def copy_files(self, name: str) -> None:
         """
@@ -102,8 +103,9 @@ class DefinitionPrepare:
         """Create remote data sources, and required providers"""
         log.trace(f"creating remote data sources for definition {name}")
         remotes = self._get_remotes(name)
-        provider_content = self._get_provider_content(name)
-        self._write_worker_tf(name, remotes, provider_content)
+        provider_names = self._get_used_providers(name)
+        provider_content = self._get_provider_content(name, provider_names)
+        self._write_worker_tf(name, remotes, provider_content, provider_names)
 
     def create_terraform_vars(self, name: str) -> None:
         """Create the variable definitions"""
@@ -133,9 +135,7 @@ class DefinitionPrepare:
         log.trace(f"creating terraform lockfile for definition {name}")
         result = generate_terraform_lockfile(
             providers=self._app_state.providers,
-            included_providers=definition.get_used_providers(
-                self._app_state.working_dir
-            ),
+            included_providers=self._get_used_providers(name),
             cache_dir=self._app_state.terraform_options.provider_cache,
         )
 
@@ -167,11 +167,10 @@ class DefinitionPrepare:
                 f"could not download modules for definition {name}: {strip_ansi(result.stderr.decode())}"
             )
 
-    def _get_provider_content(self, name: str) -> str:
+    def _get_provider_content(
+        self, _name: str, provider_names: Union[List[str], None]
+    ) -> str:
         """Get the provider content"""
-        definition = self._app_state.definitions[name]
-        provider_names = definition.get_used_providers(self._app_state.working_dir)
-
         if provider_names is not None:
             return ""
         return self._app_state.providers.required_hcl(provider_names)
@@ -195,7 +194,13 @@ class DefinitionPrepare:
             log.trace(f"using remotes {remotes} for definition {name}")
         return remotes
 
-    def _write_worker_tf(self, name: str, remotes: list, provider_content: str) -> None:
+    def _write_worker_tf(
+        self,
+        name: str,
+        remotes: list,
+        provider_content: str,
+        provider_names: Union[List[str], None],
+    ) -> None:
         """Write the worker.tf file"""
         definition = self._app_state.definitions[name]
 
@@ -205,7 +210,7 @@ class DefinitionPrepare:
         ) as tffile:
             # Write out the provider configurations for each provider
             tffile.write(
-                f"{self._app_state.providers.provider_hcl(includes=definition.get_used_providers(self._app_state.working_dir))}\n\n"
+                f"{self._app_state.providers.provider_hcl(includes=provider_names)}\n\n"
             )
             tffile.write(
                 TERRAFORM_TPL.format(
@@ -216,6 +221,16 @@ class DefinitionPrepare:
                 )
             )
             tffile.write(self._app_state.backend.data_hcl(remotes))
+
+    def _get_used_providers(self, name: str) -> Union[List[str], None]:
+        """Return cached list of providers used by a definition"""
+        cache_key = (name, self._app_state.working_dir)
+        if cache_key not in self._used_providers_cache:
+            definition = self._app_state.definitions[name]
+            self._used_providers_cache[cache_key] = definition.get_used_providers(
+                self._app_state.working_dir
+            )
+        return self._used_providers_cache[cache_key]
 
     def _get_template_vars(self, name: str) -> Dict[str, str]:
         """

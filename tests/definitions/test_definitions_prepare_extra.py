@@ -137,12 +137,14 @@ def test_create_local_vars(mocker, def_prepare, definition):
 
 def test_create_worker_tf_calls_helpers(mocker, def_prepare):
     m1 = mocker.patch.object(def_prepare, "_get_remotes", return_value=["r"])
-    m2 = mocker.patch.object(def_prepare, "_get_provider_content", return_value="PCONT")
-    m3 = mocker.patch.object(def_prepare, "_write_worker_tf")
+    m2 = mocker.patch.object(def_prepare, "_get_used_providers", return_value=["p"])
+    m3 = mocker.patch.object(def_prepare, "_get_provider_content", return_value="PCONT")
+    m4 = mocker.patch.object(def_prepare, "_write_worker_tf")
     def_prepare.create_worker_tf("def1")
     m1.assert_called_once_with("def1")
     m2.assert_called_once_with("def1")
-    m3.assert_called_once_with("def1", ["r"], "PCONT")
+    m3.assert_called_once_with("def1", ["p"])
+    m4.assert_called_once_with("def1", ["r"], "PCONT", ["p"])
 
 
 def test_create_terraform_vars(mocker, def_prepare, definition):
@@ -222,14 +224,21 @@ def test_download_modules_failure(mocker, def_prepare, definition):
         def_prepare.download_modules("def1")
 
 
-def test_get_provider_content(def_prepare, mocker, definition):
-    mocker.patch.object(Definition, "get_used_providers", return_value=None)
+def test_get_provider_content(def_prepare):
     def_prepare._app_state.providers.required_hcl.return_value = "REQ"
-    assert def_prepare._get_provider_content("def1") == "REQ"
+    assert def_prepare._get_provider_content("def1", None) == "REQ"
     def_prepare._app_state.providers.required_hcl.assert_called_once_with(None)
 
-    mocker.patch.object(Definition, "get_used_providers", return_value=["p"])
-    assert def_prepare._get_provider_content("def1") == ""
+    assert def_prepare._get_provider_content("def1", ["p"]) == ""
+
+
+def test_get_used_providers_caches(def_prepare, mocker):
+    mock_method = mocker.patch.object(
+        Definition, "get_used_providers", side_effect=[["p"], ["other"]]
+    )
+    assert def_prepare._get_used_providers("def1") == ["p"]
+    assert def_prepare._get_used_providers("def1") == ["p"]
+    assert mock_method.call_count == 1
 
 
 def test_get_remotes(def_prepare, mocker, definition):
@@ -271,8 +280,7 @@ def test_write_worker_tf(def_prepare, definition, mocker):
     def_prepare._app_state.providers.provider_hcl.return_value = "PROV"
     def_prepare._app_state.backend.hcl.return_value = "BACKEND"
     def_prepare._app_state.backend.data_hcl.return_value = "DATA"
-    mocker.patch.object(Definition, "get_used_providers", return_value=["p1"])
-    def_prepare._write_worker_tf("def1", ["r"], "REQ")
+    def_prepare._write_worker_tf("def1", ["r"], "REQ", ["p1"])
     tf_path = (
         Path(definition.get_target_path(def_prepare._app_state.working_dir))
         / WORKER_TF_FILENAME

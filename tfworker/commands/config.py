@@ -6,7 +6,6 @@ import pathlib
 from typing import Any, Dict, List, Type, Union
 
 import click
-import hcl2
 import jinja2
 import yaml
 from jinja2.runtime import StrictUndefined
@@ -17,6 +16,7 @@ import tfworker.util.log as log
 from tfworker.app_state import AppState
 from tfworker.custom_types.config_file import ConfigFile
 from tfworker.util.cli import handle_config_error
+from tfworker.util.hcl_parser import parse_string as parse_hcl_string
 
 from .. import cli_options
 
@@ -39,7 +39,7 @@ def load_config(
         log.safe_trace(f"rendered config: {rendered}")
 
         if cf.endswith(".hcl"):
-            loaded: Dict[str, Any] = hcl2.loads(rendered)["terraform"]
+            loaded: Dict[str, Any] = parse_hcl_string(rendered)["terraform"]
         else:
             loaded = yaml.safe_load(rendered)["terraform"]
 
