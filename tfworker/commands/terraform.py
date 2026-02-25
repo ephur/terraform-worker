@@ -81,7 +81,10 @@ class TerraformCommand(BaseCommand):
         all_definition_names = list(self.app_state.definitions.keys())
 
         # If planning is enabled, all definitions need init (for plan generation)
-        if self.app_state.terraform_options.plan:
+        if (
+            self.app_state.terraform_options.plan
+            or self.app_state.terraform_options.plan_destroy
+        ):
             return all_definition_names
 
         # If NOT in apply mode, all definitions need init
@@ -215,8 +218,11 @@ class TerraformCommand(BaseCommand):
                     for name in self.app_state.definitions.keys():
                         self.app_state.definitions[name].needs_apply = True
 
-        # if --no-plan is specified, skip the plan regardless
-        if not self.app_state.terraform_options.plan:
+        # if --no-plan and --no-plan-destroy are specified, skip the plan regardless
+        if (
+            not self.app_state.terraform_options.plan
+            and not self.app_state.terraform_options.plan_destroy
+        ):
             log.debug("--no-plan option specified; skipping plan execution")
             return
 
@@ -239,6 +245,7 @@ class TerraformCommand(BaseCommand):
 
     def terraform_apply_or_destroy(self) -> None:
         log.trace("entering terraform apply or destroy")
+
         if self.app_state.terraform_options.destroy:
             action: TerraformAction = TerraformAction.DESTROY
         elif self.app_state.terraform_options.apply:
@@ -265,7 +272,7 @@ class TerraformCommand(BaseCommand):
                         f"plan file does not exist for definition: {name}; skipping apply"
                     )
                     continue
-                log.info(f"running apply for definition: {name}")
+                log.info(f"running {action} for definition: {name}")
                 self._exec_terraform_action(name=name, action=action)
 
     def _handle_parallel_init_results(self, init_futures, show_output: bool) -> None:
@@ -530,9 +537,6 @@ class TerraformCommand(BaseCommand):
         """
         run terraform
         """
-        log.debug(
-            f"handling terraform command: {action} for definition {definition_name}"
-        )
         definition: Definition = self.app_state.definitions[definition_name]
         stream_output: bool = self.terraform_config.stream_output
         params: str = self.terraform_config.get_params(
@@ -543,8 +547,15 @@ class TerraformCommand(BaseCommand):
             self.app_state.root_options.working_dir
         )
 
+        # For DESTROY action, use "apply" command since terraform requires
+        # "terraform apply planfile" for both regular and destroy plans
+        terraform_command = "apply" if action == TerraformAction.DESTROY else action
+
+        log.debug(
+            f"handling terraform {action} action for definition {definition_name}"
+        )
         log.info(
-            f"running cmd: {self.app_state.terraform_options.terraform_bin} {action} {params}"
+            f"running cmd: {self.app_state.terraform_options.terraform_bin} {terraform_command} {params}"
         )
 
         if definition.squelch_apply_output and action == TerraformAction.APPLY:
@@ -560,7 +571,7 @@ class TerraformCommand(BaseCommand):
 
         result: TerraformResult = TerraformResult(
             *pipe_exec(
-                f"{self.app_state.terraform_options.terraform_bin} {action} {params}",
+                f"{self.app_state.terraform_options.terraform_bin} {terraform_command} {params}",
                 cwd=working_dir,
                 env=self.terraform_config.env,
                 stream_output=stream_output,
@@ -717,7 +728,10 @@ class TerraformCommandConfig:
 
     @property
     def action(self):
-        if self._app_state.terraform_options.destroy:
+        if (
+            self._app_state.terraform_options.destroy
+            or self._app_state.terraform_options.plan_destroy
+        ):
             return TerraformAction.DESTROY
         return TerraformAction.APPLY
 
@@ -759,7 +773,7 @@ class TerraformCommandConfig:
             TerraformAction.INIT: f"-input=false {color_str} {read_only} -plugin-dir={self._app_state.terraform_options.provider_cache}",
             TerraformAction.PLAN: f"-input=false {color_str} {plan_action} -detailed-exitcode -out {plan_file}{target_args}",
             TerraformAction.APPLY: f"-input=false {color_str} -auto-approve {plan_file}",
-            TerraformAction.DESTROY: f"-input=false {color_str} -auto-approve",
+            TerraformAction.DESTROY: f"-input=false {color_str} -auto-approve {plan_file}",
         }[command]
 
     def _get_env(self) -> Dict[str, str]:
