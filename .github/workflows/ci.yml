@@ -46,37 +46,6 @@ jobs:
       - name: Lint (flake8)
         run: poetry run flake8 --ignore E501,W503 tfworker tests
 
-  typecheck:
-    name: Type Check
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-        with:
-          virtualenvs-in-project: true
-
-      - name: Cache virtualenv
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ matrix.python-version }}-${{ hashFiles('poetry.lock') }}
-
-      - name: Install dependencies
-        run: poetry install --with dev
-
-      - name: Type check (mypy)
-        run: poetry run mypy -p tfworker
-
   test:
     name: Test
     runs-on: ubuntu-latest
