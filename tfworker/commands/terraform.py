@@ -321,10 +321,13 @@ class TerraformCommand(BaseCommand):
             def_prep.render_templates(name=name)
             def_prep.create_local_vars(name=name)
             def_prep.create_terraform_vars(name=name)
-            def_prep.create_worker_tf(name=name)
+            initial_providers = def_prep.create_worker_tf(name=name)
             def_prep.download_modules(
                 name=name,
                 stream_output=False,  # Disable streaming for parallel execution
+            )
+            def_prep.create_extra_providers_tf(
+                name=name, initial_providers=initial_providers
             )
             def_prep.create_terraform_lockfile(name=name)
         except TFWorkerException as e:

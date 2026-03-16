@@ -10,6 +10,7 @@ from tfworker.constants import (
     RESERVED_FILES,
     TF_PROVIDER_DEFAULT_LOCKFILE,
     WORKER_LOCALS_FILENAME,
+    WORKER_PROVIDERS_FILENAME,
     WORKER_TF_FILENAME,
     WORKER_TFVARS_FILENAME,
 )
@@ -222,14 +223,43 @@ def test_download_modules_failure(mocker, def_prepare, definition):
         def_prepare.download_modules("def1")
 
 
-def test_get_provider_content(def_prepare, mocker, definition):
+def test_get_provider_content_no_detected_providers(def_prepare, mocker):
+    """When module has no required_providers, write all configured providers."""
     mocker.patch.object(Definition, "get_used_providers", return_value=None)
     def_prepare._app_state.providers.required_hcl.return_value = "REQ"
     assert def_prepare._get_provider_content("def1") == "REQ"
     def_prepare._app_state.providers.required_hcl.assert_called_once_with(None)
 
-    mocker.patch.object(Definition, "get_used_providers", return_value=["p"])
+
+def test_get_provider_content_any_detected_returns_empty(def_prepare, mocker):
+    """When any required_providers exist in source files, write nothing.
+
+    Terraform errors with 'a module may only have one required providers
+    configuration' — if the module declares any providers itself we must not
+    emit a required_providers block at all.
+    """
+    mocker.patch.object(
+        Definition, "get_used_providers", return_value=["aws", "datadog"]
+    )
     assert def_prepare._get_provider_content("def1") == ""
+    def_prepare._app_state.providers.required_hcl.assert_not_called()
+
+
+def test_get_provider_content_partial_detection_also_returns_empty(def_prepare, mocker):
+    """Even when only some configured providers are declared, still write nothing.
+
+    With a real ProvidersCollection containing both 'aws' and 'datadog', detecting
+    only 'aws' must still suppress all required_providers output — writing the
+    remaining providers would trigger Terraform's 'only one required providers
+    configuration' error.
+    """
+    mocker.patch.object(Definition, "get_used_providers", return_value=["aws"])
+    # Simulate a real collection that has more providers than were detected
+    def_prepare._app_state.providers.__iter__ = MagicMock(
+        return_value=iter(["aws", "datadog"])
+    )
+    assert def_prepare._get_provider_content("def1") == ""
+    def_prepare._app_state.providers.required_hcl.assert_not_called()
 
 
 def test_get_remotes(def_prepare, mocker, definition):
@@ -292,3 +322,75 @@ def test_get_template_vars(mocker, def_prepare, definition, monkeypatch):
     assert result["var"]["foo"] == "bar"
     assert result["var"]["baz"] == "qux"
     assert result["env"]["EXAMPLE"] == "value"
+
+
+def test_create_worker_tf_returns_initial_providers(mocker, def_prepare):
+    mocker.patch.object(def_prepare, "_get_remotes", return_value=[])
+    mocker.patch.object(def_prepare, "_get_provider_content", return_value="")
+    mocker.patch.object(def_prepare, "_write_worker_tf")
+    mocker.patch.object(Definition, "get_used_providers", return_value=["aws"])
+    result = def_prepare.create_worker_tf("def1")
+    assert result == ["aws"]
+
+
+def test_create_worker_tf_returns_empty_list_when_no_providers(mocker, def_prepare):
+    mocker.patch.object(def_prepare, "_get_remotes", return_value=[])
+    mocker.patch.object(def_prepare, "_get_provider_content", return_value="")
+    mocker.patch.object(def_prepare, "_write_worker_tf")
+    mocker.patch.object(Definition, "get_used_providers", return_value=None)
+    result = def_prepare.create_worker_tf("def1")
+    assert result == []
+
+
+def test_create_extra_providers_tf_no_delta(mocker, def_prepare, definition):
+    """When no new providers are found after downloading modules, no file is written."""
+    mocker.patch.object(Definition, "get_used_providers", return_value=["aws"])
+    def_prepare.create_extra_providers_tf("def1", initial_providers=["aws"])
+    providers_path = (
+        Path(definition.get_target_path(def_prepare._app_state.working_dir))
+        / WORKER_PROVIDERS_FILENAME
+    )
+    assert not providers_path.exists()
+
+
+def test_create_extra_providers_tf_no_providers_after_modules(
+    mocker, def_prepare, definition
+):
+    """When full scan returns None (no required_providers anywhere), no file is written."""
+    mocker.patch.object(Definition, "get_used_providers", return_value=None)
+    def_prepare.create_extra_providers_tf("def1", initial_providers=["aws"])
+    providers_path = (
+        Path(definition.get_target_path(def_prepare._app_state.working_dir))
+        / WORKER_PROVIDERS_FILENAME
+    )
+    assert not providers_path.exists()
+
+
+def test_create_extra_providers_tf_writes_delta(mocker, def_prepare, definition):
+    """Providers found in submodules get provider blocks but no required_providers stanza.
+
+    Submodule files already declare required_providers for these providers; writing
+    a second declaration in the root module would cause a duplicate provider error.
+    """
+    mocker.patch.object(
+        Definition, "get_used_providers", return_value=["aws", "datadog"]
+    )
+    def_prepare._app_state.providers.provider_hcl.return_value = 'provider "datadog" {}'
+
+    def_prepare.create_extra_providers_tf("def1", initial_providers=["aws"])
+
+    providers_path = (
+        Path(definition.get_target_path(def_prepare._app_state.working_dir))
+        / WORKER_PROVIDERS_FILENAME
+    )
+    assert providers_path.exists()
+    content = providers_path.read_text()
+    assert 'provider "datadog"' in content
+    # required_providers must NOT be written — submodule files already declare it
+    assert "required_providers" not in content
+    assert "terraform {" not in content
+    # Only delta providers passed to provider_hcl; required_hcl never called
+    def_prepare._app_state.providers.provider_hcl.assert_called_once_with(
+        includes=["datadog"]
+    )
+    def_prepare._app_state.providers.required_hcl.assert_not_called()

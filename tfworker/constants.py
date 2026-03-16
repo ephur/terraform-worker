@@ -16,10 +16,12 @@ TF_PROVIDER_DEFAULT_LOCKFILE = ".terraform.lock.hcl"
 REDACTED_ITEMS = ["aws_secret_access_key", "aws_session_token"]
 
 WORKER_LOCALS_FILENAME = "worker_generated_locals.tf"
+WORKER_PROVIDERS_FILENAME = "worker_generated_providers.tf"
 WORKER_TF_FILENAME = "worker_generated_terraform.tf"
 WORKER_TFVARS_FILENAME = "worker_generated.auto.tfvars"
 RESERVED_FILES = [
     WORKER_LOCALS_FILENAME,
+    WORKER_PROVIDERS_FILENAME,
     WORKER_TF_FILENAME,
     WORKER_TFVARS_FILENAME,
 ]

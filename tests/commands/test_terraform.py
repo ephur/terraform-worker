@@ -537,6 +537,30 @@ class TestGetDefinitionsNeedingInit:
         assert result == ["def1", "def2"]
 
 
+class TestPrepareDefinition:
+    def test_extra_providers_called_with_initial_provider_list(self, tmp_path, mocker):
+        """create_extra_providers_tf receives the list returned by create_worker_tf."""
+        cmd = make_command(tmp_path)
+        mock_prep = mocker.MagicMock()
+        mock_prep.create_worker_tf.return_value = ["aws"]
+        cmd._prepare_definition(mock_prep, "def")
+        mock_prep.create_extra_providers_tf.assert_called_once_with(
+            name="def", initial_providers=["aws"]
+        )
+
+    def test_download_modules_runs_before_extra_providers(self, tmp_path, mocker):
+        """download_modules must complete before create_extra_providers_tf is called."""
+        cmd = make_command(tmp_path)
+        mock_prep = mocker.MagicMock()
+        mock_prep.create_worker_tf.return_value = ["aws"]
+        cmd._prepare_definition(mock_prep, "def")
+        calls = [c[0] for c in mock_prep.mock_calls]
+        download_idx = calls.index("download_modules")
+        extra_idx = calls.index("create_extra_providers_tf")
+        lockfile_idx = calls.index("create_terraform_lockfile")
+        assert download_idx < extra_idx < lockfile_idx
+
+
 class TestTerraformResult:
     def test_logging_and_file(self, tmp_path, mocker):
         cmd = make_command(tmp_path)
