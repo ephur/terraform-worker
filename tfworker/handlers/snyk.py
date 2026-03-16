@@ -143,7 +143,7 @@ class SnykHandler(BaseHandler):
         try:
             if self._debug:
                 log.debug(f"cmd: {' '.join(snyk_args)}")
-            (exit_code, stdout, stderr) = pipe_exec(
+            exit_code, stdout, stderr = pipe_exec(
                 f"{' '.join(snyk_args)}",
                 cwd=target_path.parent,
                 stream_output=self._stream_output,

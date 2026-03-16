@@ -73,7 +73,7 @@ class TestUtilSystem:
     def test_pipe_exec(
         self, commands, exit_code, cwd, stdin, stdout, stderr, stream_output
     ):
-        (return_exit_code, return_stdout, return_stderr) = pipe_exec(
+        return_exit_code, return_stdout, return_stderr = pipe_exec(
             commands, cwd=cwd, stdin=stdin, stream_output=stream_output
         )
 
@@ -82,10 +82,10 @@ class TestUtilSystem:
         assert return_stderr.rstrip() in stderr.encode()
 
     def test_strip_ansi(self):
-        assert strip_ansi("\x1B[31mHello\x1B[0m") == "Hello"
-        assert strip_ansi("\x1B[32mWorld\x1B[0m") == "World"
-        assert strip_ansi("\x1B[33mFoo\x1B[0m") == "Foo"
-        assert strip_ansi("\x1B[34mBar\x1B[0m") == "Bar"
+        assert strip_ansi("\x1b[31mHello\x1b[0m") == "Hello"
+        assert strip_ansi("\x1b[32mWorld\x1b[0m") == "World"
+        assert strip_ansi("\x1b[33mFoo\x1b[0m") == "Foo"
+        assert strip_ansi("\x1b[34mBar\x1b[0m") == "Bar"
 
     @pytest.mark.parametrize(
         "opsys, machine, mock_platform_opsys, mock_platform_machine",

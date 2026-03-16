@@ -77,7 +77,7 @@ class GitCopier(Copier):
             git_args = kwargs["git_args"]
 
         try:
-            (return_code, _, _) = pipe_exec(f"{git_cmd} {git_args} ls-remote {source}")
+            return_code, _, _ = pipe_exec(f"{git_cmd} {git_args} ls-remote {source}")
 
         except (PermissionError, FileNotFoundError):
             return False
