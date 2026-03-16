@@ -22,6 +22,8 @@ class DummyAppState:
             self.b64_encode = False
             self.destroy = False
             self.apply = True
+            self.plan = False
+            self.plan_destroy = False
             self.strict_locking = True
             self.target = None
             self.color = False
@@ -37,6 +39,23 @@ class TestTerraformCommandConfig:
         cfg = TerraformCommandConfig(DummyAppState())
         params = cfg.get_params(TerraformAction.APPLY, "plan")
         assert "-auto-approve" in params
+        assert "plan" in params
+
+    def test_get_params_destroy(self):
+        state = DummyAppState()
+        state.terraform_options.destroy = True
+        cfg = TerraformCommandConfig(state)
+        params = cfg.get_params(TerraformAction.DESTROY, "plan.tfplan")
+        assert "-auto-approve" in params
+        assert "plan.tfplan" in params
+
+    def test_get_params_destroy_plan(self):
+        state = DummyAppState()
+        state.terraform_options.destroy = True
+        cfg = TerraformCommandConfig(state)
+        params = cfg.get_params(TerraformAction.PLAN, "plan.tfplan")
+        assert "-destroy" in params
+        assert "plan.tfplan" in params
 
     def test_has_changes(self):
         r = TerraformResult(2, b"", b"")
@@ -84,7 +103,9 @@ def make_command(tmp_path, **opts_overrides):
             self.target = None
             self.color = False
             self.provider_cache = None
-            self.plan = True
+            self.plan = False
+            self.plan_destroy = False
+            self.plan_file_path = None
             self.limit = None
             for k, v in opts_overrides.items():
                 setattr(self, k, v)
@@ -563,7 +584,7 @@ class TestTerraformResult:
         cmd.ctx.exit.assert_called_with(1)
 
     def test_terraform_plan_paths(self, tmp_path, mocker):
-        cmd = make_command(tmp_path)
+        cmd = make_command(tmp_path, plan=True)
         plan_cls = mocker.patch("tfworker.definitions.plan.DefinitionPlan")
         plan_inst = plan_cls.return_value
         plan_inst.needs_plan.return_value = (True, "reason")
@@ -587,7 +608,7 @@ class TestTerraformResult:
         assert cmd.app_state.definitions["def"].needs_apply is True
 
     def test_terraform_plan_always_apply(self, tmp_path, mocker):
-        cmd = make_command(tmp_path)
+        cmd = make_command(tmp_path, plan=True)
         cmd.app_state.definitions["def"].always_apply = True
         plan_cls = mocker.patch("tfworker.definitions.plan.DefinitionPlan")
         plan_inst = plan_cls.return_value

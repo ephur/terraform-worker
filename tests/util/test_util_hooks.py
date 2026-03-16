@@ -9,43 +9,6 @@ from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import HookError
 
 
-# Fixture for a mock Terraform state file
-@pytest.fixture
-def mock_terraform_state():
-    """A mock Terraform state file with a single remote state resource"""
-    return """
-    {
-        "version": 4,
-        "terraform_version": "0.13.5",
-        "serial": 1,
-        "lineage": "8a2b56d2-4e16-48de-9c5b-c640d6b3a52d",
-        "outputs": {},
-        "resources": [
-            {
-                "module": "module.remote_state",
-                "mode": "data",
-                "type": "terraform_remote_state",
-                "name": "example",
-                "provider": "provider[\"registry.terraform.io/hashicorp/terraform\"]",
-                "instances": [
-                    {
-                        "schema_version": 0,
-                        "attributes": {
-                            "backend": "gcs",
-                            "config": {},
-                            "outputs": {
-                                "key": "value",
-                                "another_key": "another_value"
-                            }
-                        }
-                    }
-                ]
-            }
-        ]
-    }
-    """
-
-
 @pytest.fixture
 def mock_terraform_locals():
     """A mock Terraform locals file with two variables"""
@@ -56,76 +19,206 @@ def mock_terraform_locals():
 """
 
 
-# Test for `get_state_item`
+# Test for `get_state_item` - simplified to use only backend.get_state()
 class TestGetStateItem:
-    @mock.patch("tfworker.util.hooks._get_state_item_from_output")
-    @mock.patch("tfworker.util.hooks._get_state_item_from_remote")
-    def test_get_state_item_from_output_success(self, mock_remote, mock_output):
-        mock_output.return_value = '{"key": "value"}'
+    def test_get_state_item_success(self):
+        """Test successful retrieval of state item from backend"""
+        mock_backend = mock.Mock()
+        # Mock the actual state file format from backend.get_state()
+        mock_backend.get_state.return_value = {
+            "version": 4,
+            "outputs": {"test_item": {"value": "test_value", "type": "string"}},
+            "resources": [],
+        }
+
         result = hooks.get_state_item(
-            "working_dir", {}, "terraform_bin", "state", "item", None
+            "working_dir", {}, "terraform_bin", "test_state", "test_item", mock_backend
         )
-        assert result == '{"key": "value"}'
-        mock_output.assert_called_once()
-        mock_remote.assert_not_called()
+
+        # Should return JSON with the output value
+        import json
+
+        result_data = json.loads(result)
+        assert result_data == {"value": "test_value", "type": "string"}
+        mock_backend.get_state.assert_called_once_with("test_state")
+
+    def test_get_state_item_with_cache(self):
+        """Test that state caching prevents multiple backend calls"""
+        mock_backend = mock.Mock()
+        # Mock the actual state file format
+        state_data = {
+            "version": 4,
+            "outputs": {
+                "item1": {"value": "value1", "type": "string"},
+                "item2": {"value": "value2", "type": "string"},
+            },
+            "resources": [],
+        }
+        mock_backend.get_state.return_value = state_data
+
+        state_cache = {}
+
+        # First call - should fetch from backend
+        result1 = hooks.get_state_item(
+            "working_dir",
+            {},
+            "terraform_bin",
+            "cached_state",
+            "item1",
+            mock_backend,
+            state_cache,
+        )
+
+        # Second call - should use cache
+        result2 = hooks.get_state_item(
+            "working_dir",
+            {},
+            "terraform_bin",
+            "cached_state",
+            "item2",
+            mock_backend,
+            state_cache,
+        )
+
+        # Backend should only be called once
+        assert mock_backend.get_state.call_count == 1
+
+        import json
+
+        assert json.loads(result1) == {"value": "value1", "type": "string"}
+        assert json.loads(result2) == {"value": "value2", "type": "string"}
+
+    def test_get_state_item_backend_not_implemented(self):
+        """Test error when backend doesn't support get_state"""
+        mock_backend = mock.Mock()
+        mock_backend.get_state.side_effect = NotImplementedError()
+
+        with pytest.raises(HookError) as e:
+            hooks.get_state_item(
+                "working_dir", {}, "terraform_bin", "state", "item", mock_backend
+            )
+        assert "does not support get_state" in str(e.value)
+
+    def test_get_state_item_no_outputs(self):
+        """Test error when state has no outputs"""
+        mock_backend = mock.Mock()
+        mock_backend.get_state.return_value = {
+            "version": 4,
+            "outputs": {},  # Empty outputs
+            "resources": [],
+        }
+
+        with pytest.raises(HookError) as e:
+            hooks.get_state_item(
+                "working_dir",
+                {},
+                "terraform_bin",
+                "test_state",
+                "item",
+                mock_backend,
+            )
+        assert "No outputs found in state 'test_state'" in str(e.value)
+
+    def test_get_state_item_output_not_found(self):
+        """Test error when output item not found in state"""
+        mock_backend = mock.Mock()
+        mock_backend.get_state.return_value = {
+            "version": 4,
+            "outputs": {"some_other_item": {"value": "test", "type": "string"}},
+            "resources": [],
+        }
+
+        with pytest.raises(HookError) as e:
+            hooks.get_state_item(
+                "working_dir",
+                {},
+                "terraform_bin",
+                "test_state",
+                "missing_item",
+                mock_backend,
+            )
+        assert "Output 'missing_item' not found in state 'test_state'" in str(e.value)
+
+
+# Test for `_parse_tfvars_file`
+class TestParseTfvarsFile:
+    @mock.patch(
+        "builtins.open",
+        new_callable=mock.mock_open,
+        read_data='str_var = "hello"\nnum_var = 42\nbool_var = true\nlist_var = [1, 2, 3]\nmap_var = {key = "value"}',
+    )
+    @mock.patch("tfworker.util.hooks.hcl2.load")
+    def test_parse_tfvars_file_with_various_types(self, mock_hcl2_load, mock_open):
+        """Test that _parse_tfvars_file correctly parses various HCL2 types"""
+        mock_hcl2_load.return_value = {
+            "str_var": "hello",
+            "num_var": 42,
+            "bool_var": True,
+            "list_var": [1, 2, 3],
+            "map_var": {"key": "value"},
+        }
+
+        result = hooks._parse_tfvars_file("/path/to/test.tfvars")
+
+        assert result["str_var"] == "hello"
+        assert result["num_var"] == 42
+        assert result["bool_var"] is True
+        assert result["list_var"] == [1, 2, 3]
+        assert result["map_var"] == {"key": "value"}
+        mock_hcl2_load.assert_called_once()
 
     @mock.patch(
-        "tfworker.util.hooks._get_state_item_from_output", side_effect=FileNotFoundError
+        "builtins.open",
+        new_callable=mock.mock_open,
+        read_data="key = value\nanother_key = another_value",
     )
-    @mock.patch("tfworker.util.hooks._get_state_item_from_remote")
-    def test_get_state_item_from_remote_success(self, mock_remote, mock_output):
-        mock_remote.return_value = '{"key": "value"}'
-        result = hooks.get_state_item(
-            "working_dir", {}, "terraform_bin", "state", "item", None
-        )
-        assert result == '{"key": "value"}'
-        mock_output.assert_called_once()
-        mock_remote.assert_called_once()
+    @mock.patch("tfworker.util.hooks.hcl2.load")
+    @mock.patch("tfworker.util.hooks.log.warn")
+    def test_parse_tfvars_file_fallback_on_parse_error(
+        self, mock_log_warn, mock_hcl2_load, mock_open
+    ):
+        """Test that _parse_tfvars_file falls back to simple parsing on HCL2 error"""
+        # Use a generic exception to test the fallback behavior
+        mock_hcl2_load.side_effect = Exception("HCL2 parsing error")
 
+        result = hooks._parse_tfvars_file("/path/to/test.tfvars")
 
-# Test for `_get_state_item_from_output`
-class TestGetStateItemFromOutput:
-    @mock.patch("tfworker.util.hooks.pipe_exec")
-    def test_get_state_item_from_output_success(self, mock_pipe_exec):
-        mock_pipe_exec.return_value = (0, '{"key":"value"}', "")
-        result = hooks._get_state_item_from_output(
-            "working_dir", {}, "terraform_bin", "state", "item"
-        )
-        assert result == '{"key":"value"}'
-        mock_pipe_exec.assert_called_once()
+        # Should fall back to simple parsing
+        assert "key" in result
+        assert "another_key" in result
+        # Warning should be logged
+        mock_log_warn.assert_called_once()
+        assert "Failed to parse" in mock_log_warn.call_args[0][0]
 
-    @mock.patch("tfworker.util.hooks.pipe_exec", side_effect=FileNotFoundError)
-    def test_get_state_item_from_output_file_not_found(self, mock_pipe_exec):
+    @mock.patch("builtins.open", side_effect=FileNotFoundError)
+    def test_parse_tfvars_file_not_found(self, mock_open):
+        """Test that FileNotFoundError is propagated"""
         with pytest.raises(FileNotFoundError):
-            hooks._get_state_item_from_output(
-                "working_dir", {}, "terraform_bin", "state", "item"
-            )
+            hooks._parse_tfvars_file("/path/to/missing.tfvars")
 
-    @mock.patch("tfworker.util.hooks.pipe_exec")
-    def test_get_state_item_from_output_error(self, mock_pipe_exec):
-        mock_pipe_exec.return_value = (1, "", "error".encode())
-        with pytest.raises(HookError):
-            hooks._get_state_item_from_output(
-                "working_dir", {}, "terraform_bin", "state", "item"
-            )
+    @mock.patch("tfworker.util.hooks.os.path.isfile", return_value=True)
+    @mock.patch("tfworker.util.hooks._parse_tfvars_file")
+    def test_populate_environment_with_terraform_variables_boolean(
+        self, mock_parse_tfvars, mock_isfile
+    ):
+        """Test that boolean values from .tfvars are correctly converted to TRUE/FALSE"""
+        mock_parse_tfvars.return_value = {
+            "enabled": True,
+            "disabled": False,
+            "string_var": "some_value",
+        }
 
-    @mock.patch("tfworker.util.hooks.pipe_exec")
-    def test_get_state_item_from_output_empty_output(self, mock_pipe_exec):
-        mock_pipe_exec.return_value = (0, None, "")
-        with pytest.raises(HookError) as e:
-            hooks._get_state_item_from_output(
-                "working_dir", {}, "terraform_bin", "state", "item"
-            )
-        assert "Remote state item state.item is empty" in str(e.value)
+        local_env = {}
+        hooks._populate_environment_with_terraform_variables(
+            local_env, "working_dir", "terraform_path", False
+        )
 
-    @mock.patch("tfworker.util.hooks.pipe_exec")
-    def test_get_state_item_from_output_invalid_json(self, mock_pipe_exec):
-        mock_pipe_exec.return_value = (0, "invalid_json", "")
-        with pytest.raises(HookError) as e:
-            hooks._get_state_item_from_output(
-                "working_dir", {}, "terraform_bin", "state", "item"
-            )
-        assert "output is not in JSON format" in str(e.value)
+        # Booleans should be uppercase TRUE/FALSE (not b64 encoded)
+        assert "TF_VAR_ENABLED" in local_env
+        assert "TF_VAR_DISABLED" in local_env
+        # Should extract the value from shlex.quote
+        assert shlex.split(local_env["TF_VAR_ENABLED"])[0] == "TRUE"
+        assert shlex.split(local_env["TF_VAR_DISABLED"])[0] == "FALSE"
 
 
 # Test for `check_hooks`
@@ -354,20 +447,22 @@ class TestHelperFunctions:
         assert "stderr: stderr" in captured_lines
 
     @mock.patch("tfworker.util.hooks.os.path.isfile", return_value=True)
-    @mock.patch(
-        "builtins.open",
-        new_callable=mock.mock_open,
-        read_data="key=value\nanother_key=another_value",
-    )
+    @mock.patch("tfworker.util.hooks._parse_tfvars_file")
     def test_populate_environment_with_terraform_variables(
-        self, mock_isfile, mock_open
+        self, mock_parse_tfvars, mock_isfile
     ):
+        """Test that variables from .tfvars are properly parsed and set"""
+        mock_parse_tfvars.return_value = {
+            "key": "value",
+            "another_key": "another_value",
+        }
         local_env = {}
         hooks._populate_environment_with_terraform_variables(
             local_env, "working_dir", "terraform_path", False
         )
         assert "TF_VAR_KEY" in local_env
         assert "TF_VAR_ANOTHER_KEY" in local_env
+        mock_parse_tfvars.assert_called_once()
 
     @mock.patch("builtins.open", new_callable=mock.mock_open)
     @mock.patch("tfworker.util.hooks.os.path.isfile", return_value=True)
@@ -387,6 +482,51 @@ class TestHelperFunctions:
         assert "TF_REMOTE_LOCAL_ANOTHER_KEY" in local_env.keys()
         assert local_env["TF_REMOTE_LOCAL_KEY"] == "value"
         assert local_env["TF_REMOTE_LOCAL_ANOTHER_KEY"] == "another_value"
+
+    @mock.patch("builtins.open", new_callable=mock.mock_open)
+    @mock.patch("tfworker.util.hooks.os.path.isfile", return_value=True)
+    @mock.patch(
+        "tfworker.util.hooks.get_state_item",
+        side_effect=[
+            '{"value":"staging","type":"string"}',
+            '{"value":true,"type":"bool"}',
+            '{"value":{"key":"val"},"type":"object"}',
+            '{"value":["a","b","c"],"type":"list"}',
+        ],
+    )
+    def test_populate_environment_with_terraform_remote_vars_realistic_json(
+        self, mock_get_state_item, mock_isfile, mock_open
+    ):
+        """Test that remote vars correctly extract values from Terraform's JSON output format."""
+        mock_terraform_locals = """
+            local_key = data.terraform_remote_state.remote1.outputs.environment
+            local_flag = data.terraform_remote_state.remote2.outputs.enabled
+            local_config = data.terraform_remote_state.remote3.outputs.config
+            local_items = data.terraform_remote_state.remote4.outputs.items
+        """
+        mock_open.return_value.read.return_value = mock_terraform_locals
+
+        local_env = {}
+        hooks._populate_environment_with_terraform_remote_vars(
+            local_env, "working_dir", "terraform_path", False, None
+        )
+
+        # Simple string should be unquoted
+        assert "TF_REMOTE_LOCAL_KEY" in local_env.keys()
+        assert local_env["TF_REMOTE_LOCAL_KEY"] == "staging"
+
+        # Boolean should be uppercase
+        assert "TF_REMOTE_LOCAL_FLAG" in local_env.keys()
+        assert local_env["TF_REMOTE_LOCAL_FLAG"] == "TRUE"
+
+        # Complex object should be JSON-encoded and shlex-escaped
+        assert "TF_REMOTE_LOCAL_CONFIG" in local_env.keys()
+        # shlex.quote wraps JSON in single quotes
+        assert local_env["TF_REMOTE_LOCAL_CONFIG"] == """'{"key":"val"}'"""
+
+        # List should be JSON-encoded and shlex-escaped
+        assert "TF_REMOTE_LOCAL_ITEMS" in local_env.keys()
+        assert local_env["TF_REMOTE_LOCAL_ITEMS"] == """'["a","b","c"]'"""
 
     def test_populate_environment_with_extra_vars(self):
         local_env = {}

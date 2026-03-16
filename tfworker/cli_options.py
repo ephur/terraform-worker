@@ -290,17 +290,22 @@ class CLIOptionsTerraform(FreezableBaseModel):
     apply: bool = Field(
         False,
         json_schema_extra={"env": "WORKER_APPLY"},
-        description="Apply the terraform configuration",
+        description="Apply a terraform plan from a plan file",
     )
     destroy: bool = Field(
         False,
         json_schema_extra={"env": "WORKER_DESTROY"},
-        description="Destroy a deployment instead of create it",
+        description="Execute a destroy operation from a destroy plan file",
     )
     plan: bool = Field(
-        True,
+        False,
         json_schema_extra={"env": "WORKER_PLAN"},
-        description="Toggle running a plan, plan will still be skipped if using a saved plan file with apply",
+        description="Create a terraform plan",
+    )
+    plan_destroy: bool = Field(
+        False,
+        json_schema_extra={"env": "WORKER_PLAN_DESTROY"},
+        description="Create a destroy plan (mutually exclusive with --plan)",
     )
     force: bool = Field(
         False,
@@ -401,8 +406,25 @@ class CLIOptionsTerraform(FreezableBaseModel):
                     type="value_error",
                 )
             )
+        if values.get("plan") and values.get("plan_destroy"):
+            errors.append(
+                InitErrorDetails(
+                    loc=("--plan", "--plan"),
+                    input=(values.get("plan")),
+                    ctx={"error": "plan and plan-destroy cannot both be true"},
+                    type="value_error",
+                )
+            )
+            errors.append(
+                InitErrorDetails(
+                    loc=("--plan-destroy", "--plan-destroy"),
+                    input=(values.get("plan_destroy")),
+                    ctx={"error": "plan and plan-destroy cannot both be true"},
+                    type="value_error",
+                )
+            )
         if errors:
-            raise ValidationError.from_exception_data("apply_and_destroy", errors)
+            raise ValidationError.from_exception_data("validation_errors", errors)
         return values
 
     @field_validator("terraform_bin")

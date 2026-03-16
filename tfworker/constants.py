@@ -15,7 +15,6 @@ TF_PROVIDER_DEFAULT_LOCKFILE = ".terraform.lock.hcl"
 # Items to refact from CLI / Logging output
 REDACTED_ITEMS = ["aws_secret_access_key", "aws_session_token"]
 
-TF_STATE_CACHE_NAME = "worker_state_cache.json"
 WORKER_LOCALS_FILENAME = "worker_generated_locals.tf"
 WORKER_TF_FILENAME = "worker_generated_terraform.tf"
 WORKER_TFVARS_FILENAME = "worker_generated.auto.tfvars"
@@ -23,5 +22,4 @@ RESERVED_FILES = [
     WORKER_LOCALS_FILENAME,
     WORKER_TF_FILENAME,
     WORKER_TFVARS_FILENAME,
-    TF_STATE_CACHE_NAME,
 ]

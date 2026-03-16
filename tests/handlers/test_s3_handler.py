@@ -8,6 +8,7 @@ import botocore
 import pytest
 from moto import mock_aws
 
+from tfworker.custom_types.terraform import TerraformAction
 from tfworker.exceptions import HandlerError
 from tfworker.handlers.s3 import S3Handler
 
@@ -163,6 +164,18 @@ class TestPreApply:
             delete_mock.assert_any_call(remotefile)
             delete_mock.assert_any_call(remotefile.replace(".tfplan", ".log"))
 
+    def test_pre_destroy_calls_same_as_apply(self, handler_with_bucket):
+        """Test that DESTROY action uses the same cleanup as APPLY"""
+        handler, _ = handler_with_bucket
+        definition = MagicMock()
+        definition.name = "def"
+        with patch.object(handler, "_s3_delete_plan") as delete_mock:
+            # The execution_functions map DESTROY.PRE to _pre_apply
+            handler._pre_apply(definition)
+            remotefile = handler.get_remote_file("def")
+            delete_mock.assert_any_call(remotefile)
+            delete_mock.assert_any_call(remotefile.replace(".tfplan", ".log"))
+
 
 class TestPostPlan:
     def test_uploads_and_cleans_up(self, handler_with_bucket, tmp_path):
@@ -274,3 +287,29 @@ class TestHasPlan:
 
         monkeypatch.setattr(handler.s3_client, "head_object", raise_error)
         assert handler.has_plan(definition) is False
+
+
+class TestDestroyActionSupport:
+    def test_destroy_in_actions(self):
+        """Test that DESTROY is in the supported actions list"""
+        handler = S3Handler()
+        assert TerraformAction.DESTROY in handler.actions
+
+    def test_destroy_has_priority(self):
+        """Test that DESTROY has a default priority configured"""
+        handler = S3Handler()
+        assert TerraformAction.DESTROY in handler.default_priority
+
+    def test_destroy_execution_function_configured(self):
+        """Test that DESTROY PRE stage is mapped to _pre_apply"""
+        handler = S3Handler()
+        assert TerraformAction.DESTROY in handler.execution_functions
+        from tfworker.custom_types.terraform import TerraformStage
+
+        assert (
+            TerraformStage.PRE in handler.execution_functions[TerraformAction.DESTROY]
+        )
+        assert (
+            handler.execution_functions[TerraformAction.DESTROY][TerraformStage.PRE]
+            == handler._pre_apply
+        )

@@ -25,12 +25,13 @@ if TYPE_CHECKING:
 class S3Handler(BaseHandler):
     """The S3Handler class is a handler for the s3 backend"""
 
-    actions = [TerraformAction.PLAN, TerraformAction.APPLY]
+    actions = [TerraformAction.PLAN, TerraformAction.APPLY, TerraformAction.DESTROY]
     config_model = BaseConfig
     _ready = False
     default_priority = {
         TerraformAction.PLAN: 10,
         TerraformAction.APPLY: 10,
+        TerraformAction.DESTROY: 10,
     }
 
     def __init__(self, _: BaseConfig = None):
@@ -47,6 +48,9 @@ class S3Handler(BaseHandler):
                 TerraformStage.POST: self._post_plan,
             },
             TerraformAction.APPLY: {
+                TerraformStage.PRE: self._pre_apply,
+            },
+            TerraformAction.DESTROY: {
                 TerraformStage.PRE: self._pre_apply,
             },
         }

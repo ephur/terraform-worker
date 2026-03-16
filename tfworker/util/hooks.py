@@ -8,14 +8,13 @@ import os
 import re
 import shlex
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+
+import hcl2
+from lark.exceptions import UnexpectedToken
 
 import tfworker.util.log as log
-from tfworker.constants import (
-    TF_STATE_CACHE_NAME,
-    WORKER_LOCALS_FILENAME,
-    WORKER_TFVARS_FILENAME,
-)
+from tfworker.constants import WORKER_LOCALS_FILENAME, WORKER_TFVARS_FILENAME
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import HookError
 from tfworker.util.system import pipe_exec
@@ -62,6 +61,49 @@ class TFHookVarType(Enum):
         return self.value.upper()
 
 
+def _get_or_fetch_state(
+    state: str,
+    backend: "BaseBackend",
+    state_cache: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Get state data from cache or fetch from backend.
+
+    Checks the cache first to avoid redundant backend calls. If the state
+    is not cached, fetches it from the backend, validates it, and caches
+    it for future use.
+
+    Args:
+        state: The state name to get.
+        backend: The backend instance to fetch from.
+        state_cache: Optional cache dict to store fetched state data.
+
+    Returns:
+        The state data as a dict.
+
+    Raises:
+        HookError: If the state data is invalid (not a dict).
+    """
+    # Check cache first to avoid multiple backend calls for the same state
+    if state_cache is not None and state in state_cache:
+        log.debug(f"Using cached state data for {state}")
+        return state_cache[state]
+
+    # Fetch from backend
+    log.debug(f"Fetching state {state} from backend")
+    state_data = backend.get_state(state)
+
+    # Validate the state data before caching
+    if not isinstance(state_data, dict):
+        raise HookError(f"Invalid state data for {state}")
+
+    # Cache the validated state data
+    if state_cache is not None:
+        state_cache[state] = state_data
+
+    return state_data
+
+
 def get_state_item(
     working_dir: str,
     env: Dict[str, str],
@@ -69,93 +111,70 @@ def get_state_item(
     state: str,
     item: str,
     backend: "BaseBackend",
+    state_cache: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> str:
     """
-    General handler function for getting a state item. First tries to get the item from another definition's output,
-    and if the other definition is not set up, falls back to getting the item from the remote state. Finally, if the
-    terraform remote can not be used, like in the case of a definition requiring a hook script in order to execute
-    `terraform`; fall back to getting the item from the remote state if the provider supports it.
+    Get a state item directly from the backend.
+
+    Uses the backend's get_state() method to retrieve the full state,
+    then extracts the requested output item. This is the most reliable
+    method as it works in all contexts (pre_init hooks, --limit flag, etc.).
+
+    Caching: If state_cache is provided, the state data will be cached by
+    state name to avoid multiple backend calls for the same state.
 
     Args:
-        working_dir (str): The working directory of the terraform definition.
-        env (dict[str, str]): The environment variables to pass to the terraform command.
-        terraform_bin (str): The path to the terraform binary.
-        state (str): The state name to get the item from.
-        item (str): The item to get from the state.
+        working_dir: The working directory (unused, kept for API compat).
+        env: The environment variables (unused, kept for API compat).
+        terraform_bin: The path to terraform binary (unused, kept for API compat).
+        state: The state name to get the item from.
+        item: The output item name to extract from the state.
+        backend: The backend instance to use for fetching state.
+        state_cache: Optional dict to cache state data by state name (for performance).
 
     Returns:
-        str: The state item, key: value as a JSON string.
+        The state item as a JSON string: {"value": <actual_value>, "type": <type>}
 
     Raises:
-        HookError: If the state item is not found in the remote state.
+        HookError: If the state or item cannot be found.
+        NotImplementedError: If the backend doesn't support get_state().
     """
     try:
-        log.debug(f"Getting state item {state}.{item} from output")
-        return _get_state_item_from_output(working_dir, env, terraform_bin, state, item)
-    except FileNotFoundError:
-        log.trace(
-            "Definition is not included in limit; falling back to remote state via terraform refresh"
-        )
+        # Get state data (from cache or backend)
+        state_data = _get_or_fetch_state(state, backend, state_cache)
 
-    return _get_state_item_from_remote(
-        working_dir, env, terraform_bin, state, item, backend
-    )
+        # Extract the output from the state file's top-level outputs section
+        # State file format from backend.get_state() is:
+        # {
+        #   "version": 4,
+        #   "outputs": {
+        #     "output_name": {
+        #       "value": <actual_value>,
+        #       "type": <type>
+        #     }
+        #   }
+        # }
 
+        outputs = state_data.get("outputs", {})
+        if not outputs:
+            raise HookError(f"No outputs found in state '{state}'")
 
-def _get_state_item_from_output(
-    working_dir: str, env: Dict[str, str], terraform_bin: str, state: str, item: str
-) -> str:
-    """
-    Get a single item from the terraform output. This is the preferred
-    mechanism as items will be more guaranteed to be up to date, but it
-    creates problems when the remote state is not set up, like when using
-    --limit.
+        if item not in outputs:
+            raise HookError(f"Output '{item}' not found in state '{state}'")
 
-    Args:
-        working_dir (str): The working directory of the terraform definition.
-        env (Dict[str, str]): The environment variables to pass to the terraform command.
-        terraform_bin (str): The path to the terraform binary.
-        state (str): The state name to get the item from.
-        item (str): The item to get from the state.
+        output_data = outputs[item]
 
-    Returns:
-        str: The item from the terraform output in JSON format.
+        # Return in Terraform output format for consistency
+        # The output is already in the correct format: {"value": ..., "type": ...}
+        return json.dumps(output_data, separators=(",", ":"))
 
-    Raises:
-        HookError: If there is an error reading the remote state item or if the output is empty or not in JSON format.
-    """
-    base_dir, _ = os.path.split(working_dir)
-    try:
-        (exit_code, stdout, stderr) = safe_pipe_exec(
-            f"{terraform_bin} output -json -no-color {item}",
-            cwd=f"{base_dir}/{state}",
-            env=env,
-        )
-    except FileNotFoundError:
-        # the remote state is not setup, likely do to use of --limit
-        # this is acceptable, and is the responsibility of the hook
-        # to ensure it has all values needed for safe execution
-        raise
-
-    if exit_code != 0:
+    except NotImplementedError:
         raise HookError(
-            f"Error reading remote state item {state}.{item}, details: {stderr.decode()}"
+            f"Backend {type(backend).__name__} does not support get_state(). "
+            "Cannot retrieve remote state variables."
         )
-
-    if stdout is None:
-        raise HookError(
-            f"Remote state item {state}.{item} is empty; This is completely"
-            " unexpected, failing..."
-        )
-
-    try:
-        json_output = json.loads(stdout)
-    except json.JSONDecodeError:
-        raise HookError(
-            f"Error parsing remote state item {state}.{item}; output is not in JSON format"
-        )
-
-    return json.dumps(json_output, indent=None, separators=(",", ":"))
+    except Exception as e:
+        raise HookError(f"Error retrieving state item {state}.{item}: {str(e)}")
 
 
 def check_hooks(
@@ -268,11 +287,52 @@ def _prepare_environment(env: Dict[str, str], terraform_path: str) -> Dict[str, 
     return local_env
 
 
+def _parse_tfvars_file(tfvars_path: str) -> Dict[str, Any]:
+    """
+    Parse a .tfvars file into a dictionary of native Python types.
+
+    Uses python-hcl2 to properly parse HCL syntax, ensuring booleans,
+    numbers, strings, lists, and maps are correctly typed.
+
+    Args:
+        tfvars_path: Path to the .tfvars file
+
+    Returns:
+        Dictionary mapping variable names to their parsed values
+
+    Raises:
+        FileNotFoundError: If the file doesn't exist
+    """
+    try:
+        with open(tfvars_path, "r") as f:
+            parsed = hcl2.load(f)
+            return parsed
+    except FileNotFoundError:
+        raise
+    except (UnexpectedToken, Exception) as e:
+        # Fallback to simple parsing for robustness
+        log.warn(
+            f"Failed to parse {tfvars_path} as HCL2, falling back to simple parsing: {e}"
+        )
+        result = {}
+        with open(tfvars_path, "r") as f:
+            for line in f.read().splitlines():
+                if "=" in line:
+                    parts = line.split("=", 1)
+                    key = parts[0].strip()
+                    value = parts[1].strip()
+                    result[key] = value
+        return result
+
+
 def _populate_environment_with_terraform_variables(
     local_env: Dict[str, str], working_dir: str, terraform_path: str, b64_encode: bool
 ) -> None:
     """
-    Populates the environment with Terraform variables.
+    Populates the environment with Terraform variables from .tfvars file.
+
+    Variables are parsed using HCL2 to ensure proper type handling (booleans,
+    numbers, maps, lists) before being passed to _set_hook_env_var().
 
     Args:
         local_env (Dict[str, str]): The environment variables.
@@ -280,17 +340,16 @@ def _populate_environment_with_terraform_variables(
         terraform_path (str): The path to the Terraform binary.
         b64_encode (bool): If True, variables will be base64 encoded.
     """
-    if not os.path.isfile(os.path.join(working_dir, WORKER_TFVARS_FILENAME)):
+    tfvars_path = os.path.join(working_dir, WORKER_TFVARS_FILENAME)
+    if not os.path.isfile(tfvars_path):
         return
 
-    with open(os.path.join(working_dir, WORKER_TFVARS_FILENAME)) as f:
-        contents = f.read()
+    # Parse the .tfvars file into native Python types
+    terraform_vars = _parse_tfvars_file(tfvars_path)
 
-    for line in contents.splitlines():
-        tf_var = line.split("=")
-        _set_hook_env_var(
-            local_env, TFHookVarType.VAR, tf_var[0], tf_var[1], b64_encode
-        )
+    # Set each variable in the environment
+    for key, value in terraform_vars.items():
+        _set_hook_env_var(local_env, TFHookVarType.VAR, key, value, b64_encode)
 
 
 def _populate_environment_with_terraform_remote_vars(
@@ -322,15 +381,39 @@ def _populate_environment_with_terraform_remote_vars(
         r"\s*(?P<item>\w+)\s*\=.+data\.terraform_remote_state\.(?P<state>\w+)\.outputs\.(?P<state_item>\w+)\s*"
     )
 
+    # Create a cache dict to avoid multiple backend calls for the same state
+    state_cache: Dict[str, Dict[str, Any]] = {}
+
     for line in contents.splitlines():
         m = r.match(line)
         if m:
             item = m.group("item")
             state = m.group("state")
             state_item = m.group("state_item")
-            state_value = get_state_item(
-                working_dir, local_env, terraform_path, state, state_item, backend
+            state_value_json = get_state_item(
+                working_dir,
+                local_env,
+                terraform_path,
+                state,
+                state_item,
+                backend,
+                state_cache,
             )
+
+            # Parse the Terraform output JSON to extract just the value field
+            # Terraform output format is: {"value": <actual_value>, "type": <type>, "sensitive": <bool>}
+            try:
+                state_output = json.loads(state_value_json)
+                # Extract just the value field from the Terraform output structure
+                if isinstance(state_output, dict) and "value" in state_output:
+                    state_value = state_output["value"]
+                else:
+                    # Fallback to the raw value if it's not in the expected format
+                    state_value = state_value_json
+            except (json.JSONDecodeError, TypeError):
+                # If parsing fails, use the raw value
+                state_value = state_value_json
+
             _set_hook_env_var(
                 local_env, TFHookVarType.REMOTE, item, state_value, b64_encode
             )
@@ -365,16 +448,9 @@ def _set_hook_env_var(
         local_env (Dict[str, str]): The environment variables.
         var_type (TFHookVarType): The type of the variable.
         key (str): The key of the variable.
-        value (str): The value of the variable.
+        value (Any): The value in native Python type (bool, str, int, dict, list, etc.).
         b64_encode (bool, optional): If True, the value will be base64 encoded. Defaults to False.
     """
-    # JSON-encode complex mapping/sequence types for EXTRA vars; leave scalars as-is
-    if var_type == TFHookVarType.EXTRA and isinstance(value, (dict, list, tuple)):
-        try:
-            value = json.dumps(value)
-        except Exception:
-            value = str(value)
-
     # Normalize the key into a safe env var suffix
     key_replace_items = {" ": "", '"': "", "-": "_", ".": "_"}
     for k, v in key_replace_items.items():
@@ -406,7 +482,8 @@ def _set_hook_env_var(
         value_str = str(value).upper()
     elif isinstance(value, (dict, list, tuple)):
         try:
-            value_str = json.dumps(value)
+            # Use compact JSON formatting to match the rest of the codebase
+            value_str = json.dumps(value, separators=(",", ":"))
         except Exception:
             value_str = str(value)
     else:
@@ -465,240 +542,3 @@ def _execute_hook_script(
         raise HookError(
             f"Hook script {hook_script} execution failed with exit code {exit_code}"
         )
-
-
-def _get_state_item_from_remote(
-    working_dir: str,
-    env: Dict[str, str],
-    terraform_bin: str,
-    state: str,
-    item: str,
-    backend: "BaseBackend",
-) -> str:
-    """
-    Retrieve a state item from terraform remote state.
-
-    Args:
-        working_dir: The working directory of the terraform definition.
-        env: The environment variables to pass to the terraform command.
-        terraform_bin: The path to the terraform binary.
-        state: The state name to get the item from.
-        item: The item to get from the state.
-
-    Returns:
-        A JSON string of the state item.
-
-    Raises:
-        HookError: If the state item cannot be found or read.
-    """
-    cache_file = _make_state_cache(working_dir, env, terraform_bin, state, backend)
-    state_cache = _read_state_cache(cache_file)
-    remote_state = _find_remote_state(state_cache, state)
-
-    return _get_item_from_remote_state(remote_state, state, item)
-
-
-def _get_state_cache_name(working_dir: str, state: str | None = None) -> str:
-    """
-    Get the name of the state cache file.
-
-    Args:
-        working_dir (str): The working directory of the terraform definition.
-
-    Returns:
-        str: The name of the state cache file.
-    """
-    log.trace(f"Getting state cache name for {working_dir}")
-    if state:
-        return f"{working_dir}/{state}_{TF_STATE_CACHE_NAME}"
-    return f"{working_dir}/{TF_STATE_CACHE_NAME}"
-
-
-def _make_state_cache(
-    working_dir: str,
-    env: Dict[str, str],
-    terraform_bin: str,
-    state: str,
-    backend: "BaseBackend",
-    refresh: bool = False,
-) -> str:
-    """
-    Create a cache of the terraform state file.
-
-    Args:
-        working_dir (str): The working directory of the terraform definition.
-        env ({str, str}): The environment variables to pass to the terraform command.
-        terraform_bin (str): The path to the terraform binary.
-        refresh (bool, optional): If true, the cache will be refreshed. Defaults to False.
-
-    Raises:
-        HookError: If there is an error reading or writing the state cache.
-    """
-    state_cache = _get_state_cache_name(working_dir)
-    log.trace(f"Creating state cache for {working_dir}")
-    if not refresh and os.path.exists(state_cache):
-        log.trace("State cache exists, skipping refresh")
-        return state_cache
-
-    try:
-        _run_terraform_refresh(terraform_bin, working_dir, env)
-        state_json = _run_terraform_show(terraform_bin, working_dir, env)
-        _write_state_cache(state_cache, state_json)
-        return state_cache
-    except HookError:
-        log.trace("making state cache from terraform refresh failed")
-
-    if backend:
-        try:
-            state_cache = _get_state_cache_name(working_dir, state)
-            state_json = json.dumps(backend.get_state(state))
-            _write_state_cache(state_cache, state_json)
-            return state_cache
-        except NotImplementedError:
-            raise HookError("all methods to make the state cache failed")
-
-
-def _read_state_cache(cache_file: str) -> Dict[str, Any]:
-    """
-    Read the state cache from a file.
-
-    Args:
-        cache_file (str): The path to the state cache file.
-
-    Returns:
-        Dict[str, Any]: The state cache JSON.
-    """
-    with open(cache_file, "r") as f:
-        return json.load(f)
-
-
-def _find_remote_state(state_cache: Dict[str, Any], state: str) -> Dict[str, Any]:
-    """
-    Find the remote state in the state cache.
-
-    Args:
-        state_cache (Dict[str, Any]): The state cache JSON.
-        state (str): The state name to find.
-
-    Returns:
-        Dict[str, Any]: The remote state JSON.
-
-    Raises:
-        HookError: If the remote state is not found in the state cache.
-    """
-
-    # If values is a key, then we need to extract the remote state item from the root module
-    if "values" in state_cache:
-        resources = state_cache["values"]["root_module"]["resources"]
-        for resource in resources:
-            if (
-                resource["type"] == "terraform_remote_state"
-                and resource["name"] == state
-            ):
-                return resource
-
-    # Otherwise the cache is a root state, and we just need to return the entire state_cache in a dict
-    # with a first key of "values"
-    if "lineage" in state_cache:
-        return {"values": state_cache}
-
-    raise HookError(f"Remote state item {state} not found")
-
-
-def _get_item_from_remote_state(
-    remote_state: Dict[str, Any], state: str, item: str
-) -> str:
-    """
-    Get an item from the remote state JSON
-
-    Args:
-        remote_state (Dict[str, Any]): The remote state JSON.
-        state (str): The state name.
-        item (str): The item to get from the state.
-
-    Returns:
-        str: The item from the remote state in JSON format.
-
-    Raises:
-        HookError: If the item is not found in the remote state.
-    """
-    if item in remote_state["values"]["outputs"]:
-        return json.dumps(
-            remote_state["values"]["outputs"][item],
-            indent=None,
-            separators=(",", ":"),
-        )
-    raise HookError(f"Remote state item {state}.{item} not found in state cache")
-
-
-def _run_terraform_refresh(
-    terraform_bin: str, working_dir: str, env: Dict[str, str]
-) -> None:
-    """
-    Run `terraform apply -refresh-only` to ensure the state is refreshed.
-
-    Args:
-        terraform_bin (str): The path to the terraform binary.
-        working_dir (str): The working directory of the terraform definition.
-        env (Dict[str, str]): The environment variables to pass to the terraform command.
-
-    Raises:
-        HookError: If there is an error refreshing the terraform state.
-    """
-    log.trace(f"Refreshing remote state for {working_dir}")
-    exit_code, _, stderr = safe_pipe_exec(
-        f"{terraform_bin} apply -auto-approve -refresh-only",
-        cwd=working_dir,
-        env=env,
-    )
-    if exit_code != 0:
-        raise HookError(f"Error refreshing terraform state, details: {stderr}")
-
-
-def _run_terraform_show(
-    terraform_bin: str, working_dir: str, env: Dict[str, str]
-) -> str:
-    """
-    Run `terraform show -json` to get the state in JSON format.
-
-    Args:
-        terraform_bin (str): The path to the terraform binary.
-        working_dir (str): The working directory of the terraform definition.
-        env (Dict[str, str]): The environment variables to pass to the terraform command.
-
-    Returns:
-        str: The state in JSON format.
-
-    Raises:
-        HookError: If there is an error reading the terraform state.
-    """
-    exit_code, stdout, stderr = safe_pipe_exec(
-        f"{terraform_bin} show -json",
-        cwd=working_dir,
-        env=env,
-    )
-    if exit_code != 0:
-        raise HookError(f"Error reading terraform state, details: {stderr}")
-    try:
-        json.loads(stdout)
-    except json.JSONDecodeError:
-        raise HookError("Error parsing terraform state; output is not in JSON format")
-    return stdout.decode()
-
-
-def _write_state_cache(state_cache: str, state_json: str) -> None:
-    """
-    Write the state JSON to the cache file.
-
-    Args:
-        state_cache (str): The path to the state cache file.
-        state_json (str): The state JSON to write.
-
-    Raises:
-        HookError: If there is an error writing the state cache.
-    """
-    try:
-        with open(state_cache, "w") as f:
-            f.write(state_json)
-    except Exception as e:
-        raise HookError(f"Error writing state cache to {state_cache}, details: {e}")
