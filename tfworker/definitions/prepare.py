@@ -1,6 +1,6 @@
 import json
 from os import environ
-from typing import TYPE_CHECKING, Dict, Union
+from typing import TYPE_CHECKING, Dict, List, Union
 
 import jinja2
 
@@ -9,6 +9,7 @@ from tfworker.constants import (
     RESERVED_FILES,
     TF_PROVIDER_DEFAULT_LOCKFILE,
     WORKER_LOCALS_FILENAME,
+    WORKER_PROVIDERS_FILENAME,
     WORKER_TF_FILENAME,
     WORKER_TFVARS_FILENAME,
 )
@@ -98,12 +99,46 @@ class DefinitionPrepare:
                 tflocals.write(f"  {k} = data.terraform_remote_state.{v}\n")
             tflocals.write("}\n\n")
 
-    def create_worker_tf(self, name: str) -> None:
-        """Create remote data sources, and required providers"""
+    def create_worker_tf(self, name: str) -> List[str]:
+        """Create remote data sources, and required providers.
+
+        Returns the list of provider names included in the generated file so that
+        callers can detect providers added by submodules after download_modules runs.
+        """
         log.trace(f"creating remote data sources for definition {name}")
+        definition = self._app_state.definitions[name]
+        initial_providers = (
+            definition.get_used_providers(self._app_state.working_dir) or []
+        )
         remotes = self._get_remotes(name)
         provider_content = self._get_provider_content(name)
         self._write_worker_tf(name, remotes, provider_content)
+        return initial_providers
+
+    def create_extra_providers_tf(
+        self, name: str, initial_providers: List[str]
+    ) -> None:
+        """Write a supplementary provider file for providers found only in submodules.
+
+        After download_modules runs, submodule .tf files may declare additional
+        required_providers not present in the top-level source.  Rather than
+        rewriting worker_generated_terraform.tf (which risks confusing Terraform's
+        state lineage checks), we emit a separate file containing only the delta
+        provider blocks and a terraform { required_providers } stanza.  Terraform
+        merges multiple terraform blocks across files, so this is fully valid.
+        """
+        definition = self._app_state.definitions[name]
+        full_providers = definition.get_used_providers(self._app_state.working_dir)
+        if full_providers is None:
+            return
+        extra_providers = [p for p in full_providers if p not in initial_providers]
+        if not extra_providers:
+            return
+        log.trace(
+            f"writing supplementary providers file for definition {name} "
+            f"with extra providers: {extra_providers}"
+        )
+        self._write_extra_providers_tf(name, extra_providers)
 
     def create_terraform_vars(self, name: str) -> None:
         """Create the variable definitions"""
@@ -167,14 +202,37 @@ class DefinitionPrepare:
                 f"could not download modules for definition {name}: {strip_ansi(result.stderr.decode())}"
             )
 
-    def _get_provider_content(self, name: str) -> str:
-        """Get the provider content"""
-        definition = self._app_state.definitions[name]
-        provider_names = definition.get_used_providers(self._app_state.working_dir)
+    def _write_extra_providers_tf(self, name: str, extra_providers: List[str]) -> None:
+        """Write worker_generated_providers.tf containing only the delta provider blocks.
 
-        if provider_names is not None:
+        These providers were declared in submodule required_providers blocks, so they
+        are already declared for Terraform's dependency resolution.  Writing a second
+        required_providers entry for them in the root module would cause a duplicate
+        provider error.  Only the provider {} configuration blocks are needed here so
+        that credentials and other settings are available to the downloaded modules.
+        """
+        definition = self._app_state.definitions[name]
+        with open(
+            f"{definition.get_target_path(self._app_state.working_dir)}/{WORKER_PROVIDERS_FILENAME}",
+            "w+",
+        ) as tffile:
+            tffile.write(
+                f"{self._app_state.providers.provider_hcl(includes=extra_providers)}\n"
+            )
+
+    def _get_provider_content(self, name: str) -> str:
+        """Get the required_providers block content for the terraform stanza.
+
+        If the module's own .tf files declare any required_providers, write nothing —
+        Terraform errors with 'a module may only have one required providers
+        configuration' if required_providers appears in more than one file.
+        """
+        definition = self._app_state.definitions[name]
+        detected = definition.get_used_providers(self._app_state.working_dir)
+
+        if detected is not None:
             return ""
-        return self._app_state.providers.required_hcl(provider_names)
+        return self._app_state.providers.required_hcl(None)
 
     def _get_remotes(self, name: str) -> list:
         """Get the remote data sources"""
