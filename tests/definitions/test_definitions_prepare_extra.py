@@ -367,15 +367,21 @@ def test_create_extra_providers_tf_no_providers_after_modules(
 
 
 def test_create_extra_providers_tf_writes_delta(mocker, def_prepare, definition):
-    """Providers found in submodules get provider blocks but no required_providers stanza.
+    """Providers found in submodules get provider blocks AND a required_providers stanza.
 
-    Submodule files already declare required_providers for these providers; writing
-    a second declaration in the root module would cause a duplicate provider error.
+    The submodule's required_providers lives in the child module, not the root.
+    The root module needs its own required_providers entry so Terraform resolves
+    the correct registry source; without it Terraform defaults to hashicorp/<name>.
+    These extra providers are not declared in any root-module file, so adding
+    required_providers for them here creates no duplicate.
     """
     mocker.patch.object(
         Definition, "get_used_providers", return_value=["aws", "datadog"]
     )
     def_prepare._app_state.providers.provider_hcl.return_value = 'provider "datadog" {}'
+    def_prepare._app_state.providers.required_hcl.return_value = (
+        '  required_providers {\n    datadog = { source = "datadog/datadog" }\n  }\n'
+    )
 
     def_prepare.create_extra_providers_tf("def1", initial_providers=["aws"])
 
@@ -386,11 +392,13 @@ def test_create_extra_providers_tf_writes_delta(mocker, def_prepare, definition)
     assert providers_path.exists()
     content = providers_path.read_text()
     assert 'provider "datadog"' in content
-    # required_providers must NOT be written — submodule files already declare it
-    assert "required_providers" not in content
-    assert "terraform {" not in content
-    # Only delta providers passed to provider_hcl; required_hcl never called
+    # required_providers MUST be written so Terraform can resolve the source
+    assert "required_providers" in content
+    assert "terraform {" in content
+    # Only delta providers passed to both methods
     def_prepare._app_state.providers.provider_hcl.assert_called_once_with(
         includes=["datadog"]
     )
-    def_prepare._app_state.providers.required_hcl.assert_not_called()
+    def_prepare._app_state.providers.required_hcl.assert_called_once_with(
+        includes=["datadog"]
+    )
