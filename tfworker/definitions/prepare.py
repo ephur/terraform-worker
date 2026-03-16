@@ -203,15 +203,19 @@ class DefinitionPrepare:
             )
 
     def _write_extra_providers_tf(self, name: str, extra_providers: List[str]) -> None:
-        """Write worker_generated_providers.tf containing only the delta provider blocks.
+        """Write worker_generated_providers.tf for providers discovered only in submodules.
 
-        These providers were declared in submodule required_providers blocks, so they
-        are already declared for Terraform's dependency resolution.  Writing a second
-        required_providers entry for them in the root module would cause a duplicate
-        provider error.  Only the provider {} configuration blocks are needed here so
-        that credentials and other settings are available to the downloaded modules.
+        These providers are not declared in any root-module .tf file, so writing
+        required_providers for them here creates no duplicate.  Without a
+        required_providers entry in the root module, Terraform defaults to
+        registry.terraform.io/hashicorp/<name>, which is wrong for providers like
+        datadog/datadog.  The provider {} block provides credentials; the
+        terraform { required_providers } block provides the correct registry source.
         """
         definition = self._app_state.definitions[name]
+        required_content = self._app_state.providers.required_hcl(
+            includes=extra_providers
+        )
         with open(
             f"{definition.get_target_path(self._app_state.working_dir)}/{WORKER_PROVIDERS_FILENAME}",
             "w+",
@@ -219,6 +223,7 @@ class DefinitionPrepare:
             tffile.write(
                 f"{self._app_state.providers.provider_hcl(includes=extra_providers)}\n"
             )
+            tffile.write(f"terraform {{\n{required_content}\n}}\n")
 
     def _get_provider_content(self, name: str) -> str:
         """Get the required_providers block content for the terraform stanza.
