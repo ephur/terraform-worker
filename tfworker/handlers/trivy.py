@@ -185,7 +185,7 @@ class TrivyHandler(BaseHandler):
         try:
             if self._debug:
                 log.debug(f"cmd: {' '.join(trivy_args)}")
-            (exit_code, stdout, stderr) = pipe_exec(
+            exit_code, stdout, stderr = pipe_exec(
                 f"{' '.join(trivy_args)}",
                 cwd=str(definition_path),
                 stream_output=self._stream_output,

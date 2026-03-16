@@ -38,7 +38,7 @@ def get_terraform_version(terraform_bin: str, validation=False) -> tuple[int, in
             f"unable to get terraform version from {terraform_bin} version"
         )
 
-    (return_code, stdout, stderr) = pipe_exec(f"{terraform_bin} version")
+    return_code, stdout, stderr = pipe_exec(f"{terraform_bin} version")
     if return_code != 0:
         if validation:
             validation_exit()
@@ -86,7 +86,7 @@ def mirror_providers(
         with tfhelpers._write_mirror_configuration(
             providers, working_dir, cache_dir
         ) as temp_dir:
-            (return_code, _, stderr) = pipe_exec(
+            return_code, _, stderr = pipe_exec(
                 f"{terraform_bin} providers mirror {cache_dir}",
                 cwd=temp_dir,
                 stream_output=True,
