@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch
 
 import pytest
@@ -11,8 +12,10 @@ REDACTED_ITEMS = ["aws_secret_access_key", "aws_session_token", "aws_profile"]
 def reset_log_level():
     """Reset log level to ERROR after each test"""
     log.log_level = log.LogLevel.ERROR
+    log.log_format = log.LogFormat.TEXT
     yield
     log.log_level = log.LogLevel.ERROR
+    log.log_format = log.LogFormat.TEXT
 
 
 def test_redact_items_re_string():
@@ -38,8 +41,13 @@ def test_redact_items_re_dict():
 
 
 def test_redact_items_re_invalid_type():
-    with pytest.raises(ValueError, match="Items must be a dictionary or a string"):
-        log.redact_items_re(12345)
+    # Non-string/dict values should be converted to strings
+    result = log.redact_items_re(12345)
+    assert result == "12345"
+
+    # Test with a list
+    result = log.redact_items_re([1, 2, 3])
+    assert result == "[1, 2, 3]"
 
 
 def test_redact_items_re_nested_dict():
@@ -155,8 +163,13 @@ def test_redact_items_token_dict():
 
 
 def test_redact_items_token_invalid_type():
-    with pytest.raises(ValueError, match="Items must be a dictionary or a string"):
-        log.redact_items_token(12345)
+    # Non-string/dict values should be converted to strings
+    result = log.redact_items_token(12345)
+    assert result == "12345"
+
+    # Test with a list
+    result = log.redact_items_token([1, 2, 3])
+    assert result == "[1, 2, 3]"
 
 
 def test_redact_items_token_nested_dict():
@@ -331,6 +344,65 @@ def test_log_trace_level(mock_secho):
     log.log_level = log.LogLevel.TRACE
     log.log("This is a trace message.", log.LogLevel.TRACE)
     mock_secho.assert_called_once_with("This is a trace message.", fg="cyan")
+
+
+@patch("tfworker.util.log.secho")
+def test_log_json_format_string(mock_secho):
+    log.log_level = log.LogLevel.INFO
+    log.log_format = log.LogFormat.JSON
+
+    log.info("This is a test message.")
+
+    mock_secho.assert_called_once()
+    args, kwargs = mock_secho.call_args
+    payload = json.loads(args[0])
+    assert payload["level"] == "INFO"
+    assert payload["message"] == "This is a test message."
+    assert "timestamp" in payload
+    assert kwargs == {"fg": None}
+
+
+@patch("tfworker.util.log.secho")
+def test_log_json_format_dict(mock_secho):
+    log.log_level = log.LogLevel.INFO
+    log.log_format = log.LogFormat.JSON
+
+    log.info({"message": "run started", "deployment": "example"})
+
+    mock_secho.assert_called_once()
+    args, kwargs = mock_secho.call_args
+    payload = json.loads(args[0])
+    assert payload["level"] == "INFO"
+    assert payload["message"] == "run started"
+    assert payload["deployment"] == "example"
+    assert "timestamp" in payload
+    assert kwargs == {"fg": None}
+
+
+@patch("tfworker.util.log.secho")
+def test_log_subprocess_result_json(mock_secho):
+    log.log_level = log.LogLevel.INFO
+    log.log_format = log.LogFormat.JSON
+
+    log.log_subprocess_result(
+        command="terraform init",
+        exit_code=0,
+        stdout=b"stdout text",
+        stderr=b"",
+        level=log.LogLevel.INFO,
+        extra={"definition": "example"},
+    )
+
+    mock_secho.assert_called_once()
+    args, kwargs = mock_secho.call_args
+    payload = json.loads(args[0])
+    assert payload["message"] == "subprocess completed"
+    assert payload["command"] == "terraform init"
+    assert payload["definition"] == "example"
+    assert payload["stdout"] == "stdout text"
+    assert payload["stderr"] == ""
+    assert payload["exit_code"] == 0
+    assert kwargs == {"fg": None}
 
 
 # performance testing the two different redact methods

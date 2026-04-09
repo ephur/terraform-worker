@@ -89,8 +89,30 @@ def mirror_providers(
             (return_code, _, stderr) = pipe_exec(
                 f"{terraform_bin} providers mirror {cache_dir}",
                 cwd=temp_dir,
-                stream_output=True,
+                stream_output=not log.json_logging_enabled(),
+                **(
+                    {
+                        "stream_log_level": log.LogLevel.INFO,
+                        "stream_log_context": {
+                            "source": "subprocess",
+                            "stream": "combined",
+                            "command": "terraform providers mirror",
+                            "cache_dir": cache_dir,
+                        },
+                    }
+                    if not log.json_logging_enabled()
+                    else {}
+                ),
             )
+            if log.json_logging_enabled():
+                log.log_subprocess_result(
+                    command="terraform providers mirror",
+                    exit_code=return_code,
+                    stdout="",
+                    stderr=stderr,
+                    level=log.LogLevel.ERROR if return_code else log.LogLevel.INFO,
+                    extra={"cache_dir": cache_dir},
+                )
             if return_code != 0:
                 raise TFWorkerException(f"Unable to mirror providers: {stderr}")
     except IndexError:

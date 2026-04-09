@@ -44,6 +44,7 @@ def cli(ctx: click.Context, **kwargs):
         handle_option_error(e)
 
     log.log_level = log.LogLevel[options.log_level]
+    log.log_format = log.LogFormat[options.log_format]
     log.msg(f"set log level to {options.log_level}", log.LogLevel.DEBUG)
     app_state = AppState(root_options=options)
     ctx.obj = app_state

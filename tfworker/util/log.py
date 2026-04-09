@@ -1,4 +1,8 @@
+import json
 import re
+import sys
+import traceback
+from datetime import UTC, datetime
 from enum import Enum
 from functools import partial
 from typing import Any, Dict, List, Union
@@ -16,7 +20,57 @@ class LogLevel(Enum):
     ERROR = 4
 
 
+class LogFormat(Enum):
+    TEXT = "text"
+    JSON = "json"
+
+
 log_level = LogLevel.ERROR
+log_format = LogFormat.TEXT
+
+
+def json_logging_enabled() -> bool:
+    return log_format == LogFormat.JSON
+
+
+def log_subprocess_result(
+    command: str,
+    exit_code: int,
+    stdout: Union[str, bytes],
+    stderr: Union[str, bytes],
+    level: LogLevel = LogLevel.INFO,
+    extra: Dict[str, Any] | None = None,
+    redact: bool = False,
+) -> None:
+    payload: Dict[str, Any] = {
+        "message": "subprocess completed",
+        "source": "subprocess",
+        "command": command,
+        "exit_code": exit_code,
+        "stdout": stdout.decode() if isinstance(stdout, bytes) else stdout,
+        "stderr": stderr.decode() if isinstance(stderr, bytes) else stderr,
+    }
+    if extra is not None:
+        payload.update(extra)
+    log(payload, level=level, redact=redact)
+
+
+def _normalize_message(msg: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    if isinstance(msg, dict):
+        return dict(msg)
+    return {"message": str(msg)}
+
+
+def _format_json_message(
+    msg: Union[str, Dict[str, Any]], level: LogLevel
+) -> str:
+    payload = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "level": level.name,
+    }
+    payload.update(_normalize_message(msg))
+    payload.setdefault("message", "")
+    return json.dumps(payload, sort_keys=True)
 
 
 def log(
@@ -39,10 +93,17 @@ def log(
     }
 
     if redact:
+        msg = redact_items_re(msg)
+    else:
         msg = redact_items_token(msg)
 
     if level.value >= log_level.value:
-        secho(msg, fg=level_colors[level])
+        rendered_msg = msg
+        color = level_colors[level]
+        if log_format == LogFormat.JSON:
+            rendered_msg = _format_json_message(msg, level)
+            color = None
+        secho(rendered_msg, fg=color)
     return
 
 
@@ -62,6 +123,10 @@ def redact_items_token(
     Raises:
         ValueError: If passed an item that is not a dictionary or string
     """
+
+    # Convert non-string, non-dict items to strings
+    if not isinstance(items, (str, dict)):
+        items = str(items)
 
     if isinstance(items, str):
         """
@@ -122,9 +187,6 @@ def redact_items_token(
                 items[k] = redact_items_token(v, redact)
         return items
 
-    else:
-        raise ValueError("Items must be a dictionary or a string")
-
 
 def redact_items_re(
     items: Union[Dict[str, Any], str], redact: List[str] = REDACTED_ITEMS
@@ -142,6 +204,10 @@ def redact_items_re(
     Raises:
         ValueError: If passed an item that is not a dictionary or string
     """
+    # Convert non-string, non-dict items to strings
+    if not isinstance(items, (str, dict)):
+        items = str(items)
+
     if isinstance(items, str):
         # The regex pattern is designed to match and redact sensitive information from a string, preserving the original key, delimiter, and quote style.
         #
@@ -176,9 +242,6 @@ def redact_items_re(
             elif isinstance(v, str):
                 items[k] = redact_items_re(v, redact)
         return items
-
-    else:
-        raise ValueError("Items must be a dictionary or a string")
 
 
 # Allow a non stuttering method when importing the library to print

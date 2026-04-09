@@ -27,6 +27,8 @@ def safe_pipe_exec(
     cwd: str = None,
     env: Dict[str, str] = None,
     stream_output: bool = False,
+    stream_log_level: log.LogLevel | None = None,
+    stream_log_context: Dict[str, Any] | None = None,
 ) -> Tuple[int, Union[bytes, None], Union[bytes, None]]:
     """
     A wrapper around pipe_exec that checks environment variables for unsafe types before calling pipe_exec.
@@ -41,7 +43,20 @@ def safe_pipe_exec(
             raise HookError(
                 "Environment contains non-string values, aborting pipe_exec"
             )
-    return pipe_exec(args, stdin=stdin, cwd=cwd, env=env, stream_output=stream_output)
+    pipe_exec_kwargs = {
+        "stdin": stdin,
+        "cwd": cwd,
+        "env": env,
+        "stream_output": stream_output,
+    }
+    if stream_log_level is not None:
+        pipe_exec_kwargs["stream_log_level"] = stream_log_level
+    if stream_log_context is not None:
+        pipe_exec_kwargs["stream_log_context"] = stream_log_context
+    return pipe_exec(
+        args,
+        **pipe_exec_kwargs,
+    )
 
 
 if TYPE_CHECKING:
@@ -522,21 +537,57 @@ def _execute_hook_script(
     log.trace(
         f"Executing hook script: {hook_script} in {hook_dir} with params {phase} {command} "
     )
+    aggregate_output = log.json_logging_enabled()
+    effective_stream_output = stream_output and not aggregate_output
+
+    pipe_exec_kwargs = {
+        "cwd": hook_dir,
+        "env": local_env,
+        "stream_output": effective_stream_output,
+    }
+    if effective_stream_output:
+        pipe_exec_kwargs["stream_log_level"] = log.LogLevel.DEBUG
+        pipe_exec_kwargs["stream_log_context"] = {
+            "source": "subprocess",
+            "stream": "combined",
+            "command": "hook",
+            "hook_script": hook_script,
+            "hook_phase": phase.value if hasattr(phase, "value") else str(phase),
+            "hook_action": command.value if hasattr(command, "value") else str(command),
+        }
+
     exit_code, stdout, stderr = safe_pipe_exec(
         f"{hook_script} {phase} {command}",
-        cwd=hook_dir,
-        env=local_env,
-        stream_output=stream_output,
+        **pipe_exec_kwargs,
     )
 
-    if debug:
-        log.debug(f"Results from hook script: {hook_script}")
-        log.debug(f"exit code: {exit_code}")
-        if not stream_output:
+    if aggregate_output:
+        log.log_subprocess_result(
+            command="hook",
+            exit_code=exit_code,
+            stdout=stdout,
+            stderr=stderr,
+            level=log.LogLevel.ERROR if exit_code else log.LogLevel.DEBUG,
+            extra={
+                "hook_script": hook_script,
+                "hook_phase": phase.value if hasattr(phase, "value") else str(phase),
+                "hook_action": command.value if hasattr(command, "value") else str(command),
+            },
+        )
+
+    # Log hook results based on exit code and debug mode
+    # Always log failures at ERROR level, only log success at DEBUG level when debug=True
+    should_log = debug or (exit_code != 0)
+    log_level_func = log.error if exit_code != 0 else log.debug
+
+    if should_log:
+        log_level_func(f"Results from hook script: {hook_script}")
+        log_level_func(f"exit code: {exit_code}")
+        if not effective_stream_output and not aggregate_output:
             for line in stdout.decode().splitlines():
-                log.debug(f"stdout: {line}")
+                log_level_func(f"stdout: {line}")
             for line in stderr.decode().splitlines():
-                log.debug(f"stderr: {line}")
+                log_level_func(f"stderr: {line}")
 
     if exit_code != 0:
         raise HookError(

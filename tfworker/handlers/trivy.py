@@ -185,11 +185,38 @@ class TrivyHandler(BaseHandler):
         try:
             if self._debug:
                 log.debug(f"cmd: {' '.join(trivy_args)}")
+            aggregate_output = log.json_logging_enabled()
+            effective_stream_output = self._stream_output and not aggregate_output
+
+            pipe_exec_kwargs = {
+                "cwd": str(definition_path),
+                "stream_output": effective_stream_output,
+            }
+            if effective_stream_output:
+                pipe_exec_kwargs["stream_log_level"] = log.LogLevel.INFO
+                pipe_exec_kwargs["stream_log_context"] = {
+                    "source": "subprocess",
+                    "stream": "combined",
+                    "command": "trivy",
+                    "definition_path": str(definition_path),
+                    "handler": "trivy",
+                }
             (exit_code, stdout, stderr) = pipe_exec(
                 f"{' '.join(trivy_args)}",
-                cwd=str(definition_path),
-                stream_output=self._stream_output,
+                **pipe_exec_kwargs,
             )
+            if aggregate_output:
+                log.log_subprocess_result(
+                    command="trivy",
+                    exit_code=exit_code,
+                    stdout=stdout,
+                    stderr=stderr,
+                    level=log.LogLevel.ERROR if exit_code else log.LogLevel.INFO,
+                    extra={
+                        "definition_path": str(definition_path),
+                        "handler": "trivy",
+                    },
+                )
         except Exception as e:
             raise HandlerError(f"Error executing trivy scan: {e}")
 

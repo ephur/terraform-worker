@@ -143,11 +143,38 @@ class SnykHandler(BaseHandler):
         try:
             if self._debug:
                 log.debug(f"cmd: {' '.join(snyk_args)}")
+            aggregate_output = log.json_logging_enabled()
+            effective_stream_output = self._stream_output and not aggregate_output
+
+            pipe_exec_kwargs = {
+                "cwd": target_path.parent,
+                "stream_output": effective_stream_output,
+            }
+            if effective_stream_output:
+                pipe_exec_kwargs["stream_log_level"] = log.LogLevel.INFO
+                pipe_exec_kwargs["stream_log_context"] = {
+                    "source": "subprocess",
+                    "stream": "combined",
+                    "command": "snyk iac test",
+                    "definition": definition.name,
+                    "handler": "snyk",
+                }
             (exit_code, stdout, stderr) = pipe_exec(
                 f"{' '.join(snyk_args)}",
-                cwd=target_path.parent,
-                stream_output=self._stream_output,
+                **pipe_exec_kwargs,
             )
+            if aggregate_output:
+                log.log_subprocess_result(
+                    command="snyk iac test",
+                    exit_code=exit_code,
+                    stdout=stdout,
+                    stderr=stderr,
+                    level=log.LogLevel.ERROR if exit_code else log.LogLevel.INFO,
+                    extra={
+                        "definition": definition.name,
+                        "handler": "snyk",
+                    },
+                )
         except Exception as e:
             raise HandlerError(f"Error executing snyk scan: {e}")
 
