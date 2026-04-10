@@ -152,13 +152,6 @@ class SnykHandler(BaseHandler):
             }
             if effective_stream_output:
                 pipe_exec_kwargs["stream_log_level"] = log.LogLevel.INFO
-                pipe_exec_kwargs["stream_log_context"] = {
-                    "source": "subprocess",
-                    "stream": "combined",
-                    "command": "snyk iac test",
-                    "definition": definition.name,
-                    "handler": "snyk",
-                }
             exit_code, stdout, stderr = pipe_exec(
                 f"{' '.join(snyk_args)}",
                 **pipe_exec_kwargs,

@@ -204,13 +204,7 @@ class TestTerraformCommandMethods:
 
         assert pe.call_args.kwargs["stream_output"] is True
         assert pe.call_args.kwargs["stream_log_level"] == log.LogLevel.INFO
-        assert pe.call_args.kwargs["stream_log_context"] == {
-            "source": "subprocess",
-            "stream": "combined",
-            "command": "terraform apply",
-            "definition": "def",
-            "terraform_action": "apply",
-        }
+        assert "stream_log_context" not in pe.call_args.kwargs
 
     def test_run_json_aggregates_output(self, tmp_path, mocker):
         old_format = log.log_format

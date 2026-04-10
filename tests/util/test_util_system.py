@@ -96,7 +96,6 @@ class TestUtilSystem:
             "/bin/echo foo",
             stream_output=True,
             stream_log_level=log.LogLevel.INFO,
-            stream_log_context={"source": "subprocess", "command": "echo"},
         )
 
         assert exit_code == 0
@@ -115,7 +114,6 @@ class TestUtilSystem:
             "/bin/echo foo",
             stream_output=True,
             stream_log_level=log.LogLevel.INFO,
-            stream_log_context={"source": "subprocess", "command": "echo"},
         )
 
         assert exit_code == 0

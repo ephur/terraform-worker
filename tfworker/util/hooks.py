@@ -28,7 +28,6 @@ def safe_pipe_exec(
     env: Dict[str, str] = None,
     stream_output: bool = False,
     stream_log_level: log.LogLevel | None = None,
-    stream_log_context: Dict[str, Any] | None = None,
 ) -> Tuple[int, Union[bytes, None], Union[bytes, None]]:
     """
     A wrapper around pipe_exec that checks environment variables for unsafe types before calling pipe_exec.
@@ -51,8 +50,6 @@ def safe_pipe_exec(
     }
     if stream_log_level is not None:
         pipe_exec_kwargs["stream_log_level"] = stream_log_level
-    if stream_log_context is not None:
-        pipe_exec_kwargs["stream_log_context"] = stream_log_context
     return pipe_exec(
         args,
         **pipe_exec_kwargs,
@@ -547,14 +544,6 @@ def _execute_hook_script(
     }
     if effective_stream_output:
         pipe_exec_kwargs["stream_log_level"] = log.LogLevel.DEBUG
-        pipe_exec_kwargs["stream_log_context"] = {
-            "source": "subprocess",
-            "stream": "combined",
-            "command": "hook",
-            "hook_script": hook_script,
-            "hook_phase": phase.value if hasattr(phase, "value") else str(phase),
-            "hook_action": command.value if hasattr(command, "value") else str(command),
-        }
 
     exit_code, stdout, stderr = safe_pipe_exec(
         f"{hook_script} {phase} {command}",

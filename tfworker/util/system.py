@@ -3,7 +3,7 @@ import platform
 import re
 import shlex
 import subprocess
-from typing import Any, Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 import tfworker.util.log as log
 
@@ -29,7 +29,6 @@ def pipe_exec(
     env: Dict[str, str] = None,
     stream_output: bool = False,
     stream_log_level: log.LogLevel | None = None,
-    stream_log_context: Dict[str, Any] | None = None,
 ) -> Tuple[int, Union[bytes, None], Union[bytes, None]]:
     """
     A function to take one or more commands and execute them in a pipeline, returning the output of the last command.
@@ -42,8 +41,6 @@ def pipe_exec(
         stream_output (bool, optional): A boolean indicating if the output should be streamed back to the caller.
         stream_log_level (LogLevel, optional): The logger level to use when
             streaming output through the application logger.
-        stream_log_context (dict, optional): Additional structured fields to
-            include when streamed lines are sent through the application logger.
 
     Returns:
         tuple: A tuple containing the return code, stdout, and stderr of the last command in the pipeline.
@@ -124,8 +121,8 @@ def pipe_exec(
             if log.json_logging_enabled():
                 stdout += line
                 continue
-            if stream_log_level is not None or stream_log_context is not None:
-                log.log(rendered_line, level=stream_log_level or log.LogLevel.INFO)
+            if stream_log_level is not None:
+                log.log(rendered_line, level=stream_log_level)
             else:
                 print(rendered_line)
             stdout += line

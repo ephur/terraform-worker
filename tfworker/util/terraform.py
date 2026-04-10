@@ -86,20 +86,12 @@ def mirror_providers(
         with tfhelpers._write_mirror_configuration(
             providers, working_dir, cache_dir
         ) as temp_dir:
-            return_code, _, stderr = pipe_exec(
+            return_code, stdout, stderr = pipe_exec(
                 f"{terraform_bin} providers mirror {cache_dir}",
                 cwd=temp_dir,
                 stream_output=not log.json_logging_enabled(),
                 **(
-                    {
-                        "stream_log_level": log.LogLevel.INFO,
-                        "stream_log_context": {
-                            "source": "subprocess",
-                            "stream": "combined",
-                            "command": "terraform providers mirror",
-                            "cache_dir": cache_dir,
-                        },
-                    }
+                    {"stream_log_level": log.LogLevel.INFO}
                     if not log.json_logging_enabled()
                     else {}
                 ),
@@ -108,7 +100,7 @@ def mirror_providers(
                 log.log_subprocess_result(
                     command="terraform providers mirror",
                     exit_code=return_code,
-                    stdout="",
+                    stdout=stdout,
                     stderr=stderr,
                     level=log.LogLevel.ERROR if return_code else log.LogLevel.INFO,
                     extra={"cache_dir": cache_dir},

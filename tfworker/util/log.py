@@ -90,6 +90,7 @@ def log(
     }
 
     if redact:
+        msg = redact_items_token(msg)
         msg = redact_items_re(msg)
     else:
         msg = redact_items_token(msg)
@@ -115,10 +116,8 @@ def redact_items_token(
         redact (List[str]): List of items to redact
 
     Returns:
-        Union[Dict[str, Any], str]: Redacted items
-
-    Raises:
-        ValueError: If passed an item that is not a dictionary or string
+        Union[Dict[str, Any], str]: Redacted items. Non-string, non-dict
+            inputs are coerced to str before processing.
     """
 
     # Convert non-string, non-dict items to strings
@@ -196,10 +195,8 @@ def redact_items_re(
         redact (List[str]): List of items to redact
 
     Returns:
-        Union[Dict[str, Any], str]: Redacted items
-
-    Raises:
-        ValueError: If passed an item that is not a dictionary or string
+        Union[Dict[str, Any], str]: Redacted items. Non-string, non-dict
+            inputs are coerced to str before processing.
     """
     # Convert non-string, non-dict items to strings
     if not isinstance(items, (str, dict)):
@@ -225,7 +222,7 @@ def redact_items_re(
         pattern = re.compile(
             r"("
             + "|".join(re.escape(key) for key in redact)
-            + r')(\s*[:=]\s*|\s+)(["\']?)(.*?)(\3)(?=\s|$)',
+            + r')(\s*[:=]\s*|\s+)(["\']?)(.*?)(\3)(?=\s|[,}\];]|$)',
             re.IGNORECASE,
         )
         return pattern.sub(r"\1\2\3REDACTED\5", items)

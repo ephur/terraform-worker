@@ -194,13 +194,6 @@ class TrivyHandler(BaseHandler):
             }
             if effective_stream_output:
                 pipe_exec_kwargs["stream_log_level"] = log.LogLevel.INFO
-                pipe_exec_kwargs["stream_log_context"] = {
-                    "source": "subprocess",
-                    "stream": "combined",
-                    "command": "trivy",
-                    "definition_path": str(definition_path),
-                    "handler": "trivy",
-                }
             exit_code, stdout, stderr = pipe_exec(
                 f"{' '.join(trivy_args)}",
                 **pipe_exec_kwargs,

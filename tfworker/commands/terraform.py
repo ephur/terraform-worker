@@ -582,13 +582,6 @@ class TerraformCommand(BaseCommand):
         }
         if effective_stream_output:
             pipe_exec_kwargs["stream_log_level"] = log.LogLevel.INFO
-            pipe_exec_kwargs["stream_log_context"] = {
-                "source": "subprocess",
-                "stream": "combined",
-                "command": f"terraform {terraform_command}",
-                "definition": definition_name,
-                "terraform_action": action.value,
-            }
 
         result: TerraformResult = TerraformResult(
             *pipe_exec(
