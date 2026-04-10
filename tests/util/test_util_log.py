@@ -396,7 +396,7 @@ def test_log_subprocess_result_json(mock_secho):
     mock_secho.assert_called_once()
     args, kwargs = mock_secho.call_args
     payload = json.loads(args[0])
-    assert payload["message"] == "subprocess completed"
+    assert payload["message"] == "terraform init completed"
     assert payload["command"] == "terraform init"
     assert payload["definition"] == "example"
     assert payload["stdout"] == "stdout text"

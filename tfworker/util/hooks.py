@@ -571,7 +571,9 @@ def _execute_hook_script(
             extra={
                 "hook_script": hook_script,
                 "hook_phase": phase.value if hasattr(phase, "value") else str(phase),
-                "hook_action": command.value if hasattr(command, "value") else str(command),
+                "hook_action": (
+                    command.value if hasattr(command, "value") else str(command)
+                ),
             },
         )
 

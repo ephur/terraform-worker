@@ -41,9 +41,10 @@ def log_subprocess_result(
     level: LogLevel = LogLevel.INFO,
     extra: Dict[str, Any] | None = None,
     redact: bool = False,
+    message: str | None = None,
 ) -> None:
     payload: Dict[str, Any] = {
-        "message": "subprocess completed",
+        "message": message or f"{command} completed",
         "source": "subprocess",
         "command": command,
         "exit_code": exit_code,
@@ -61,9 +62,7 @@ def _normalize_message(msg: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
     return {"message": str(msg)}
 
 
-def _format_json_message(
-    msg: Union[str, Dict[str, Any]], level: LogLevel
-) -> str:
+def _format_json_message(msg: Union[str, Dict[str, Any]], level: LogLevel) -> str:
     payload = {
         "timestamp": datetime.now(UTC).isoformat(),
         "level": level.name,

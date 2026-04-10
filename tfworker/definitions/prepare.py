@@ -182,6 +182,7 @@ class DefinitionPrepare:
                 stderr=result.stderr,
                 level=log.LogLevel.ERROR if result.exit_code else log.LogLevel.INFO,
                 extra={"definition": name},
+                message=f"terraform get output for {name}",
             )
         elif not stream_output:
             log.debug(f"terraform get result: {result.stdout}")
