@@ -38,6 +38,10 @@ class TestCLIOptionsRoot:
         cli_options = c.CLIOptionsRoot(log_level="debug")
         assert cli_options.log_level == "DEBUG"
 
+    def test_cli_options_with_lower_log_format(self):
+        cli_options = c.CLIOptionsRoot(log_format="json")
+        assert cli_options.log_format == "JSON"
+
     def test_run_id_default_none(self):
         cli_options = c.CLIOptionsRoot()
         assert cli_options.run_id is None
@@ -49,6 +53,10 @@ class TestCLIOptionsRoot:
     def test_cli_options_with_invalid_log_level(self):
         with pytest.raises(ValueError):
             c.CLIOptionsRoot(log_level="invalid_log_level")
+
+    def test_cli_options_with_invalid_log_format(self):
+        with pytest.raises(ValueError):
+            c.CLIOptionsRoot(log_format="invalid_log_format")
 
     def test_config_exists(self, tmp_path):
         config_file = tmp_path / "config.yaml"

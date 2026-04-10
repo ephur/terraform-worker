@@ -289,7 +289,7 @@ class TerraformCommand(BaseCommand):
                 log.debug(f"Completed terraform init for definition: {name}")
 
                 # Log successful output only if original stream_output was enabled
-                if show_output and result:
+                if show_output and result and not log.json_logging_enabled():
                     self._log_terraform_result(name, result)
 
             except (TFWorkerException, KeyError) as e:
@@ -377,7 +377,10 @@ class TerraformCommand(BaseCommand):
         if result.exit_code:
             log.error(f"error running terraform {action.value} for {name}")
             # If stream_output was disabled, show the captured output at error level
-            if not self.terraform_config.stream_output:
+            if (
+                not self.terraform_config.stream_output
+                and not log.json_logging_enabled()
+            ):
                 if result.stdout:
                     for line in result.stdout.decode().strip().split("\n"):
                         if line.strip():
@@ -569,14 +572,45 @@ class TerraformCommand(BaseCommand):
             )
             stream_output = False
 
+        aggregate_output = log.json_logging_enabled()
+        effective_stream_output = stream_output and not aggregate_output
+
+        pipe_exec_kwargs = {
+            "cwd": working_dir,
+            "env": self.terraform_config.env,
+            "stream_output": effective_stream_output,
+        }
+        if effective_stream_output:
+            pipe_exec_kwargs["stream_log_level"] = log.LogLevel.INFO
+
         result: TerraformResult = TerraformResult(
             *pipe_exec(
                 f"{self.app_state.terraform_options.terraform_bin} {terraform_command} {params}",
-                cwd=working_dir,
-                env=self.terraform_config.env,
-                stream_output=stream_output,
+                **pipe_exec_kwargs,
             )
         )
+
+        if aggregate_output:
+            # For terraform plan, exit code 2 means changes detected (not an error)
+            # For other commands, any non-zero exit code is an error
+            if action == TerraformAction.PLAN and result.exit_code == 2:
+                log_level = log.LogLevel.INFO
+            elif result.exit_code != 0:
+                log_level = log.LogLevel.ERROR
+            else:
+                log_level = log.LogLevel.INFO
+            log.log_subprocess_result(
+                command=f"terraform {terraform_command}",
+                exit_code=result.exit_code,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                level=log_level,
+                extra={
+                    "definition": definition_name,
+                    "terraform_action": action.value,
+                },
+                message=f"terraform {terraform_command} output for {definition_name}",
+            )
 
         log.debug(f"exit code: {result.exit_code}")
         return result

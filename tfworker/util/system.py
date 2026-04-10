@@ -5,6 +5,8 @@ import shlex
 import subprocess
 from typing import Dict, List, Tuple, Union
 
+import tfworker.util.log as log
+
 
 def strip_ansi(line: str) -> str:
     """
@@ -26,6 +28,7 @@ def pipe_exec(
     cwd: str = None,
     env: Dict[str, str] = None,
     stream_output: bool = False,
+    stream_log_level: log.LogLevel | None = None,
 ) -> Tuple[int, Union[bytes, None], Union[bytes, None]]:
     """
     A function to take one or more commands and execute them in a pipeline, returning the output of the last command.
@@ -36,6 +39,8 @@ def pipe_exec(
         cwd (str, optional): The working directory to execute the command in.
         env (dict, optional): A dictionary of environment variables to set for the command.
         stream_output (bool, optional): A boolean indicating if the output should be streamed back to the caller.
+        stream_log_level (LogLevel, optional): The logger level to use when
+            streaming output through the application logger.
 
     Returns:
         tuple: A tuple containing the return code, stdout, and stderr of the last command in the pipeline.
@@ -112,7 +117,14 @@ def pipe_exec(
         # for a single command this will be the only command, for a pipeline reading from the
         # last command will trigger all of the commands, communicating through their pipes
         for line in iter(commands[-1].stdout.readline, ""):
-            print(line.rstrip())
+            rendered_line = line.rstrip()
+            if log.json_logging_enabled():
+                stdout += line
+                continue
+            if stream_log_level is not None:
+                log.log(rendered_line, level=stream_log_level)
+            else:
+                print(rendered_line)
             stdout += line
 
         # for streaming output stderr will be included with stdout, there's no way to make

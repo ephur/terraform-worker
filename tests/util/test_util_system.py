@@ -2,6 +2,7 @@ from unittest import mock
 
 import pytest
 
+import tfworker.util.log as log
 from tfworker.util.system import get_platform, pipe_exec, strip_ansi
 
 
@@ -86,6 +87,41 @@ class TestUtilSystem:
         assert strip_ansi("\x1b[32mWorld\x1b[0m") == "World"
         assert strip_ansi("\x1b[33mFoo\x1b[0m") == "Foo"
         assert strip_ansi("\x1b[34mBar\x1b[0m") == "Bar"
+
+    def test_pipe_exec_streams_through_logger(self, mocker):
+        log_call = mocker.patch("tfworker.util.system.log.log")
+        printer = mocker.patch("builtins.print")
+
+        exit_code, stdout, stderr = pipe_exec(
+            "/bin/echo foo",
+            stream_output=True,
+            stream_log_level=log.LogLevel.INFO,
+        )
+
+        assert exit_code == 0
+        assert stdout.rstrip() == b"foo"
+        assert stderr == b""
+        log_call.assert_called_once_with("foo", level=log.LogLevel.INFO)
+        printer.assert_not_called()
+
+    def test_pipe_exec_json_mode_does_not_emit_live_lines(self, mocker):
+        old_format = log.log_format
+        log.log_format = log.LogFormat.JSON
+        log_call = mocker.patch("tfworker.util.system.log.log")
+        printer = mocker.patch("builtins.print")
+
+        exit_code, stdout, stderr = pipe_exec(
+            "/bin/echo foo",
+            stream_output=True,
+            stream_log_level=log.LogLevel.INFO,
+        )
+
+        assert exit_code == 0
+        assert stdout.rstrip() == b"foo"
+        assert stderr == b""
+        log_call.assert_not_called()
+        printer.assert_not_called()
+        log.log_format = old_format
 
     @pytest.mark.parametrize(
         "opsys, machine, mock_platform_opsys, mock_platform_machine",
