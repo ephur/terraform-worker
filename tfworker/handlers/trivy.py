@@ -201,7 +201,7 @@ class TrivyHandler(BaseHandler):
                     "definition_path": str(definition_path),
                     "handler": "trivy",
                 }
-            (exit_code, stdout, stderr) = pipe_exec(
+            exit_code, stdout, stderr = pipe_exec(
                 f"{' '.join(trivy_args)}",
                 **pipe_exec_kwargs,
             )
