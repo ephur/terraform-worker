@@ -1,7 +1,5 @@
 import json
 import re
-import sys
-import traceback
 from datetime import UTC, datetime
 from enum import Enum
 from functools import partial
