@@ -112,6 +112,11 @@ class CLIOptionsRoot(FreezableBaseModel):
         description="The level to use for logging/output",
         json_schema_extra={"env": "LOG_LEVEL"},
     )
+    log_format: str = Field(
+        "TEXT",
+        description="The format to use for logging/output",
+        json_schema_extra={"env": "LOG_FORMAT"},
+    )
     gcp_region: str = Field(
         const.DEFAULT_GCP_REGION,
         json_schema_extra={"env": "GCP_REGION"},
@@ -230,6 +235,16 @@ class CLIOptionsRoot(FreezableBaseModel):
             return level.upper()
         except KeyError:
             raise ValueError("Invalid log level")
+
+    @field_validator("log_format")
+    @classmethod
+    def validate_log_format(cls, fmt: str) -> str:
+        """Validate the log format."""
+        try:
+            _ = log.LogFormat[fmt.upper()]
+            return fmt.upper()
+        except KeyError:
+            raise ValueError("Invalid log format")
 
     @field_validator("backend_prefix")
     @classmethod

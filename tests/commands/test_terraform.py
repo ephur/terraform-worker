@@ -4,6 +4,7 @@ from unittest import mock
 
 import pytest
 
+import tfworker.util.log as log
 from tfworker.commands.terraform import (
     TerraformCommand,
     TerraformCommandConfig,
@@ -188,6 +189,160 @@ class TestTerraformCommandMethods:
         defn.squelch_plan_output = True
         cmd._run("def", TerraformAction.PLAN)
         assert pe.call_args.kwargs["stream_output"] is False
+
+    def test_run_stream_logging_context(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        defn = cmd.app_state.definitions["def"]
+        defn.plan_file = "plan"
+
+        mocker.patch.object(TerraformCommandConfig, "get_params", return_value="params")
+        pe = mocker.patch(
+            "tfworker.commands.terraform.pipe_exec", return_value=(0, b"", b"")
+        )
+
+        cmd._run("def", TerraformAction.APPLY)
+
+        assert pe.call_args.kwargs["stream_output"] is True
+        assert pe.call_args.kwargs["stream_log_level"] == log.LogLevel.INFO
+        assert pe.call_args.kwargs["stream_log_context"] == {
+            "source": "subprocess",
+            "stream": "combined",
+            "command": "terraform apply",
+            "definition": "def",
+            "terraform_action": "apply",
+        }
+
+    def test_run_json_aggregates_output(self, tmp_path, mocker):
+        old_format = log.log_format
+        log.log_format = log.LogFormat.JSON
+        cmd = make_command(tmp_path)
+        defn = cmd.app_state.definitions["def"]
+        defn.plan_file = "plan"
+
+        mocker.patch.object(TerraformCommandConfig, "get_params", return_value="params")
+        pe = mocker.patch(
+            "tfworker.commands.terraform.pipe_exec",
+            return_value=(0, b"stdout", b"stderr"),
+        )
+        aggregate = mocker.patch(
+            "tfworker.commands.terraform.log.log_subprocess_result"
+        )
+
+        cmd._run("def", TerraformAction.APPLY)
+
+        assert pe.call_args.kwargs["stream_output"] is False
+        aggregate.assert_called_once_with(
+            command="terraform apply",
+            exit_code=0,
+            stdout=b"stdout",
+            stderr=b"stderr",
+            level=log.LogLevel.INFO,
+            extra={
+                "definition": "def",
+                "terraform_action": "apply",
+            },
+            message="terraform apply output for def",
+        )
+        log.log_format = old_format
+
+    def test_run_plan_exit_code_2_logs_as_info(self, tmp_path, mocker):
+        """Test that terraform plan exit code 2 (changes detected) logs as INFO, not ERROR"""
+        old_format = log.log_format
+        log.log_format = log.LogFormat.JSON
+        cmd = make_command(tmp_path)
+        defn = cmd.app_state.definitions["def"]
+        defn.plan_file = "plan"
+
+        mocker.patch.object(TerraformCommandConfig, "get_params", return_value="params")
+        mocker.patch(
+            "tfworker.commands.terraform.pipe_exec",
+            return_value=(2, b"stdout", b"stderr"),
+        )
+        aggregate = mocker.patch(
+            "tfworker.commands.terraform.log.log_subprocess_result"
+        )
+
+        cmd._run("def", TerraformAction.PLAN)
+
+        aggregate.assert_called_once_with(
+            command="terraform plan",
+            exit_code=2,
+            stdout=b"stdout",
+            stderr=b"stderr",
+            level=log.LogLevel.INFO,  # Exit code 2 for plan should be INFO
+            extra={
+                "definition": "def",
+                "terraform_action": "plan",
+            },
+            message="terraform plan output for def",
+        )
+        log.log_format = old_format
+
+    def test_run_plan_exit_code_1_logs_as_error(self, tmp_path, mocker):
+        """Test that terraform plan exit code 1 (actual error) logs as ERROR"""
+        old_format = log.log_format
+        log.log_format = log.LogFormat.JSON
+        cmd = make_command(tmp_path)
+        defn = cmd.app_state.definitions["def"]
+        defn.plan_file = "plan"
+
+        mocker.patch.object(TerraformCommandConfig, "get_params", return_value="params")
+        mocker.patch(
+            "tfworker.commands.terraform.pipe_exec",
+            return_value=(1, b"stdout", b"stderr"),
+        )
+        aggregate = mocker.patch(
+            "tfworker.commands.terraform.log.log_subprocess_result"
+        )
+
+        cmd._run("def", TerraformAction.PLAN)
+
+        aggregate.assert_called_once_with(
+            command="terraform plan",
+            exit_code=1,
+            stdout=b"stdout",
+            stderr=b"stderr",
+            level=log.LogLevel.ERROR,  # Exit code 1 should always be ERROR
+            extra={
+                "definition": "def",
+                "terraform_action": "plan",
+            },
+            message="terraform plan output for def",
+        )
+        log.log_format = old_format
+
+    def test_run_apply_exit_code_2_logs_as_error(self, tmp_path, mocker):
+        """Test that non-plan commands with exit code 2 still log as ERROR"""
+        old_format = log.log_format
+        log.log_format = log.LogFormat.JSON
+        cmd = make_command(tmp_path)
+        defn = cmd.app_state.definitions["def"]
+        defn.plan_file = "plan"
+
+        mocker.patch.object(TerraformCommandConfig, "get_params", return_value="params")
+        mocker.patch(
+            "tfworker.commands.terraform.pipe_exec",
+            return_value=(2, b"stdout", b"stderr"),
+        )
+        aggregate = mocker.patch(
+            "tfworker.commands.terraform.log.log_subprocess_result"
+        )
+
+        cmd._run("def", TerraformAction.APPLY)
+
+        aggregate.assert_called_once_with(
+            command="terraform apply",
+            exit_code=2,
+            stdout=b"stdout",
+            stderr=b"stderr",
+            level=log.LogLevel.ERROR,  # Exit code 2 for apply should be ERROR
+            extra={
+                "definition": "def",
+                "terraform_action": "apply",
+            },
+            message="terraform apply output for def",
+        )
+        log.log_format = old_format
 
     def test_exec_hook_paths(self, tmp_path, mocker):
         cmd = make_command(tmp_path)

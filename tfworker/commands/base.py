@@ -62,6 +62,9 @@ class BaseCommand:
         self._app_state.deployment = deployment
         c.resolve_model_with_cli_options(self._app_state)
         log.log_level = log.LogLevel[self._app_state.root_options.log_level]
+        log.log_format = log.LogFormat[
+            getattr(self._app_state.root_options, "log_format", log.LogFormat.TEXT.name)
+        ]
 
         self._app_state.authenticators = _init_authenticators(
             self._app_state.root_options
