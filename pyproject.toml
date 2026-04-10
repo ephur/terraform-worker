@@ -50,7 +50,7 @@ worker = 'tfworker.cli:cli'
 optional = true
 
 [tool.poetry.group.dev.dependencies]
-black = "^24.4"
+black = ">=24.4,<27.0"
 coverage = "^7.5"
 deepdiff = ">=7,<9"
 flake8 = "^7.0"
