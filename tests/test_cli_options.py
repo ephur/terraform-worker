@@ -278,8 +278,21 @@ class TestCLIOptionsTerraform:
         provider_cache = tmp_path / "dir"
         provider_cache.mkdir()
         provider_cache.chmod(0o444)
-        with pytest.raises(ValueError):
-            c.CLIOptionsTerraform(provider_cache=str(provider_cache))
+        # A read-only cache is allowed — writes may not be needed if all providers
+        # are already present. A warning is logged but no exception is raised.
+        cli_options = c.CLIOptionsTerraform(provider_cache=str(provider_cache))
+        assert cli_options.provider_cache == str(provider_cache)
+        provider_cache.chmod(0o755)
+
+    @skip_permissions
+    def test_validate_provider_cache_not_writable_logs_warning(self, tmp_path, mocker):
+        provider_cache = tmp_path / "dir"
+        provider_cache.mkdir()
+        provider_cache.chmod(0o444)
+        mock_warn = mocker.patch("tfworker.cli_options.log.warn")
+        c.CLIOptionsTerraform(provider_cache=str(provider_cache))
+        assert mock_warn.called
+        assert "not writeable" in mock_warn.call_args[0][0]
         provider_cache.chmod(0o755)
 
     @skip_permissions

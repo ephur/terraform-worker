@@ -468,7 +468,7 @@ class CLIOptionsTerraform(FreezableBaseModel):
     @field_validator("provider_cache")
     @classmethod
     def validate_provider_cache(cls, fpath: Union[str, None]) -> Union[str, None]:
-        return validate_existing_dir(fpath)
+        return validate_existing_dir(fpath, require_writable=False)
 
     @field_validator("plan_file_path")
     @classmethod
@@ -480,21 +480,27 @@ class CLIOptionsTerraform(FreezableBaseModel):
         return validate_limit(values)
 
 
-def validate_existing_dir(fpath: Union[str, None], empty=False) -> Union[str, None]:
+def validate_existing_dir(
+    fpath: Union[str, None], empty=False, require_writable=True
+) -> Union[str, None]:
     """
     validate_existing_dir is called by multiple validators, it ensures
-    a writable directory exists at the provided path, and optionally that
-    it is empty
+    a readable directory exists at the provided path, and optionally that
+    it is empty or writable.
 
     Args:
         fpath (str): The path to the directory
         empty (bool): If the directory must be empty
+        require_writable (bool): If True (default), raise an error when the directory
+            is not writable. If False, log a warning instead — useful when writes may
+            not actually occur at runtime (e.g. a fully-populated provider cache).
 
     Returns:
         str: The absolute path to the directory
 
     Raises:
-        ValueError: If the directory does not exist, is not a directory, is not writeable, or is not empty
+        ValueError: If the directory does not exist, is not a directory, is not readable,
+            is not writeable (when require_writable=True), or is not empty
     """
     if fpath is None:
         return
@@ -503,7 +509,13 @@ def validate_existing_dir(fpath: Union[str, None], empty=False) -> Union[str, No
     if not os.path.isdir(fpath):
         raise ValueError(f"path {fpath} does not exist!")
     if not os.access(fpath, os.W_OK):
-        raise ValueError(f"Ppath {fpath} is not writeable!")
+        if require_writable:
+            raise ValueError(f"path {fpath} is not writeable!")
+        else:
+            log.warn(
+                f"provider cache path {fpath} is not writeable; providers not already"
+                " in the cache will cause an error at runtime"
+            )
     if not os.access(fpath, os.R_OK):
         raise ValueError(f"path {fpath} is not readable!")
     if empty and any(os.listdir(fpath)):
