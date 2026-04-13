@@ -18,23 +18,8 @@ Example configuration::
 """
 
 import os
-import subprocess
-from typing import TYPE_CHECKING, Union
 
-import tfworker.util.log as log
 from pydantic import BaseModel, PrivateAttr, model_validator
-from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
-
-from tfworker.custom_types.terraform import TerraformAction, TerraformStage
-from tfworker.exceptions import HandlerError
-
-from .base import BaseHandler
-from .registry import HandlerRegistry
-
-if TYPE_CHECKING:
-    from tfworker.commands.terraform import TerraformResult
-    from tfworker.definitions.model import Definition
 
 
 class SlackConfig(BaseModel):

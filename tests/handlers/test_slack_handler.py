@@ -3,8 +3,6 @@ from unittest.mock import patch
 
 import pytest
 
-from tfworker.exceptions import HandlerError
-
 
 class TestSlackConfig:
     def test_requires_channel(self):
