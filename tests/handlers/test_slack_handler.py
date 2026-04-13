@@ -4,6 +4,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
+from tfworker.commands.terraform import TerraformResult
+from tfworker.definitions.model import Definition
 
 
 class TestSlackConfig:
@@ -407,3 +409,59 @@ class TestSlackHandlerInit:
         assert TerraformAction.PLAN in SlackHandler.actions
         assert TerraformAction.APPLY in SlackHandler.actions
         assert TerraformAction.DESTROY in SlackHandler.actions
+
+
+class TestSlackHandlerExecute:
+    def _make_handler(self):
+        from tfworker.handlers.slack import SlackConfig, SlackHandler
+        cfg = SlackConfig(channel="#ops", token="xoxb-test")
+        with patch("tfworker.handlers.slack.WebClient"):
+            handler = SlackHandler(cfg)
+        handler._client = MagicMock()
+        handler._client.chat_postMessage.return_value = {
+            "ts": "1.2", "channel": "C1"
+        }
+        return handler
+
+    def _make_definition(self, name="vpc"):
+        return Definition(name=name, path="/tmp")
+
+    def test_pre_marks_running_and_posts(self):
+        handler = self._make_handler()
+        defn = self._make_definition()
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+        assert handler._board._statuses["vpc"]["plan"] == "running"
+        handler._client.chat_postMessage.assert_called_once()
+
+    def test_post_success_marks_done_and_updates(self):
+        handler = self._make_handler()
+        defn = self._make_definition()
+        result = TerraformResult(0, b"ok", b"")
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
+        assert handler._board._statuses["vpc"]["plan"] == "done"
+        handler._client.chat_update.assert_called_once()
+
+    def test_post_failure_marks_failed_and_updates(self):
+        handler = self._make_handler()
+        defn = self._make_definition()
+        result = TerraformResult(1, b"", b"error!")
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
+        assert handler._board._statuses["vpc"]["plan"] == "failed"
+
+    def test_multiple_definitions_tracked(self):
+        handler = self._make_handler()
+        vpc = self._make_definition("vpc")
+        eks = self._make_definition("eks")
+        handler.execute(TerraformAction.INIT, TerraformStage.PRE, "prod", vpc, "/tmp")
+        handler.execute(TerraformAction.INIT, TerraformStage.PRE, "prod", eks, "/tmp")
+        assert "vpc" in handler._board._statuses
+        assert "eks" in handler._board._statuses
+
+    def test_execute_never_raises_on_slack_failure(self):
+        handler = self._make_handler()
+        handler._client.chat_postMessage.side_effect = Exception("Slack is down")
+        defn = self._make_definition()
+        # Must not raise
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")

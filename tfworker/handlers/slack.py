@@ -317,4 +317,13 @@ class SlackHandler(BaseHandler):
         working_dir: str,
         result: Union["TerraformResult", None] = None,
     ) -> None:
-        pass  # implemented in Task 8
+        self._board.ensure_definition(definition.name, deployment, working_dir)
+
+        if stage == TerraformStage.PRE:
+            self._board.mark(definition.name, action, "running")
+            self._board.post_or_update(self._client)
+
+        elif stage == TerraformStage.POST:
+            status = "done" if (result is not None and result.exit_code == 0) else "failed"
+            self._board.mark(definition.name, action, status)
+            self._board.post_or_update(self._client)
