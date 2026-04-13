@@ -199,3 +199,104 @@ class TestSlackStatusBoardGitContext:
             with patch("subprocess.check_output", side_effect=Exception("no git")):
                 result = board._resolve_git_context("/some/dir")
         assert result is None
+
+
+class TestSlackStatusBoardBlocks:
+    def _make_board(self, title=None, run_id=None):
+        from tfworker.handlers.slack import SlackStatusBoard
+        b = SlackStatusBoard(channel="#ops", title=title, run_id=run_id)
+        b._deployment = "prod"
+        return b
+
+    def test_blocks_is_list(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        assert isinstance(blocks, list)
+        assert len(blocks) >= 1
+
+    def test_header_block_contains_deployment(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        header = blocks[0]
+        assert header["type"] == "header"
+        assert "prod" in header["text"]["text"]
+
+    def test_header_uses_title_when_set(self):
+        board = self._make_board(title="My Run")
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        assert "My Run" in blocks[0]["text"]["text"]
+
+    def test_header_includes_run_id(self):
+        board = self._make_board(run_id="run-42")
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        assert "run-42" in blocks[0]["text"]["text"]
+
+    def test_git_context_block_present_when_available(self):
+        board = self._make_board()
+        board._git_context = "Branch: main  Commit: abc1234"
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        context_texts = [
+            str(b) for b in blocks if b.get("type") == "context"
+        ]
+        assert any("main" in t for t in context_texts)
+
+    def test_status_table_contains_definition_name(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        all_text = str(blocks)
+        assert "vpc" in all_text
+
+    def test_status_table_contains_action_column(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        all_text = str(blocks)
+        assert "Plan" in all_text or "plan" in all_text
+
+    def test_banner_in_progress(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "running")
+        blocks = board._build_blocks()
+        all_text = str(blocks)
+        assert "🟡" in all_text
+
+    def test_banner_done(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        all_text = str(blocks)
+        assert "✅" in all_text
+
+    def test_banner_failed(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "failed")
+        blocks = board._build_blocks()
+        all_text = str(blocks)
+        assert "❌" in all_text
+
+    def test_only_observed_actions_as_columns(self):
+        """A plan-only run shows Init and Plan columns only."""
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.INIT, "done")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        all_text = str(blocks)
+        assert "Apply" not in all_text
+        assert "Destroy" not in all_text

@@ -165,8 +165,66 @@ class SlackStatusBoard:
         return "  ".join(parts) if parts else None
 
     def _build_blocks(self) -> list[dict]:
-        """Placeholder — implemented in Task 5."""
-        return []
+        """Build Slack Block Kit payload for the current status board state."""
+        blocks: list[dict] = []
+
+        # Header block
+        title = self._title or self._deployment or "Terraform run"
+        header_text = f"🏗️  {title}"
+        if self._run_id:
+            header_text += f"  |  run: {self._run_id}"
+        blocks.append(
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": header_text, "emoji": True},
+            }
+        )
+
+        # Git context block (omitted when unavailable)
+        if self._git_context:
+            blocks.append(
+                {
+                    "type": "context",
+                    "elements": [{"type": "mrkdwn", "text": self._git_context}],
+                }
+            )
+
+        # Status table block
+        if self._seen_actions and self._statuses:
+            col_headers = ["*Definition*"] + [
+                f"*{a.capitalize()}*" for a in self._seen_actions
+            ]
+            rows = ["\t".join(col_headers)]
+            for def_name, action_statuses in self._statuses.items():
+                row = [f"`{def_name}`"]
+                for action_val in self._seen_actions:
+                    status = action_statuses.get(action_val, "pending")
+                    row.append(self.STATUS_EMOJI.get(status, "❓"))
+                rows.append("\t".join(row))
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "\n".join(rows)},
+                }
+            )
+
+        # Divider
+        blocks.append({"type": "divider"})
+
+        # Overall status banner
+        overall = self.overall_status()
+        if overall == "in_progress":
+            banner = "🟡  *In progress*"
+        elif overall == "done":
+            banner = "✅  *Run complete — all definitions succeeded*"
+        else:
+            failed = self.failed_count()
+            banner = f"❌  *Run failed — {failed} definition(s) errored*"
+        blocks.append(
+            {"type": "section", "text": {"type": "mrkdwn", "text": banner}}
+        )
+
+        return blocks
 
     def post_or_update(self, client) -> None:
         """Placeholder — implemented in Task 6."""
