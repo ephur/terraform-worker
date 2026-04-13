@@ -19,12 +19,21 @@ Example configuration::
 
 import os
 import subprocess
+from typing import TYPE_CHECKING, Union
 
+import click
 from pydantic import BaseModel, PrivateAttr, model_validator
 from slack_sdk import WebClient
 
 import tfworker.util.log as log
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
+from tfworker.exceptions import HandlerError
+from .base import BaseHandler
+from .registry import HandlerRegistry
+
+if TYPE_CHECKING:
+    from tfworker.commands.terraform import TerraformResult
+    from tfworker.definitions.model import Definition
 
 
 class SlackConfig(BaseModel):
@@ -263,3 +272,49 @@ class SlackStatusBoard:
             )
         except Exception as e:
             log.error(f"Slack API error in post_thread_reply: {e}")
+
+
+@HandlerRegistry.register("slack")
+class SlackHandler(BaseHandler):
+    """Post a live-updating Slack status board for each terraform-worker run."""
+
+    actions = [
+        TerraformAction.INIT,
+        TerraformAction.PLAN,
+        TerraformAction.APPLY,
+        TerraformAction.DESTROY,
+    ]
+    config_model = SlackConfig
+    _ready = False
+
+    def __init__(self, config: SlackConfig) -> None:
+        self.config = config
+        self._client = WebClient(token=config.resolved_token)
+        run_id = self._get_run_id()
+        self._board = SlackStatusBoard(
+            channel=config.channel,
+            title=config.title,
+            run_id=run_id,
+        )
+        self._ready = True
+
+    def is_ready(self) -> bool:
+        return self._ready
+
+    def _get_run_id(self) -> str | None:
+        """Retrieve run_id from app state; return None on any failure."""
+        try:
+            return click.get_current_context().obj.root_options.run_id
+        except Exception:
+            return None
+
+    def execute(
+        self,
+        action: "TerraformAction",
+        stage: "TerraformStage",
+        deployment: str,
+        definition: "Definition",
+        working_dir: str,
+        result: Union["TerraformResult", None] = None,
+    ) -> None:
+        pass  # implemented in Task 8

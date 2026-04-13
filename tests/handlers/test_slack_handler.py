@@ -375,3 +375,35 @@ class TestSlackStatusBoardPostOrUpdate:
         client.chat_postMessage.side_effect = Exception("network error")
         # Must not raise
         board.post_thread_reply(client, "reply")
+
+
+class TestSlackHandlerInit:
+    def _make_config(self, **kwargs):
+        from tfworker.handlers.slack import SlackConfig
+        return SlackConfig(channel="#ops", token="xoxb-test", **kwargs)
+
+    def test_is_ready_after_init(self):
+        from tfworker.handlers.slack import SlackHandler
+        with patch("tfworker.handlers.slack.WebClient"):
+            handler = SlackHandler(self._make_config())
+        assert handler.is_ready() is True
+
+    def test_missing_token_raises_handler_error(self):
+        from tfworker.handlers.slack import SlackConfig, SlackHandler
+        env = {k: v for k, v in os.environ.items() if k != "SLACK_BOT_TOKEN"}
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(Exception):
+                SlackConfig(channel="#ops")
+
+    def test_handler_stores_board(self):
+        from tfworker.handlers.slack import SlackHandler, SlackStatusBoard
+        with patch("tfworker.handlers.slack.WebClient"):
+            handler = SlackHandler(self._make_config())
+        assert isinstance(handler._board, SlackStatusBoard)
+
+    def test_actions_includes_all_terraform_actions(self):
+        from tfworker.handlers.slack import SlackHandler
+        assert TerraformAction.INIT in SlackHandler.actions
+        assert TerraformAction.PLAN in SlackHandler.actions
+        assert TerraformAction.APPLY in SlackHandler.actions
+        assert TerraformAction.DESTROY in SlackHandler.actions
