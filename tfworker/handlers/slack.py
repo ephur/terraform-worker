@@ -11,9 +11,6 @@ Example configuration::
         token: "xoxb-..."          # raw value; supports jinja injection
         # token_env: "SLACK_BOT_TOKEN"  # env var name (default)
         title: "Prod deployment"   # optional; falls back to deployment name
-        thread_reply: false        # post summary/error replies in thread
-        thread_reply_text: |      # optional template: {run_id} {status} {deployment}
-          "Run {run_id} finished: {status}"
 """
 
 import os
@@ -39,8 +36,6 @@ class SlackConfig(BaseModel):
     token: str | None = None
     token_env: str = "SLACK_BOT_TOKEN"
     title: str | None = None
-    thread_reply: bool = False
-    thread_reply_text: str | None = None
 
     _resolved_token: str = PrivateAttr(default="")
 
@@ -267,19 +262,6 @@ class SlackStatusBoard:
         except Exception as e:
             log.error(f"Slack API error in post_or_update: {e}")
 
-    def post_thread_reply(self, client: WebClient, text: str) -> None:
-        """Post a reply in the thread under the status board message."""
-        if self._ts is None:
-            return
-        try:
-            client.chat_postMessage(
-                channel=self._channel,
-                thread_ts=self._ts,
-                text=text,
-            )
-        except Exception as e:
-            log.error(f"Slack API error in post_thread_reply: {e}")
-
 
 @HandlerRegistry.register("slack")
 class SlackHandler(BaseHandler):
@@ -303,7 +285,6 @@ class SlackHandler(BaseHandler):
             title=config.title,
             run_id=run_id,
         )
-        self._completion_reply_sent = False
         self._ready = True
 
     def is_ready(self) -> bool:
@@ -353,7 +334,7 @@ class SlackHandler(BaseHandler):
         deployment: str,
         working_dir: str,
     ) -> None:
-        """Finalize the board; fix any stuck-running statuses; post completion reply."""
+        """Finalize the board; fix any stuck-running statuses."""
         try:
             for action_statuses in self._board._statuses.values():
                 for action_val in list(action_statuses):
@@ -361,41 +342,8 @@ class SlackHandler(BaseHandler):
                         action_statuses[action_val] = "failed"
 
             self._board.post_or_update(self._client)
-
-            if (
-                self.config.thread_reply
-                and self._board._ts is not None
-                and not self._completion_reply_sent
-            ):
-                self._post_completion_reply(deployment)
-                self._completion_reply_sent = True
         except Exception as e:
             log.error(f"SlackHandler.teardown error: {e}")
-
-    def _post_completion_reply(self, deployment: str) -> None:
-        overall = self._board.overall_status()
-        run_id = self._board._run_id or "unknown"
-        if self.config.thread_reply_text:
-            try:
-                text = self.config.thread_reply_text.format(
-                    run_id=run_id,
-                    status=overall,
-                    deployment=deployment,
-                )
-            except (KeyError, IndexError) as e:
-                log.error(f"Slack thread_reply_text template error: {e}; using default message")
-                text = (
-                    f"✅ Run complete for `{deployment}` (run: {run_id})"
-                    if overall == "done"
-                    else f"❌ Run finished with errors for `{deployment}` (run: {run_id})"
-                )
-        else:
-            text = (
-                f"✅ Run complete for `{deployment}` (run: {run_id})"
-                if overall == "done"
-                else f"❌ Run finished with errors for `{deployment}` (run: {run_id})"
-            )
-        self._board.post_thread_reply(self._client, text)
 
     def execute(
         self,
@@ -423,18 +371,3 @@ class SlackHandler(BaseHandler):
                 status = "failed"
             self._board.mark(definition.name, action, status)
             self._board.post_or_update(self._client)
-
-            if self.config.thread_reply:
-                if status == "failed":
-                    stderr_snippet = ""
-                    if result and result.stderr:
-                        stderr_snippet = result.stderr.decode()[:500]
-                    else:
-                        stderr_snippet = "unknown error"
-                    self._board.post_thread_reply(
-                        self._client,
-                        f"❌ `{definition.name}` {action} failed:\n```{stderr_snippet}```",
-                    )
-                elif self._board.is_terminal():
-                    self._post_completion_reply(deployment)
-                    self._completion_reply_sent = True

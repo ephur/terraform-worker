@@ -55,9 +55,7 @@ class TestSlackConfig:
         from tfworker.handlers.slack import SlackConfig
         cfg = SlackConfig(channel="#ops", token="xoxb-x")
         assert cfg.token_env == "SLACK_BOT_TOKEN"
-        assert cfg.thread_reply is False
         assert cfg.title is None
-        assert cfg.thread_reply_text is None
 
 
 class TestSlackStatusBoard:
@@ -407,31 +405,6 @@ class TestSlackStatusBoardPostOrUpdate:
         # Must not raise
         board.post_or_update(client)
 
-    def test_post_thread_reply_posts_under_parent_ts(self):
-        board = self._make_board()
-        client = self._mock_client()
-        board.post_or_update(client)  # sets _ts
-        board.post_thread_reply(client, "all done")
-        call_kwargs = client.chat_postMessage.call_args_list[-1].kwargs
-        assert call_kwargs["thread_ts"] == "111.222"
-        assert call_kwargs["text"] == "all done"
-
-    def test_post_thread_reply_noop_when_no_ts(self):
-        board = self._make_board()
-        client = self._mock_client()
-        # _ts is None — no message posted yet
-        board.post_thread_reply(client, "reply")
-        client.chat_postMessage.assert_not_called()
-
-    def test_thread_reply_error_is_logged_not_raised(self):
-        board = self._make_board()
-        client = self._mock_client()
-        board.post_or_update(client)
-        client.chat_postMessage.side_effect = Exception("network error")
-        # Must not raise
-        board.post_thread_reply(client, "reply")
-
-
 class TestSlackHandlerInit:
     def _make_config(self, **kwargs):
         from tfworker.handlers.slack import SlackConfig
@@ -574,96 +547,6 @@ class TestSlackHandlerExecute:
         assert handler._board.overall_status() == "done"
 
 
-class TestSlackHandlerThreadReply:
-    def _make_handler(self, thread_reply=True, thread_reply_text=None):
-        from tfworker.handlers.slack import SlackConfig, SlackHandler
-        cfg = SlackConfig(
-            channel="#ops",
-            token="xoxb-test",
-            thread_reply=thread_reply,
-            thread_reply_text=thread_reply_text,
-        )
-        with patch("tfworker.handlers.slack.WebClient"):
-            handler = SlackHandler(cfg)
-        handler._client = MagicMock()
-        handler._client.chat_postMessage.return_value = {
-            "ts": "1.2", "channel": "C1"
-        }
-        return handler
-
-    def _make_definition(self, name="vpc"):
-        return Definition(name=name, path="/tmp")
-
-    def test_error_reply_posted_on_failure(self):
-        handler = self._make_handler()
-        defn = self._make_definition()
-        result = TerraformResult(1, b"", b"something went wrong")
-        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
-        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
-        # chat_postMessage called twice: initial post + error thread reply
-        assert handler._client.chat_postMessage.call_count == 2
-        thread_call = handler._client.chat_postMessage.call_args_list[-1]
-        assert thread_call.kwargs["thread_ts"] == "1.2"
-        assert "something went wrong" in thread_call.kwargs["text"]
-
-    def test_completion_reply_posted_on_terminal_success(self):
-        handler = self._make_handler()
-        defn = self._make_definition()
-        result = TerraformResult(0, b"ok", b"")
-        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
-        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
-        assert handler._client.chat_postMessage.call_count == 2
-        thread_call = handler._client.chat_postMessage.call_args_list[-1]
-        assert thread_call.kwargs["thread_ts"] == "1.2"
-
-    def test_custom_thread_reply_text_rendered(self):
-        handler = self._make_handler(
-            thread_reply_text="Run {run_id} done: {status} for {deployment}"
-        )
-        handler._board._run_id = "abc-123"
-        defn = self._make_definition()
-        result = TerraformResult(0, b"ok", b"")
-        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
-        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
-        thread_call = handler._client.chat_postMessage.call_args_list[-1]
-        assert "abc-123" in thread_call.kwargs["text"]
-        assert "prod" in thread_call.kwargs["text"]
-
-    def test_no_thread_reply_when_disabled(self):
-        handler = self._make_handler(thread_reply=False)
-        defn = self._make_definition()
-        result = TerraformResult(0, b"ok", b"")
-        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
-        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
-        # Only the initial post — no thread reply
-        assert handler._client.chat_postMessage.call_count == 1
-
-    def test_completion_reply_not_posted_mid_run(self):
-        """No completion reply while other definitions are still pending."""
-        handler = self._make_handler()
-        vpc = self._make_definition("vpc")
-        eks = self._make_definition("eks")
-        result_ok = TerraformResult(0, b"ok", b"")
-        # Register eks as in-flight so vpc completing is not terminal
-        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", eks, "/tmp")
-        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", vpc, "/tmp")
-        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", vpc, "/tmp", result_ok)
-        # vpc done but eks still running — should NOT post completion reply
-        for call in handler._client.chat_postMessage.call_args_list:
-            assert call.kwargs.get("thread_ts") is None
-
-    def test_bad_template_does_not_raise(self):
-        """A template with unknown keys must not propagate an exception."""
-        handler = self._make_handler(thread_reply_text="Run {bad_key} done")
-        defn = self._make_definition()
-        result = TerraformResult(0, b"ok", b"")
-        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
-        # Must not raise despite bad template key
-        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
-        # A completion reply should still have been posted (with fallback text)
-        assert handler._client.chat_postMessage.call_count == 2
-
-
 class TestSlackHandlerRegistry:
     def test_registered_as_slack(self):
         from tfworker.handlers.registry import HandlerRegistry
@@ -767,9 +650,9 @@ class TestSlackHandlerSetup:
 
 
 class TestSlackHandlerTeardown:
-    def _make_handler(self, thread_reply=True):
+    def _make_handler(self):
         from tfworker.handlers.slack import SlackConfig, SlackHandler
-        cfg = SlackConfig(channel="#ops", token="xoxb-test", thread_reply=thread_reply)
+        cfg = SlackConfig(channel="#ops", token="xoxb-test")
         with patch("tfworker.handlers.slack.WebClient"):
             h = SlackHandler(cfg)
         h._client = MagicMock()
@@ -794,22 +677,12 @@ class TestSlackHandlerTeardown:
         h.teardown("prod", "/tmp")
         assert h._board._statuses["vpc"]["plan"] == "failed"
 
-    def test_teardown_posts_completion_reply_when_not_sent(self):
-        h = self._make_handler(thread_reply=True)
+    def test_teardown_no_extra_messages(self):
+        """teardown only updates the board — no additional postMessage calls."""
+        h = self._make_handler()
         h._board.ensure_definition("vpc", "prod", "/tmp")
         h._board.mark("vpc", TerraformAction.PLAN, "done")
         h._board._ts = "1.2"
-        h._completion_reply_sent = False
-        h.teardown("prod", "/tmp")
-        h._client.chat_postMessage.assert_called_once()
-
-    def test_teardown_no_double_reply_when_already_sent(self):
-        """If execute() already sent the completion reply, teardown() must not send another."""
-        h = self._make_handler(thread_reply=True)
-        h._board.ensure_definition("vpc", "prod", "/tmp")
-        h._board.mark("vpc", TerraformAction.PLAN, "done")
-        h._board._ts = "1.2"
-        h._completion_reply_sent = True
         h.teardown("prod", "/tmp")
         h._client.chat_postMessage.assert_not_called()
 
