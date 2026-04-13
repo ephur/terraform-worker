@@ -1,5 +1,5 @@
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -300,3 +300,78 @@ class TestSlackStatusBoardBlocks:
         all_text = str(blocks)
         assert "Apply" not in all_text
         assert "Destroy" not in all_text
+
+
+class TestSlackStatusBoardPostOrUpdate:
+    def _make_board(self):
+        from tfworker.handlers.slack import SlackStatusBoard
+        b = SlackStatusBoard(channel="#ops", title=None, run_id=None)
+        b._deployment = "prod"
+        b.ensure_definition("vpc", "prod", "/tmp")
+        b.mark("vpc", TerraformAction.PLAN, "running")
+        return b
+
+    def _mock_client(self):
+        client = MagicMock()
+        client.chat_postMessage.return_value = {"ts": "111.222", "channel": "C123"}
+        return client
+
+    def test_first_call_uses_post_message(self):
+        board = self._make_board()
+        client = self._mock_client()
+        board.post_or_update(client)
+        client.chat_postMessage.assert_called_once()
+        client.chat_update.assert_not_called()
+
+    def test_first_call_stores_ts(self):
+        board = self._make_board()
+        client = self._mock_client()
+        board.post_or_update(client)
+        assert board._ts == "111.222"
+
+    def test_second_call_uses_update(self):
+        board = self._make_board()
+        client = self._mock_client()
+        board.post_or_update(client)
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        board.post_or_update(client)
+        client.chat_update.assert_called_once()
+
+    def test_update_uses_stored_ts(self):
+        board = self._make_board()
+        client = self._mock_client()
+        board.post_or_update(client)
+        board.post_or_update(client)
+        call_kwargs = client.chat_update.call_args.kwargs
+        assert call_kwargs["ts"] == "111.222"
+
+    def test_slack_error_is_logged_not_raised(self):
+        board = self._make_board()
+        client = MagicMock()
+        client.chat_postMessage.side_effect = Exception("api down")
+        # Must not raise
+        board.post_or_update(client)
+
+    def test_post_thread_reply_posts_under_parent_ts(self):
+        board = self._make_board()
+        client = self._mock_client()
+        board.post_or_update(client)  # sets _ts
+        board.post_thread_reply(client, "all done")
+        call_kwargs = client.chat_postMessage.call_args_list[-1].kwargs
+        assert call_kwargs["thread_ts"] == "111.222"
+        assert call_kwargs["text"] == "all done"
+
+    def test_post_thread_reply_noop_when_no_ts(self):
+        board = self._make_board()
+        client = self._mock_client()
+        # _ts is None — no message posted yet
+        board.post_thread_reply(client, "reply")
+        client.chat_postMessage.assert_not_called()
+
+    def test_thread_reply_error_is_logged_not_raised(self):
+        board = self._make_board()
+        client = self._mock_client()
+        board.post_or_update(client)
+        client.chat_postMessage.side_effect = Exception("network error")
+        # Must not raise
+        board.post_thread_reply(client, "reply")

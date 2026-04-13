@@ -21,7 +21,9 @@ import os
 import subprocess
 
 from pydantic import BaseModel, PrivateAttr, model_validator
+from slack_sdk import WebClient
 
+import tfworker.util.log as log
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 
 
@@ -226,10 +228,38 @@ class SlackStatusBoard:
 
         return blocks
 
-    def post_or_update(self, client) -> None:
-        """Placeholder — implemented in Task 6."""
-        pass
+    def post_or_update(self, client: WebClient) -> None:
+        """Post the status board as a new message, or update the existing one."""
+        blocks = self._build_blocks()
+        fallback_text = f"Terraform run: {self._deployment or 'unknown'}"
+        try:
+            if self._ts is None:
+                resp = client.chat_postMessage(
+                    channel=self._channel,
+                    blocks=blocks,
+                    text=fallback_text,
+                )
+                self._ts = resp["ts"]
+                self._channel = resp["channel"]
+            else:
+                client.chat_update(
+                    channel=self._channel,
+                    ts=self._ts,
+                    blocks=blocks,
+                    text=fallback_text,
+                )
+        except Exception as e:
+            log.error(f"Slack API error in post_or_update: {e}")
 
-    def post_thread_reply(self, client, text: str) -> None:
-        """Placeholder — implemented in Task 6."""
-        pass
+    def post_thread_reply(self, client: WebClient, text: str) -> None:
+        """Post a reply in the thread under the status board message."""
+        if self._ts is None:
+            return
+        try:
+            client.chat_postMessage(
+                channel=self._channel,
+                thread_ts=self._ts,
+                text=text,
+            )
+        except Exception as e:
+            log.error(f"Slack API error in post_thread_reply: {e}")
