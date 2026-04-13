@@ -42,6 +42,7 @@ pydantic-settings = "^2.13.1"
 packaging = "^24.2"
 openai = "^1.109.1"
 urllib3 = ">=2.6.3"
+slack-sdk = "^3.35.0"
 
 [tool.poetry.scripts]
 worker = 'tfworker.cli:cli'
