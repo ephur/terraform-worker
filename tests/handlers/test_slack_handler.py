@@ -466,6 +466,60 @@ class TestSlackHandlerExecute:
         # Must not raise
         handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
 
+    def test_plan_exit_code_2_marks_changes(self):
+        """Exit code 2 on a plan means changes detected — not an error."""
+        handler = self._make_handler()
+        defn = self._make_definition()
+        result = TerraformResult(2, b"Plan: 1 to add", b"")
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
+        assert handler._board._statuses["vpc"]["plan"] == "changes"
+
+    def test_plan_exit_code_0_marks_done(self):
+        """Exit code 0 on a plan means no changes."""
+        handler = self._make_handler()
+        defn = self._make_definition()
+        result = TerraformResult(0, b"No changes.", b"")
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
+        assert handler._board._statuses["vpc"]["plan"] == "done"
+
+    def test_plan_exit_code_1_marks_failed(self):
+        """Exit code 1 on a plan means an error."""
+        handler = self._make_handler()
+        defn = self._make_definition()
+        result = TerraformResult(1, b"", b"Error: something broke")
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
+        assert handler._board._statuses["vpc"]["plan"] == "failed"
+
+    def test_exit_code_2_on_non_plan_action_marks_failed(self):
+        """Exit code 2 is only meaningful for plan; treat as failure for other actions."""
+        handler = self._make_handler()
+        defn = self._make_definition()
+        result = TerraformResult(2, b"", b"unexpected")
+        handler.execute(TerraformAction.APPLY, TerraformStage.PRE, "prod", defn, "/tmp")
+        handler.execute(TerraformAction.APPLY, TerraformStage.POST, "prod", defn, "/tmp", result)
+        assert handler._board._statuses["vpc"]["apply"] == "failed"
+
+    def test_changes_status_is_terminal(self):
+        """A plan with changes should be considered terminal, not stuck pending."""
+        handler = self._make_handler()
+        defn = self._make_definition()
+        result = TerraformResult(2, b"Plan: 1 to add", b"")
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
+        assert handler._board.is_terminal() is True
+
+    def test_changes_status_does_not_count_as_failed(self):
+        """overall_status should be 'done' when all plans show changes, not 'failed'."""
+        handler = self._make_handler()
+        defn = self._make_definition()
+        result = TerraformResult(2, b"Plan: 1 to add", b"")
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
+        assert handler._board.overall_status() == "done"
+
 
 class TestSlackHandlerThreadReply:
     def _make_handler(self, thread_reply=True, thread_reply_text=None):

@@ -70,6 +70,7 @@ class SlackStatusBoard:
         "pending": "⏳",
         "running": "🔄",
         "done": "✅",
+        "changes": "🔵",
         "failed": "❌",
         "skipped": "⏭️",
     }
@@ -347,7 +348,14 @@ class SlackHandler(BaseHandler):
             self._board.post_or_update(self._client)
 
         elif stage == TerraformStage.POST:
-            status = "done" if (result is not None and result.exit_code == 0) else "failed"
+            if result is None:
+                status = "failed"
+            elif result.exit_code == 0:
+                status = "done"
+            elif action == TerraformAction.PLAN and result.exit_code == 2:
+                status = "changes"
+            else:
+                status = "failed"
             self._board.mark(definition.name, action, status)
             self._board.post_or_update(self._client)
 
