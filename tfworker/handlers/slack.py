@@ -6,15 +6,14 @@ updating it in-place as definitions progress through terraform actions.
 Example configuration::
 
     handlers:
-      - name: slack
-        options:
-          channel: "#terraform-runs"
-          token: "xoxb-..."          # raw value; supports jinja injection
-          # token_env: "SLACK_BOT_TOKEN"  # env var name (default)
-          title: "Prod deployment"   # optional; falls back to deployment name
-          thread_reply: false        # post summary/error replies in thread
-          thread_reply_text: |      # optional template: {run_id} {status} {deployment}
-            "Run {run_id} finished: {status}"
+      slack:
+        channel: "#terraform-runs"
+        token: "xoxb-..."          # raw value; supports jinja injection
+        # token_env: "SLACK_BOT_TOKEN"  # env var name (default)
+        title: "Prod deployment"   # optional; falls back to deployment name
+        thread_reply: false        # post summary/error replies in thread
+        thread_reply_text: |      # optional template: {run_id} {status} {deployment}
+          "Run {run_id} finished: {status}"
 """
 
 import os
