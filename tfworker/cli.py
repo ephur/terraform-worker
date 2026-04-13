@@ -108,11 +108,25 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
     log_limiter()
     tfc = TerraformCommand(deployment=deployment)
 
+    if tfc.app_state.handlers is not None:
+        tfc.app_state.handlers.exec_setup(
+            deployment=deployment,
+            definitions=tfc.app_state.definitions,
+            working_dir=str(tfc.app_state.working_dir),
+            terraform_options=tfc.app_state.terraform_options,
+        )
+
     # Prepare the provider cache
     tfc.prep_providers()
     tfc.terraform_init()
     tfc.terraform_plan()
     tfc.terraform_apply_or_destroy()
+
+    if tfc.app_state.handlers is not None:
+        tfc.app_state.handlers.exec_teardown(
+            deployment=deployment,
+            working_dir=str(tfc.app_state.working_dir),
+        )
 
 
 @cli.command()

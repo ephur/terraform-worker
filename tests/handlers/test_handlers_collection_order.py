@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import MagicMock
 
 from tfworker.custom_types import TerraformAction, TerraformStage
 from tfworker.exceptions import HandlerError
@@ -177,3 +178,76 @@ class TestHasAvailablePlan:
             }
         )
         assert h.has_available_plan(DummyDef()) is False
+
+
+class TestExecSetupTeardown:
+    def test_exec_setup_calls_setup_on_ready_handlers(self):
+        calls = []
+
+        class SetupHandler(DummyHandler):
+            tag = "s"
+
+            def setup(self, deployment, definitions, working_dir, terraform_options):
+                calls.append((deployment, working_dir))
+
+        h = HandlersCollection({"s": SetupHandler()})
+        h.exec_setup("prod", MagicMock(), "/tmp", MagicMock())
+        assert calls == [("prod", "/tmp")]
+
+    def test_exec_teardown_calls_teardown_on_ready_handlers(self):
+        calls = []
+
+        class TeardownHandler(DummyHandler):
+            tag = "t"
+
+            def teardown(self, deployment, working_dir):
+                calls.append((deployment, working_dir))
+
+        h = HandlersCollection({"t": TeardownHandler()})
+        h.exec_teardown("prod", "/tmp")
+        assert calls == [("prod", "/tmp")]
+
+    def test_exec_setup_skips_not_ready_handlers(self):
+        calls = []
+
+        class NotReadyHandler(DummyHandler):
+            tag = "nr"
+
+            def setup(self, deployment, definitions, working_dir, terraform_options):
+                calls.append("called")
+
+        handler = NotReadyHandler()
+        handler._ready = False
+        h = HandlersCollection({"nr": handler})
+        h.exec_setup("prod", MagicMock(), "/tmp", MagicMock())
+        assert calls == []
+
+    def test_exec_setup_propagates_errors(self):
+        class BrokenHandler(DummyHandler):
+            tag = "b"
+
+            def setup(self, deployment, definitions, working_dir, terraform_options):
+                raise RuntimeError("boom")
+
+        h = HandlersCollection({"b": BrokenHandler()})
+        with pytest.raises(RuntimeError, match="boom"):
+            h.exec_setup("prod", MagicMock(), "/tmp", MagicMock())
+
+    def test_exec_teardown_propagates_errors(self):
+        class BrokenHandler(DummyHandler):
+            tag = "b"
+
+            def teardown(self, deployment, working_dir):
+                raise RuntimeError("boom")
+
+        h = HandlersCollection({"b": BrokenHandler()})
+        with pytest.raises(RuntimeError, match="boom"):
+            h.exec_teardown("prod", "/tmp")
+
+    def test_exec_setup_noop_for_base_handler(self):
+        h = HandlersCollection({"a": HandlerA()})
+        h.exec_setup("prod", MagicMock(), "/tmp", MagicMock())
+
+    def test_exec_teardown_noop_for_base_handler(self):
+        h = HandlersCollection({"a": HandlerA()})
+        h.exec_teardown("prod", "/tmp")

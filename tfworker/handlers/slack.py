@@ -199,24 +199,32 @@ class SlackStatusBoard:
                 }
             )
 
-        # Status table block
+        # Status table using 2-column fields layout (left = name, right = emoji row)
         if self._seen_actions and self._statuses:
-            col_headers = ["*Definition*"] + [
+            action_labels = "  ".join(
                 f"*{a.capitalize()}*" for a in self._seen_actions
-            ]
-            rows = ["\t".join(col_headers)]
-            for def_name, action_statuses in self._statuses.items():
-                row = [f"`{def_name}`"]
-                for action_val in self._seen_actions:
-                    status = action_statuses.get(action_val, "pending")
-                    row.append(self.STATUS_EMOJI.get(status, "❓"))
-                rows.append("\t".join(row))
-            blocks.append(
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": "\n".join(rows)},
-                }
             )
+            blocks.append({
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": "*Definition*"},
+                    {"type": "mrkdwn", "text": action_labels},
+                ],
+            })
+            for def_name, action_statuses in self._statuses.items():
+                emoji_row = "  ".join(
+                    self.STATUS_EMOJI.get(
+                        action_statuses.get(action_val, "pending"), "❓"
+                    )
+                    for action_val in self._seen_actions
+                )
+                blocks.append({
+                    "type": "section",
+                    "fields": [
+                        {"type": "mrkdwn", "text": f"`{def_name}`"},
+                        {"type": "mrkdwn", "text": emoji_row},
+                    ],
+                })
 
         # Divider
         blocks.append({"type": "divider"})
@@ -295,6 +303,7 @@ class SlackHandler(BaseHandler):
             title=config.title,
             run_id=run_id,
         )
+        self._completion_reply_sent = False
         self._ready = True
 
     def is_ready(self) -> bool:
@@ -306,6 +315,62 @@ class SlackHandler(BaseHandler):
             return click.get_current_context().obj.root_options.run_id
         except Exception:
             return None
+
+    def setup(
+        self,
+        deployment: str,
+        definitions,
+        working_dir: str,
+        terraform_options,
+    ) -> None:
+        """Pre-populate the board with all definitions and infer expected action columns."""
+        try:
+            expected_actions = [TerraformAction.INIT]
+            if getattr(terraform_options, "plan", False) or getattr(
+                terraform_options, "plan_destroy", False
+            ):
+                expected_actions.append(TerraformAction.PLAN)
+            if getattr(terraform_options, "apply", False) or any(
+                getattr(defn, "always_apply", False) for defn in definitions.values()
+            ):
+                expected_actions.append(TerraformAction.APPLY)
+            if getattr(terraform_options, "destroy", False):
+                expected_actions.append(TerraformAction.DESTROY)
+
+            for defn in definitions.values():
+                self._board.ensure_definition(defn.name, deployment, working_dir)
+                for action in expected_actions:
+                    action_val = action.value
+                    if action_val not in self._board._statuses[defn.name]:
+                        self._board.mark(defn.name, action, "pending")
+
+            self._board.post_or_update(self._client)
+        except Exception as e:
+            log.error(f"SlackHandler.setup error: {e}")
+
+    def teardown(
+        self,
+        deployment: str,
+        working_dir: str,
+    ) -> None:
+        """Finalize the board; fix any stuck-running statuses; post completion reply."""
+        try:
+            for action_statuses in self._board._statuses.values():
+                for action_val in list(action_statuses):
+                    if action_statuses[action_val] == "running":
+                        action_statuses[action_val] = "failed"
+
+            self._board.post_or_update(self._client)
+
+            if (
+                self.config.thread_reply
+                and self._board._ts is not None
+                and not self._completion_reply_sent
+            ):
+                self._post_completion_reply(deployment)
+                self._completion_reply_sent = True
+        except Exception as e:
+            log.error(f"SlackHandler.teardown error: {e}")
 
     def _post_completion_reply(self, deployment: str) -> None:
         overall = self._board.overall_status()
@@ -372,3 +437,4 @@ class SlackHandler(BaseHandler):
                     )
                 elif self._board.is_terminal():
                     self._post_completion_reply(deployment)
+                    self._completion_reply_sent = True

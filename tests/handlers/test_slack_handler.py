@@ -303,6 +303,59 @@ class TestSlackStatusBoardBlocks:
         assert "Apply" not in all_text
         assert "Destroy" not in all_text
 
+    def test_status_table_uses_fields_layout(self):
+        """Table rows are rendered as section blocks with fields, not tab-separated text."""
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        fields_sections = [b for b in blocks if b.get("type") == "section" and "fields" in b]
+        assert len(fields_sections) >= 2  # header row + at least one definition row
+
+    def test_status_table_header_fields_structure(self):
+        """Header row has exactly 2 fields: Definition label and action labels."""
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        fields_sections = [b for b in blocks if b.get("type") == "section" and "fields" in b]
+        header = fields_sections[0]
+        assert len(header["fields"]) == 2
+        assert header["fields"][0]["text"] == "*Definition*"
+        assert "*Plan*" in header["fields"][1]["text"]
+
+    def test_status_table_definition_row_structure(self):
+        """Definition rows have name on left, emoji string on right."""
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        fields_sections = [b for b in blocks if b.get("type") == "section" and "fields" in b]
+        def_row = fields_sections[1]
+        assert len(def_row["fields"]) == 2
+        assert "`vpc`" in def_row["fields"][0]["text"]
+        assert "✅" in def_row["fields"][1]["text"]
+
+    def test_multiple_definitions_produce_multiple_rows(self):
+        """Multiple definitions produce one section+fields block each."""
+        board = self._make_board()
+        for name in ["vpc", "eks", "rds"]:
+            board.ensure_definition(name, "prod", "/tmp")
+            board.mark(name, TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        fields_sections = [b for b in blocks if b.get("type") == "section" and "fields" in b]
+        assert len(fields_sections) == 4  # 1 header + 3 definition rows
+
+    def test_table_section_blocks_have_no_text_key(self):
+        """Table section blocks use 'fields', not a top-level 'text' key."""
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        for block in blocks:
+            if block.get("type") == "section" and "fields" in block:
+                assert "text" not in block
+
 
 class TestSlackStatusBoardPostOrUpdate:
     def _make_board(self):
@@ -625,3 +678,143 @@ class TestSlackHandlerRegistry:
         from tfworker.handlers.slack import SlackConfig
         model = HandlerRegistry.get_handler_config_model("slack")
         assert model is SlackConfig
+
+
+class TestSlackHandlerSetup:
+    def _make_handler(self):
+        from tfworker.handlers.slack import SlackConfig, SlackHandler
+        cfg = SlackConfig(channel="#ops", token="xoxb-test")
+        with patch("tfworker.handlers.slack.WebClient"):
+            h = SlackHandler(cfg)
+        h._client = MagicMock()
+        h._client.chat_postMessage.return_value = {"ts": "1.2", "channel": "C1"}
+        return h
+
+    def _defs(self, names=("vpc", "eks"), always_apply=False):
+        objs = [Definition(name=n, path="/tmp", always_apply=always_apply) for n in names]
+        m = MagicMock()
+        m.values.return_value = objs
+        return m
+
+    def _opts(self, plan=True, apply=False, destroy=False, plan_destroy=False):
+        o = MagicMock()
+        o.plan = plan
+        o.apply = apply
+        o.destroy = destroy
+        o.plan_destroy = plan_destroy
+        return o
+
+    def test_registers_all_definitions(self):
+        h = self._make_handler()
+        h.setup("prod", self._defs(["vpc", "eks"]), "/tmp", self._opts())
+        assert "vpc" in h._board._statuses
+        assert "eks" in h._board._statuses
+
+    def test_seeds_pending_for_plan_action(self):
+        h = self._make_handler()
+        h.setup("prod", self._defs(["vpc"]), "/tmp", self._opts(plan=True))
+        assert h._board._statuses["vpc"].get("plan") == "pending"
+
+    def test_init_always_included(self):
+        h = self._make_handler()
+        h.setup("prod", self._defs(["vpc"]), "/tmp", self._opts(plan=False))
+        assert "init" in h._board._seen_actions
+
+    def test_apply_inferred_from_option(self):
+        h = self._make_handler()
+        h.setup("prod", self._defs(["vpc"]), "/tmp", self._opts(apply=True))
+        assert "apply" in h._board._seen_actions
+
+    def test_apply_inferred_from_always_apply_definition(self):
+        h = self._make_handler()
+        h.setup("prod", self._defs(["vpc"], always_apply=True), "/tmp", self._opts(apply=False))
+        assert "apply" in h._board._seen_actions
+
+    def test_apply_not_included_when_not_requested(self):
+        h = self._make_handler()
+        h.setup("prod", self._defs(["vpc"]), "/tmp", self._opts(plan=True, apply=False))
+        assert "apply" not in h._board._seen_actions
+
+    def test_destroy_inferred_from_option(self):
+        h = self._make_handler()
+        h.setup("prod", self._defs(["vpc"]), "/tmp", self._opts(destroy=True))
+        assert "destroy" in h._board._seen_actions
+
+    def test_posts_initial_board(self):
+        h = self._make_handler()
+        h.setup("prod", self._defs(["vpc"]), "/tmp", self._opts())
+        h._client.chat_postMessage.assert_called_once()
+
+    def test_slack_error_does_not_raise(self):
+        h = self._make_handler()
+        h._client.chat_postMessage.side_effect = Exception("down")
+        h.setup("prod", self._defs(["vpc"]), "/tmp", self._opts())
+
+    def test_does_not_overwrite_existing_status(self):
+        """If execute() already marked a status, setup() must not reset it."""
+        h = self._make_handler()
+        h._board._statuses["vpc"] = {"init": "running"}
+        h._board._seen_actions = ["init"]
+        defs = MagicMock()
+        defs.values.return_value = [Definition(name="vpc", path="/tmp")]
+        h.setup("prod", defs, "/tmp", self._opts())
+        assert h._board._statuses["vpc"]["init"] == "running"
+
+    def test_plan_destroy_infers_plan_column(self):
+        h = self._make_handler()
+        h.setup("prod", self._defs(["vpc"]), "/tmp", self._opts(plan=False, plan_destroy=True))
+        assert "plan" in h._board._seen_actions
+
+
+class TestSlackHandlerTeardown:
+    def _make_handler(self, thread_reply=True):
+        from tfworker.handlers.slack import SlackConfig, SlackHandler
+        cfg = SlackConfig(channel="#ops", token="xoxb-test", thread_reply=thread_reply)
+        with patch("tfworker.handlers.slack.WebClient"):
+            h = SlackHandler(cfg)
+        h._client = MagicMock()
+        h._client.chat_postMessage.return_value = {"ts": "1.2", "channel": "C1"}
+        h._client.chat_update.return_value = {}
+        return h
+
+    def test_teardown_posts_final_update(self):
+        h = self._make_handler()
+        h._board.ensure_definition("vpc", "prod", "/tmp")
+        h._board.mark("vpc", TerraformAction.PLAN, "done")
+        h._board._ts = "1.2"
+        h.teardown("prod", "/tmp")
+        h._client.chat_update.assert_called_once()
+
+    def test_teardown_fixes_stuck_running(self):
+        h = self._make_handler()
+        h._board.ensure_definition("vpc", "prod", "/tmp")
+        h._board._statuses["vpc"]["plan"] = "running"
+        h._board._seen_actions = ["plan"]
+        h._board._ts = "1.2"
+        h.teardown("prod", "/tmp")
+        assert h._board._statuses["vpc"]["plan"] == "failed"
+
+    def test_teardown_posts_completion_reply_when_not_sent(self):
+        h = self._make_handler(thread_reply=True)
+        h._board.ensure_definition("vpc", "prod", "/tmp")
+        h._board.mark("vpc", TerraformAction.PLAN, "done")
+        h._board._ts = "1.2"
+        h._completion_reply_sent = False
+        h.teardown("prod", "/tmp")
+        h._client.chat_postMessage.assert_called_once()
+
+    def test_teardown_no_double_reply_when_already_sent(self):
+        """If execute() already sent the completion reply, teardown() must not send another."""
+        h = self._make_handler(thread_reply=True)
+        h._board.ensure_definition("vpc", "prod", "/tmp")
+        h._board.mark("vpc", TerraformAction.PLAN, "done")
+        h._board._ts = "1.2"
+        h._completion_reply_sent = True
+        h.teardown("prod", "/tmp")
+        h._client.chat_postMessage.assert_not_called()
+
+    def test_teardown_slack_error_does_not_raise(self):
+        h = self._make_handler()
+        h._client.chat_update.side_effect = Exception("down")
+        h._board._ts = "1.2"
+        h.teardown("prod", "/tmp")
