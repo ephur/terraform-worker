@@ -32,22 +32,21 @@ Add `slack-sdk` to `pyproject.toml` dependencies.
 
 ```yaml
 handlers:
-  - name: slack
-    options:
-      channel: "#terraform-runs"      # required
+  slack:
+    channel: "#terraform-runs"      # required
 
-      # Token resolution — pick one, or none to use default env var.
-      # Only one should be set; token takes precedence over token_env.
-      token: "xoxb-..."              # raw value; supports jinja template injection
-      token_env: "MY_SLACK_TOKEN"    # custom env var name (default: SLACK_BOT_TOKEN)
+    # Token resolution — pick one, or none to use default env var.
+    # Only one should be set; token takes precedence over token_env.
+    token: "xoxb-..."              # raw value; supports jinja template injection
+    token_env: "MY_SLACK_TOKEN"    # custom env var name (default: SLACK_BOT_TOKEN)
 
-      # Header (all optional)
-      title: "Prod deployment"       # falls back to deployment name
+    # Header (all optional)
+    title: "Prod deployment"       # falls back to deployment name
 
-      # Thread reply (optional)
-      thread_reply: false            # default false
-      thread_reply_text: |           # optional template; vars: {run_id} {status} {deployment}
-        "Run {run_id} finished with status: {status}"
+    # Thread reply (optional)
+    thread_reply: false            # default false
+    thread_reply_text: |           # optional template; vars: {run_id} {status} {deployment}
+      "Run {run_id} finished with status: {status}"
 ```
 
 ### `SlackConfig` Fields
