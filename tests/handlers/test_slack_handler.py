@@ -545,6 +545,17 @@ class TestSlackHandlerThreadReply:
         for call in handler._client.chat_postMessage.call_args_list:
             assert call.kwargs.get("thread_ts") is None
 
+    def test_bad_template_does_not_raise(self):
+        """A template with unknown keys must not propagate an exception."""
+        handler = self._make_handler(thread_reply_text="Run {bad_key} done")
+        defn = self._make_definition()
+        result = TerraformResult(0, b"ok", b"")
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+        # Must not raise despite bad template key
+        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
+        # A completion reply should still have been posted (with fallback text)
+        assert handler._client.chat_postMessage.call_count == 2
+
 
 class TestSlackHandlerRegistry:
     def test_registered_as_slack(self):

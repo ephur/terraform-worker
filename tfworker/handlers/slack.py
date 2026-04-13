@@ -311,11 +311,19 @@ class SlackHandler(BaseHandler):
         overall = self._board.overall_status()
         run_id = self._board._run_id or "unknown"
         if self.config.thread_reply_text:
-            text = self.config.thread_reply_text.format(
-                run_id=run_id,
-                status=overall,
-                deployment=deployment,
-            )
+            try:
+                text = self.config.thread_reply_text.format(
+                    run_id=run_id,
+                    status=overall,
+                    deployment=deployment,
+                )
+            except (KeyError, IndexError) as e:
+                log.error(f"Slack thread_reply_text template error: {e}; using default message")
+                text = (
+                    f"✅ Run complete for `{deployment}` (run: {run_id})"
+                    if overall == "done"
+                    else f"❌ Run finished with errors for `{deployment}` (run: {run_id})"
+                )
         else:
             text = (
                 f"✅ Run complete for `{deployment}` (run: {run_id})"
