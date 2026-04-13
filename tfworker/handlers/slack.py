@@ -334,12 +334,14 @@ class SlackHandler(BaseHandler):
         deployment: str,
         working_dir: str,
     ) -> None:
-        """Finalize the board; fix any stuck-running statuses."""
+        """Finalize the board; resolve any unfinished statuses."""
         try:
             for action_statuses in self._board._statuses.values():
                 for action_val in list(action_statuses):
                     if action_statuses[action_val] == "running":
                         action_statuses[action_val] = "failed"
+                    elif action_statuses[action_val] == "pending":
+                        action_statuses[action_val] = "skipped"
 
             self._board.post_or_update(self._client)
         except Exception as e:

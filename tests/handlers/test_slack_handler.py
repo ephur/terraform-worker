@@ -686,6 +686,17 @@ class TestSlackHandlerTeardown:
         h.teardown("prod", "/tmp")
         h._client.chat_postMessage.assert_not_called()
 
+    def test_teardown_marks_pending_as_skipped(self):
+        """Actions pre-populated by setup() but never started are shown as skipped."""
+        h = self._make_handler()
+        h._board.ensure_definition("vpc", "prod", "/tmp")
+        h._board._statuses["vpc"]["plan"] = "done"
+        h._board._statuses["vpc"]["apply"] = "pending"
+        h._board._seen_actions = ["plan", "apply"]
+        h._board._ts = "1.2"
+        h.teardown("prod", "/tmp")
+        assert h._board._statuses["vpc"]["apply"] == "skipped"
+
     def test_teardown_slack_error_does_not_raise(self):
         h = self._make_handler()
         h._client.chat_update.side_effect = Exception("down")
