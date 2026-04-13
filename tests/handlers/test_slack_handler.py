@@ -3,6 +3,8 @@ from unittest.mock import patch
 
 import pytest
 
+from tfworker.custom_types.terraform import TerraformAction, TerraformStage
+
 
 class TestSlackConfig:
     def test_requires_channel(self):
@@ -54,3 +56,92 @@ class TestSlackConfig:
         assert cfg.thread_reply is False
         assert cfg.title is None
         assert cfg.thread_reply_text is None
+
+
+class TestSlackStatusBoard:
+    def _make_board(self):
+        from tfworker.handlers.slack import SlackStatusBoard
+        return SlackStatusBoard(channel="#ops", title=None, run_id=None)
+
+    def test_ensure_definition_registers_definition(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        assert "vpc" in board._statuses
+
+    def test_ensure_definition_captures_deployment_once(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.ensure_definition("eks", "other", "/tmp")
+        assert board._deployment == "prod"  # first call wins
+
+    def test_mark_sets_status(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "running")
+        assert board._statuses["vpc"]["plan"] == "running"
+
+    def test_mark_adds_action_to_seen_actions(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "running")
+        assert "plan" in board._seen_actions
+
+    def test_mark_maintains_action_order(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.APPLY, "running")
+        board.mark("vpc", TerraformAction.INIT, "done")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        assert board._seen_actions == ["init", "plan", "apply"]
+
+    def test_is_terminal_false_when_running(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "running")
+        assert board.is_terminal() is False
+
+    def test_is_terminal_false_when_pending(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.INIT, "done")
+        board.mark("vpc", TerraformAction.PLAN, "running")
+        assert board.is_terminal() is False
+
+    def test_is_terminal_true_when_all_done(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.INIT, "done")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        assert board.is_terminal() is True
+
+    def test_is_terminal_true_when_failed(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "failed")
+        assert board.is_terminal() is True
+
+    def test_overall_status_in_progress(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "running")
+        assert board.overall_status() == "in_progress"
+
+    def test_overall_status_done(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        assert board.overall_status() == "done"
+
+    def test_overall_status_failed(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "failed")
+        assert board.overall_status() == "failed"
+
+    def test_failed_count(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.ensure_definition("eks", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "failed")
+        board.mark("eks", TerraformAction.PLAN, "done")
+        assert board.failed_count() == 1
