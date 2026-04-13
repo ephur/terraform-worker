@@ -308,6 +308,23 @@ class SlackHandler(BaseHandler):
         except Exception:
             return None
 
+    def _post_completion_reply(self, deployment: str) -> None:
+        overall = self._board.overall_status()
+        run_id = self._board._run_id or "unknown"
+        if self.config.thread_reply_text:
+            text = self.config.thread_reply_text.format(
+                run_id=run_id,
+                status=overall,
+                deployment=deployment,
+            )
+        else:
+            text = (
+                f"✅ Run complete for `{deployment}` (run: {run_id})"
+                if overall == "done"
+                else f"❌ Run finished with errors for `{deployment}` (run: {run_id})"
+            )
+        self._board.post_thread_reply(self._client, text)
+
     def execute(
         self,
         action: "TerraformAction",
@@ -327,3 +344,17 @@ class SlackHandler(BaseHandler):
             status = "done" if (result is not None and result.exit_code == 0) else "failed"
             self._board.mark(definition.name, action, status)
             self._board.post_or_update(self._client)
+
+            if self.config.thread_reply:
+                if status == "failed":
+                    stderr_snippet = ""
+                    if result and result.stderr:
+                        stderr_snippet = result.stderr.decode()[:500]
+                    else:
+                        stderr_snippet = "unknown error"
+                    self._board.post_thread_reply(
+                        self._client,
+                        f"❌ `{definition.name}` {action} failed:\n```{stderr_snippet}```",
+                    )
+                elif self._board.is_terminal():
+                    self._post_completion_reply(deployment)

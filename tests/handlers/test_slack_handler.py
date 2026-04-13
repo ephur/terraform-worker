@@ -465,3 +465,82 @@ class TestSlackHandlerExecute:
         defn = self._make_definition()
         # Must not raise
         handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+
+
+class TestSlackHandlerThreadReply:
+    def _make_handler(self, thread_reply=True, thread_reply_text=None):
+        from tfworker.handlers.slack import SlackConfig, SlackHandler
+        cfg = SlackConfig(
+            channel="#ops",
+            token="xoxb-test",
+            thread_reply=thread_reply,
+            thread_reply_text=thread_reply_text,
+        )
+        with patch("tfworker.handlers.slack.WebClient"):
+            handler = SlackHandler(cfg)
+        handler._client = MagicMock()
+        handler._client.chat_postMessage.return_value = {
+            "ts": "1.2", "channel": "C1"
+        }
+        return handler
+
+    def _make_definition(self, name="vpc"):
+        return Definition(name=name, path="/tmp")
+
+    def test_error_reply_posted_on_failure(self):
+        handler = self._make_handler()
+        defn = self._make_definition()
+        result = TerraformResult(1, b"", b"something went wrong")
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
+        # chat_postMessage called twice: initial post + error thread reply
+        assert handler._client.chat_postMessage.call_count == 2
+        thread_call = handler._client.chat_postMessage.call_args_list[-1]
+        assert thread_call.kwargs["thread_ts"] == "1.2"
+        assert "something went wrong" in thread_call.kwargs["text"]
+
+    def test_completion_reply_posted_on_terminal_success(self):
+        handler = self._make_handler()
+        defn = self._make_definition()
+        result = TerraformResult(0, b"ok", b"")
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
+        assert handler._client.chat_postMessage.call_count == 2
+        thread_call = handler._client.chat_postMessage.call_args_list[-1]
+        assert thread_call.kwargs["thread_ts"] == "1.2"
+
+    def test_custom_thread_reply_text_rendered(self):
+        handler = self._make_handler(
+            thread_reply_text="Run {run_id} done: {status} for {deployment}"
+        )
+        handler._board._run_id = "abc-123"
+        defn = self._make_definition()
+        result = TerraformResult(0, b"ok", b"")
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
+        thread_call = handler._client.chat_postMessage.call_args_list[-1]
+        assert "abc-123" in thread_call.kwargs["text"]
+        assert "prod" in thread_call.kwargs["text"]
+
+    def test_no_thread_reply_when_disabled(self):
+        handler = self._make_handler(thread_reply=False)
+        defn = self._make_definition()
+        result = TerraformResult(0, b"ok", b"")
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", defn, "/tmp")
+        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", defn, "/tmp", result)
+        # Only the initial post — no thread reply
+        assert handler._client.chat_postMessage.call_count == 1
+
+    def test_completion_reply_not_posted_mid_run(self):
+        """No completion reply while other definitions are still pending."""
+        handler = self._make_handler()
+        vpc = self._make_definition("vpc")
+        eks = self._make_definition("eks")
+        result_ok = TerraformResult(0, b"ok", b"")
+        # Register eks as in-flight so vpc completing is not terminal
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", eks, "/tmp")
+        handler.execute(TerraformAction.PLAN, TerraformStage.PRE, "prod", vpc, "/tmp")
+        handler.execute(TerraformAction.PLAN, TerraformStage.POST, "prod", vpc, "/tmp", result_ok)
+        # vpc done but eks still running — should NOT post completion reply
+        for call in handler._client.chat_postMessage.call_args_list:
+            assert call.kwargs.get("thread_ts") is None
