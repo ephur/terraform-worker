@@ -132,9 +132,7 @@ class SlackStatusBoard:
         branch = os.environ.get("GITHUB_REF_NAME") or os.environ.get(
             "CI_COMMIT_REF_NAME"
         )
-        raw_sha = os.environ.get("GITHUB_SHA", "") or os.environ.get(
-            "CI_COMMIT_SHA", ""
-        )
+        raw_sha = os.environ.get("GITHUB_SHA") or os.environ.get("CI_COMMIT_SHA") or ""
         commit = raw_sha[:7] if raw_sha else ""
 
         if not branch:

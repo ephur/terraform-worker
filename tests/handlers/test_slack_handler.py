@@ -154,8 +154,13 @@ class TestSlackStatusBoardGitContext:
 
     def test_github_actions_env_vars(self):
         board = self._make_board()
-        env = {"GITHUB_REF_NAME": "main", "GITHUB_SHA": "abc1234567"}
-        with patch.dict(os.environ, env, clear=False):
+        env = {
+            "GITHUB_REF_NAME": "main",
+            "GITHUB_SHA": "abc1234567",
+            "CI_COMMIT_REF_NAME": "",
+            "CI_COMMIT_SHA": "",
+        }
+        with patch.dict(os.environ, env, clear=True):
             result = board._resolve_git_context("/tmp")
         assert "main" in result
         assert "abc1234" in result
@@ -165,8 +170,10 @@ class TestSlackStatusBoardGitContext:
         env = {
             "CI_COMMIT_REF_NAME": "feature/x",
             "CI_COMMIT_SHA": "def7890123",
+            "GITHUB_REF_NAME": "",
+            "GITHUB_SHA": "",
         }
-        with patch.dict(os.environ, env, clear=False):
+        with patch.dict(os.environ, env, clear=True):
             result = board._resolve_git_context("/tmp")
         assert "feature/x" in result
         assert "def7890" in result
