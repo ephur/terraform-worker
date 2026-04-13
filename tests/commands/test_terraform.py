@@ -756,39 +756,6 @@ class TestTerraformResult:
         cmd.terraform_plan()
         assert cmd.app_state.definitions["def"].needs_apply is True
 
-    def test_terraform_plan_skipped_notifies_post_handlers(self, tmp_path, mocker):
-        """When a plan is skipped because a plan file already exists, POST handlers
-        are called with a synthetic TerraformResult(exit_code=2) so they can
-        transition out of 'running' state (e.g. Slack board shows 🔵 not 🔄)."""
-        cmd = make_command(tmp_path, plan=True)
-        plan_cls = mocker.patch("tfworker.definitions.plan.DefinitionPlan")
-        plan_inst = plan_cls.return_value
-        # First needs_plan call (pre-check loop): plan file exists
-        # Second needs_plan call (main loop): plan file exists — triggers POST notify
-        plan_inst.needs_plan.side_effect = [
-            (False, "plan file exists"),
-            (False, "plan file exists"),
-        ]
-        cmd._exec_terraform_pre_plan = mocker.Mock()
-        exec_hook = mocker.patch.object(cmd, "_exec_hook")
-
-        cmd.terraform_plan()
-
-        post_handler_calls = [
-            c
-            for c in cmd.app_state.handlers.exec_handlers.call_args_list
-            if c.kwargs.get("stage") == TerraformStage.POST
-        ]
-        assert len(post_handler_calls) == 1
-        assert post_handler_calls[0].kwargs["action"] == TerraformAction.PLAN
-        assert post_handler_calls[0].kwargs["result"].exit_code == 2
-
-        post_hook_calls = [
-            c for c in exec_hook.call_args_list if c.args[2] == TerraformStage.POST
-        ]
-        assert len(post_hook_calls) == 1
-        assert post_hook_calls[0].args[1] == TerraformAction.PLAN
-
     def test_terraform_plan_always_apply(self, tmp_path, mocker):
         cmd = make_command(tmp_path, plan=True)
         cmd.app_state.definitions["def"].always_apply = True

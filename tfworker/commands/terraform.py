@@ -232,31 +232,6 @@ class TerraformCommand(BaseCommand):
             needed, reason = def_plan.needs_plan(self.app_state.definitions[name])
             if not needed:
                 log.info(f"Plan not needed for definition: {name}, reason: {reason}")
-                if "plan file exists" in reason:
-                    # A pre-existing plan file means changes were detected in an earlier run.
-                    # Fire POST plan handlers with exit_code=2 so they can update their state
-                    # (e.g. Slack handler needs to transition out of "running" to "changes").
-                    synthetic_result = TerraformResult(
-                        2, b"", b"plan file exists; using cached plan"
-                    )
-                    try:
-                        self._app_state.handlers.exec_handlers(
-                            action=TerraformAction.PLAN,
-                            stage=TerraformStage.POST,
-                            deployment=self.app_state.deployment,
-                            definition=self.app_state.definitions[name],
-                            working_dir=self.app_state.working_dir,
-                            result=synthetic_result,
-                        )
-                    except HandlerError as e:
-                        log.error(f"handler error on definition {name}: {e}")
-                        self.ctx.exit(2)
-                    self._exec_hook(
-                        self._app_state.definitions[name],
-                        TerraformAction.PLAN,
-                        TerraformStage.POST,
-                        synthetic_result,
-                    )
                 continue
 
             log.info(f"definition {name} needs a plan: {reason}")
