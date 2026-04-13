@@ -27,7 +27,6 @@ from slack_sdk import WebClient
 
 import tfworker.util.log as log
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
-from tfworker.exceptions import HandlerError
 from .base import BaseHandler
 from .registry import HandlerRegistry
 

@@ -544,3 +544,19 @@ class TestSlackHandlerThreadReply:
         # vpc done but eks still running — should NOT post completion reply
         for call in handler._client.chat_postMessage.call_args_list:
             assert call.kwargs.get("thread_ts") is None
+
+
+class TestSlackHandlerRegistry:
+    def test_registered_as_slack(self):
+        from tfworker.handlers.registry import HandlerRegistry
+        import tfworker.handlers.slack  # noqa: F401
+        handler_cls = HandlerRegistry.get_handler("slack")
+        from tfworker.handlers.slack import SlackHandler
+        assert handler_cls is SlackHandler
+
+    def test_config_model_is_slack_config(self):
+        from tfworker.handlers.registry import HandlerRegistry
+        import tfworker.handlers.slack  # noqa: F401
+        from tfworker.handlers.slack import SlackConfig
+        model = HandlerRegistry.get_handler_config_model("slack")
+        assert model is SlackConfig
