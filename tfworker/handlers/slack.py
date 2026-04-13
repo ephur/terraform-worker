@@ -128,8 +128,43 @@ class SlackStatusBoard:
         )
 
     def _resolve_git_context(self, working_dir: str) -> str | None:
-        """Placeholder — implemented in Task 4."""
-        return None
+        """Resolve branch and commit from CI env vars or git subprocess."""
+        branch = os.environ.get("GITHUB_REF_NAME") or os.environ.get(
+            "CI_COMMIT_REF_NAME"
+        )
+        raw_sha = os.environ.get("GITHUB_SHA", "") or os.environ.get(
+            "CI_COMMIT_SHA", ""
+        )
+        commit = raw_sha[:7] if raw_sha else ""
+
+        if not branch:
+            try:
+                branch = subprocess.check_output(
+                    ["git", "branch", "--show-current"],
+                    cwd=working_dir,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                ).decode().strip()
+            except Exception:
+                pass
+
+        if not commit:
+            try:
+                commit = subprocess.check_output(
+                    ["git", "rev-parse", "--short", "HEAD"],
+                    cwd=working_dir,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                ).decode().strip()
+            except Exception:
+                pass
+
+        parts = []
+        if branch:
+            parts.append(f"Branch: {branch}")
+        if commit:
+            parts.append(f"Commit: {commit}")
+        return "  ".join(parts) if parts else None
 
     def _build_blocks(self) -> list[dict]:
         """Placeholder — implemented in Task 5."""

@@ -145,3 +145,50 @@ class TestSlackStatusBoard:
         board.mark("vpc", TerraformAction.PLAN, "failed")
         board.mark("eks", TerraformAction.PLAN, "done")
         assert board.failed_count() == 1
+
+
+class TestSlackStatusBoardGitContext:
+    def _make_board(self):
+        from tfworker.handlers.slack import SlackStatusBoard
+        return SlackStatusBoard(channel="#ops", title=None, run_id=None)
+
+    def test_github_actions_env_vars(self):
+        board = self._make_board()
+        env = {"GITHUB_REF_NAME": "main", "GITHUB_SHA": "abc1234567"}
+        with patch.dict(os.environ, env, clear=False):
+            result = board._resolve_git_context("/tmp")
+        assert "main" in result
+        assert "abc1234" in result
+
+    def test_gitlab_ci_env_vars(self):
+        board = self._make_board()
+        env = {
+            "CI_COMMIT_REF_NAME": "feature/x",
+            "CI_COMMIT_SHA": "def7890123",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            result = board._resolve_git_context("/tmp")
+        assert "feature/x" in result
+        assert "def7890" in result
+
+    def test_falls_back_to_git_subprocess(self):
+        board = self._make_board()
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("GITHUB_REF_NAME", "GITHUB_SHA",
+                            "CI_COMMIT_REF_NAME", "CI_COMMIT_SHA")}
+        with patch.dict(os.environ, env, clear=True):
+            with patch("subprocess.check_output") as mock_sub:
+                mock_sub.side_effect = [b"mybranch\n", b"a1b2c3d\n"]
+                result = board._resolve_git_context("/some/dir")
+        assert "mybranch" in result
+        assert "a1b2c3d" in result
+
+    def test_returns_none_on_complete_failure(self):
+        board = self._make_board()
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("GITHUB_REF_NAME", "GITHUB_SHA",
+                            "CI_COMMIT_REF_NAME", "CI_COMMIT_SHA")}
+        with patch.dict(os.environ, env, clear=True):
+            with patch("subprocess.check_output", side_effect=Exception("no git")):
+                result = board._resolve_git_context("/some/dir")
+        assert result is None
