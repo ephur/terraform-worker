@@ -382,6 +382,16 @@ class CLIOptionsTerraform(FreezableBaseModel):
         json_schema_extra={"env": "WORKER_BACKEND_USE_ALL_REMOTES"},
         description="Generate remote data sources based on all definition paths present in the backend",
     )
+    plan_failures: bool = Field(
+        True,
+        json_schema_extra={"env": "WORKER_PLAN_FAILURES"},
+        description="Stop planning remaining definitions when a plan error occurs (exit code 1)",
+    )
+    fail_on_plan_error: bool = Field(
+        True,
+        json_schema_extra={"env": "WORKER_FAIL_ON_PLAN_ERROR"},
+        description="Exit non-zero at end of planning if any definition had a plan error",
+    )
 
     @model_validator(mode="before")
     @classmethod
