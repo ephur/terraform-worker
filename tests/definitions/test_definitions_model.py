@@ -35,6 +35,7 @@ class TestDefinitionModel:
         assert testdef.path == "test"
         assert testdef.ready is False
         assert testdef.needs_apply is False
+        assert testdef.plan_failed is False
         assert testdef.plan_file is None
 
     def test_definition_path(self, tmp_path):

@@ -68,6 +68,7 @@ class Definition(BaseModel):
     # Internals, these should not be set by the user
     ready: bool = False
     needs_apply: bool = False
+    plan_failed: bool = False
     plan_file: Optional[Union[str, None]] = None
 
     def get_target_path(self, working_dir: str) -> str:
