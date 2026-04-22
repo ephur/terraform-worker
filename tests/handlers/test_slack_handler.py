@@ -146,6 +146,14 @@ class TestSlackStatusBoard:
         board.mark("eks", TerraformAction.PLAN, "done")
         assert board.failed_count() == 1
 
+    def test_skipped_count(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.ensure_definition("eks", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "skipped")
+        board.mark("eks", TerraformAction.PLAN, "done")
+        assert board.skipped_count() == 1
+
 
 class TestSlackStatusBoardGitContext:
     def _make_board(self):
@@ -289,6 +297,25 @@ class TestSlackStatusBoardBlocks:
         blocks = board._build_blocks()
         all_text = str(blocks)
         assert "❌" in all_text
+
+    def test_banner_done_with_skips(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.INIT, "done")
+        board.mark("vpc", TerraformAction.PLAN, "skipped")
+        blocks = board._build_blocks()
+        all_text = str(blocks)
+        assert "✅" in all_text
+        assert "skipped" in all_text
+
+    def test_banner_done_no_skips(self):
+        board = self._make_board()
+        board.ensure_definition("vpc", "prod", "/tmp")
+        board.mark("vpc", TerraformAction.PLAN, "done")
+        blocks = board._build_blocks()
+        all_text = str(blocks)
+        assert "succeeded" in all_text
+        assert "skipped" not in all_text
 
     def test_only_observed_actions_as_columns(self):
         """A plan-only run shows Init and Plan columns only."""
@@ -669,13 +696,18 @@ class TestSlackHandlerTeardown:
         h._client.chat_update.assert_called_once()
 
     def test_teardown_fixes_stuck_running(self):
+        """PRE fired but plan was skipped — teardown marks it skipped, not failed.
+
+        A genuine terraform failure calls ctx.exit(1) which raises SystemExit,
+        so teardown is never reached for real failures.
+        """
         h = self._make_handler()
         h._board.ensure_definition("vpc", "prod", "/tmp")
         h._board._statuses["vpc"]["plan"] = "running"
         h._board._seen_actions = ["plan"]
         h._board._ts = "1.2"
         h.teardown("prod", "/tmp")
-        assert h._board._statuses["vpc"]["plan"] == "failed"
+        assert h._board._statuses["vpc"]["plan"] == "skipped"
 
     def test_teardown_no_extra_messages(self):
         """teardown only updates the board — no additional postMessage calls."""

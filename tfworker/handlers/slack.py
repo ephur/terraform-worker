@@ -67,7 +67,7 @@ class SlackStatusBoard:
         "done": "✅",
         "changes": "🔵",
         "failed": "❌",
-        "skipped": "⏭️",
+        "skipped": "—",
     }
     ACTION_ORDER: list[str] = ["init", "plan", "apply", "destroy"]
 
@@ -130,6 +130,15 @@ class SlackStatusBoard:
             for action_statuses in self._statuses.values()
             for status in action_statuses.values()
             if status == "failed"
+        )
+
+    def skipped_count(self) -> int:
+        """Return number of definition+action pairs that were skipped."""
+        return sum(
+            1
+            for action_statuses in self._statuses.values()
+            for status in action_statuses.values()
+            if status == "skipped"
         )
 
     def _resolve_git_context(self, working_dir: str) -> str | None:
@@ -229,7 +238,11 @@ class SlackStatusBoard:
         if overall == "in_progress":
             banner = "🟡  *In progress*"
         elif overall == "done":
-            banner = "✅  *Run complete — all definitions succeeded*"
+            skipped = self.skipped_count()
+            if skipped:
+                banner = f"✅  *Run complete — {skipped} definition(s) skipped*"
+            else:
+                banner = "✅  *Run complete — all definitions succeeded*"
         else:
             failed = self.failed_count()
             banner = f"❌  *Run failed — {failed} definition(s) errored*"
@@ -338,9 +351,7 @@ class SlackHandler(BaseHandler):
         try:
             for action_statuses in self._board._statuses.values():
                 for action_val in list(action_statuses):
-                    if action_statuses[action_val] == "running":
-                        action_statuses[action_val] = "failed"
-                    elif action_statuses[action_val] == "pending":
+                    if action_statuses[action_val] in ("running", "pending"):
                         action_statuses[action_val] = "skipped"
 
             self._board.post_or_update(self._client)

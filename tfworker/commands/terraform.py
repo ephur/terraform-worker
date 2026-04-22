@@ -233,7 +233,6 @@ class TerraformCommand(BaseCommand):
             if not needed:
                 log.info(f"Plan not needed for definition: {name}, reason: {reason}")
                 continue
-
             log.info(f"definition {name} needs a plan: {reason}")
             self._exec_terraform_plan(name=name)
             if getattr(self.app_state.definitions[name], "always_apply", False):
