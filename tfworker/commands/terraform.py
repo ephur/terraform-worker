@@ -476,7 +476,7 @@ class TerraformCommand(BaseCommand):
 
         if result.exit_code == 1:
             log.error(f"error running terraform plan for {name}")
-            self.ctx.exit(1)
+            definition.plan_failed = True
 
         if result.exit_code == 2:
             log.debug(f"terraform plan for {name} indicates changes")
@@ -496,6 +496,9 @@ class TerraformCommand(BaseCommand):
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
+
+        if definition.plan_failed:
+            return
 
         log.trace(f"executing post plan hooks for definition {name}")
         self._exec_hook(

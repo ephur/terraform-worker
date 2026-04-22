@@ -108,6 +108,8 @@ def make_command(tmp_path, **opts_overrides):
             self.plan_destroy = False
             self.plan_file_path = None
             self.limit = None
+            self.plan_failures = True
+            self.fail_on_plan_error = True
             for k, v in opts_overrides.items():
                 setattr(self, k, v)
 
@@ -434,11 +436,13 @@ class TestTerraformCommandMethods:
         cmd._exec_terraform_plan("def")
         assert cmd.app_state.definitions["def"].needs_apply
 
+        cmd.ctx.exit.reset_mock()
         mocker.patch.object(cmd, "_run", return_value=TerraformResult(1, b"", b""))
-        with pytest.raises(SystemExit):
-            cmd._exec_terraform_plan("def")
-        cmd.ctx.exit.assert_called_with(1)
+        cmd._exec_terraform_plan("def")
+        assert cmd.app_state.definitions["def"].plan_failed is True
+        cmd.ctx.exit.assert_not_called()
 
+        cmd.app_state.definitions["def"].plan_failed = False
         mocker.patch.object(cmd, "_run", return_value=TerraformResult(2, b"", b""))
         cmd._exec_terraform_plan("def")
         gen.assert_called()
@@ -608,6 +612,32 @@ class TestTerraformCommandMethods:
         # Should prepare and init even though plans exist, because planning is enabled
         assert prepare_mock.call_count == 1
         assert init_mock.call_count == 1
+
+    def test_exec_terraform_plan_error_calls_post_handlers(self, tmp_path, mocker):
+        """POST handlers must be called even when plan exits with code 1."""
+        cmd = make_command(tmp_path)
+        defn = cmd.app_state.definitions["def"]
+        defn.plan_file = tmp_path / "plan.tfplan"
+        mocker.patch.object(cmd, "_run", return_value=TerraformResult(1, b"error", b""))
+        mocker.patch.object(cmd, "_exec_hook")
+
+        cmd._exec_terraform_plan("def")
+
+        cmd.app_state.handlers.exec_handlers.assert_called_once()
+        call_kwargs = cmd.app_state.handlers.exec_handlers.call_args.kwargs
+        assert call_kwargs["result"].exit_code == 1
+
+    def test_exec_terraform_plan_error_skips_post_hooks(self, tmp_path, mocker):
+        """POST hooks must NOT be called when plan exits with code 1."""
+        cmd = make_command(tmp_path)
+        defn = cmd.app_state.definitions["def"]
+        defn.plan_file = tmp_path / "plan.tfplan"
+        mocker.patch.object(cmd, "_run", return_value=TerraformResult(1, b"error", b""))
+        hook_mock = mocker.patch.object(cmd, "_exec_hook")
+
+        cmd._exec_terraform_plan("def")
+
+        hook_mock.assert_not_called()
 
 
 class TestGetDefinitionsNeedingInit:
