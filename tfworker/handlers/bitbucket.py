@@ -98,7 +98,12 @@ class BitbucketHandler(BaseHandler):
         execute is a generic method that will execute the specified action with the provided arguments.
         """
 
-        if action == TerraformAction.PLAN and stage == TerraformStage.POST:
+        if (
+            action == TerraformAction.PLAN
+            and stage == TerraformStage.POST
+            and result is not None
+            and result.exit_code == 2
+        ):
             self.plan(
                 deployment=definition.deployment,
                 definition=definition.name,
@@ -125,7 +130,7 @@ class BitbucketHandler(BaseHandler):
             # add the comment to the pull request
             try:
                 self._pull_request.comment(
-                    self.pr_text.format(
+                    self.config.pr_text.format(
                         deployment=deployment, definition=definition, text=trimmed_text
                     )
                 )
