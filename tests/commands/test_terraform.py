@@ -835,7 +835,7 @@ class TestTerraformResult:
     def test_properties(self):
         res = TerraformResult(0, b"out", b"err")
         assert res.stdout_str == "out"
-        assert res.stderr_str == "out"
+        assert res.stderr_str == "err"
 
     def test_prep_providers_error(self, tmp_path, mocker):
         cmd = make_command(tmp_path)

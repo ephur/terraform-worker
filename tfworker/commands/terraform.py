@@ -692,7 +692,7 @@ class TerraformResult:
 
     @property
     def stderr_str(self) -> str:
-        return self.stdout.decode()
+        return self.stderr.decode()
 
     def log_stdout(self, action: TerraformAction) -> None:
         log_method = TerraformCommandConfig.get_config().get_log_method(action)
