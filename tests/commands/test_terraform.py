@@ -639,6 +639,100 @@ class TestTerraformCommandMethods:
 
         hook_mock.assert_not_called()
 
+    def _make_two_def_command(self, tmp_path, **opts):
+        """Helper: make_command with a second definition added."""
+        cmd = make_command(tmp_path, plan=True, **opts)
+        cmd.app_state.definitions["def2"] = Definition(name="def2", path="module2")
+        return cmd
+
+    def test_terraform_plan_failures_true_fail_true_halts_and_exits(self, tmp_path, mocker):
+        """plan_failures=True, fail_on_plan_error=True: halts loop, exits 1."""
+        cmd = self._make_two_def_command(tmp_path, plan_failures=True, fail_on_plan_error=True)
+        plan_cls = mocker.patch("tfworker.definitions.plan.DefinitionPlan")
+        plan_inst = plan_cls.return_value
+        plan_inst.needs_plan.return_value = (True, "reason")
+        cmd._exec_terraform_pre_plan = mocker.Mock()
+
+        def fail_first(name):
+            cmd.app_state.definitions[name].plan_failed = (name == "def")
+        cmd._exec_terraform_plan = mocker.Mock(side_effect=fail_first)
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_plan()
+
+        assert cmd._exec_terraform_plan.call_count == 1
+        cmd.ctx.exit.assert_called_with(1)
+
+    def test_terraform_plan_failures_true_fail_false_halts_no_exit(self, tmp_path, mocker):
+        """plan_failures=True, fail_on_plan_error=False: halts loop, exits 0 (no ctx.exit)."""
+        cmd = self._make_two_def_command(tmp_path, plan_failures=True, fail_on_plan_error=False)
+        plan_cls = mocker.patch("tfworker.definitions.plan.DefinitionPlan")
+        plan_inst = plan_cls.return_value
+        plan_inst.needs_plan.return_value = (True, "reason")
+        cmd._exec_terraform_pre_plan = mocker.Mock()
+
+        def fail_first(name):
+            cmd.app_state.definitions[name].plan_failed = (name == "def")
+        cmd._exec_terraform_plan = mocker.Mock(side_effect=fail_first)
+
+        cmd.terraform_plan()
+
+        assert cmd._exec_terraform_plan.call_count == 1
+        cmd.ctx.exit.assert_not_called()
+
+    def test_terraform_plan_failures_false_fail_true_continues_then_exits(self, tmp_path, mocker):
+        """plan_failures=False, fail_on_plan_error=True: continues all defs, exits 1 at end."""
+        cmd = self._make_two_def_command(tmp_path, plan_failures=False, fail_on_plan_error=True)
+        plan_cls = mocker.patch("tfworker.definitions.plan.DefinitionPlan")
+        plan_inst = plan_cls.return_value
+        plan_inst.needs_plan.return_value = (True, "reason")
+        cmd._exec_terraform_pre_plan = mocker.Mock()
+
+        def fail_first(name):
+            cmd.app_state.definitions[name].plan_failed = (name == "def")
+        cmd._exec_terraform_plan = mocker.Mock(side_effect=fail_first)
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_plan()
+
+        assert cmd._exec_terraform_plan.call_count == 2
+        cmd.ctx.exit.assert_called_with(1)
+
+    def test_terraform_plan_failures_false_fail_false_continues_no_exit(self, tmp_path, mocker):
+        """plan_failures=False, fail_on_plan_error=False: continues all defs, exits 0."""
+        cmd = self._make_two_def_command(tmp_path, plan_failures=False, fail_on_plan_error=False)
+        plan_cls = mocker.patch("tfworker.definitions.plan.DefinitionPlan")
+        plan_inst = plan_cls.return_value
+        plan_inst.needs_plan.return_value = (True, "reason")
+        cmd._exec_terraform_pre_plan = mocker.Mock()
+
+        def fail_first(name):
+            cmd.app_state.definitions[name].plan_failed = (name == "def")
+        cmd._exec_terraform_plan = mocker.Mock(side_effect=fail_first)
+
+        cmd.terraform_plan()
+
+        assert cmd._exec_terraform_plan.call_count == 2
+        cmd.ctx.exit.assert_not_called()
+
+    def test_terraform_plan_always_apply_skipped_on_plan_failure(self, tmp_path, mocker):
+        """always_apply must not trigger apply when plan_failed=True."""
+        cmd = make_command(tmp_path, plan=True, plan_failures=False, fail_on_plan_error=False)
+        cmd.app_state.definitions["def"].always_apply = True
+        plan_cls = mocker.patch("tfworker.definitions.plan.DefinitionPlan")
+        plan_inst = plan_cls.return_value
+        plan_inst.needs_plan.return_value = (True, "reason")
+        cmd._exec_terraform_pre_plan = mocker.Mock()
+
+        def fail_def(name):
+            cmd.app_state.definitions[name].plan_failed = True
+        cmd._exec_terraform_plan = mocker.Mock(side_effect=fail_def)
+        act = mocker.patch.object(cmd, "_exec_terraform_action")
+
+        cmd.terraform_plan()
+
+        act.assert_not_called()
+
 
 class TestGetDefinitionsNeedingInit:
     def test_all_definitions_when_plan_enabled(self, tmp_path, mocker):
