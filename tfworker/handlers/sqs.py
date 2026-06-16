@@ -131,7 +131,7 @@ class SQSHandler(BaseHandler):
         queues: List[str] = []
         if isinstance(self.config.queues, list):
             actions = self.config.actions or list(TerraformAction)
-            stages = self.config.stages or list(TerraformStage)
+            stages = self.config.stages or [TerraformStage.PRE, TerraformStage.POST]
             res_filter = self.config.results
             if action in actions and stage in stages:
                 if result is None:
@@ -144,7 +144,11 @@ class SQSHandler(BaseHandler):
 
         for q, rule in self.config.queues.items():
             acts = rule.actions or self.config.actions or list(TerraformAction)
-            stgs = rule.stages or self.config.stages or list(TerraformStage)
+            stgs = (
+                rule.stages
+                or self.config.stages
+                or [TerraformStage.PRE, TerraformStage.POST]
+            )
             res_filter = (
                 rule.results if rule.results is not None else self.config.results
             )

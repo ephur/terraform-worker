@@ -27,6 +27,20 @@ class TestSQSHandlerTargetQueues:
         )
 
     @patch("tfworker.handlers.sqs.SQSHandler._validate_queues", return_value=None)
+    def test_default_stages_exclude_error(self, _mock_validate):
+        """With no explicit stages, the ERROR stage must not target queues."""
+        config = SQSConfig(queues=["q"])
+        handler = SQSHandler(config)
+        assert (
+            handler._target_queues(TerraformAction.APPLY, TerraformStage.ERROR, None)
+            == []
+        )
+        # PRE/POST still default-on
+        assert handler._target_queues(
+            TerraformAction.APPLY, TerraformStage.POST, None
+        ) == ["q"]
+
+    @patch("tfworker.handlers.sqs.SQSHandler._validate_queues", return_value=None)
     def test_result_filter(self, _mock_validate):
         config = SQSConfig(queues=["q"], results=[0])
         handler = SQSHandler(config)

@@ -402,6 +402,32 @@ class TestTerraformCommandMethods:
             cmd._exec_terraform_action("def", TerraformAction.APPLY)
         cmd.ctx.exit.assert_called_with(1)
 
+    def test_exec_terraform_action_dispatches_error_stage_on_failure(
+        self, tmp_path, mocker
+    ):
+        cmd = make_command(tmp_path)
+        mocker.patch.object(cmd, "_run", return_value=TerraformResult(1, b"", b"boom"))
+        h = cmd.app_state.handlers
+        with pytest.raises(SystemExit):
+            cmd._exec_terraform_action("def", TerraformAction.APPLY)
+        cmd.ctx.exit.assert_called_with(1)
+        # POST is skipped on failure; ERROR must be dispatched with the result
+        error_calls = [
+            c
+            for c in h.exec_handlers.call_args_list
+            if c.kwargs.get("stage") == TerraformStage.ERROR
+        ]
+        assert len(error_calls) == 1
+        assert error_calls[0].kwargs["result"].exit_code == 1
+
+    def test_exec_error_handlers_swallows_handler_errors(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        cmd.app_state.handlers.exec_handlers.side_effect = HandlerError("nope")
+        # Must not raise — error-stage handler failures cannot mask the original error
+        cmd._exec_error_handlers(
+            "def", TerraformAction.APPLY, TerraformResult(1, b"", b"")
+        )
+
     def test_exec_terraform_pre_plan(self, tmp_path, mocker):
         cmd = make_command(tmp_path)
         ehook = mocker.patch.object(cmd, "_exec_hook")

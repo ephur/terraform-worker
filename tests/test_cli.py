@@ -104,6 +104,44 @@ class TestCliCommands:
             "terraform_apply_or_destroy",
         ]:
             getattr(tfc_cls.return_value, meth).assert_called_once()
+        tfc_cls.return_value.app_state.handlers.exec_setup.assert_called_once()
+        tfc_cls.return_value.app_state.handlers.exec_teardown.assert_called_once()
+
+    def test_terraform_setup_before_prep_teardown_after_apply(self, mocker):
+        """exec_setup fires before prep_providers; exec_teardown fires after apply_or_destroy."""
+        runner = CliRunner()
+        call_order = []
+        mocker.patch("click.get_current_context", click_globals.get_current_context)
+        mocker.patch("tfworker.cli.validate_host")
+        mocker.patch("tfworker.cli.register_plugins")
+        mocker.patch("tfworker.cli.RootCommand")
+        tfc_cls = mocker.patch("tfworker.cli.TerraformCommand")
+        mocker.patch(
+            "tfworker.cli.CLIOptionsRoot.model_validate",
+            return_value=CLIOptionsRoot.model_construct(),
+        )
+        mocker.patch(
+            "tfworker.cli.CLIOptionsTerraform.model_validate",
+            return_value=CLIOptionsTerraform.model_construct(),
+        )
+        mocker.patch("tfworker.cli.tf_util.get_terraform_version", return_value=(1, 0))
+        mocker.patch("tfworker.cli.log_limiter")
+
+        tfc = tfc_cls.return_value
+        tfc.app_state.handlers.exec_setup.side_effect = lambda **kw: call_order.append(
+            "setup"
+        )
+        tfc.prep_providers.side_effect = lambda: call_order.append("prep_providers")
+        tfc.terraform_apply_or_destroy.side_effect = lambda: call_order.append(
+            "apply_or_destroy"
+        )
+        tfc.app_state.handlers.exec_teardown.side_effect = (
+            lambda **kw: call_order.append("teardown")
+        )
+
+        runner.invoke(cli.cli, ["terraform", "dep"])
+        assert call_order.index("setup") < call_order.index("prep_providers")
+        assert call_order.index("apply_or_destroy") < call_order.index("teardown")
 
     def test_env_runs(self, mocker):
         runner = CliRunner()

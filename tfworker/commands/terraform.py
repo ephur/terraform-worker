@@ -233,7 +233,6 @@ class TerraformCommand(BaseCommand):
             if not needed:
                 log.info(f"Plan not needed for definition: {name}, reason: {reason}")
                 continue
-
             log.info(f"definition {name} needs a plan: {reason}")
             self._exec_terraform_plan(name=name)
             if getattr(self.app_state.definitions[name], "always_apply", False):
@@ -389,6 +388,7 @@ class TerraformCommand(BaseCommand):
                     for line in result.stderr.decode().strip().split("\n"):
                         if line.strip():
                             log.error(f"[{name}] stderr: {line}")
+            self._exec_error_handlers(name, action, result)
             self.ctx.exit(1)
 
         try:
@@ -422,6 +422,35 @@ class TerraformCommand(BaseCommand):
                 Path(definition.plan_file).unlink(missing_ok=True)
 
         return result
+
+    def _exec_error_handlers(
+        self,
+        name: str,
+        action: TerraformAction,
+        result: "TerraformResult",
+    ) -> None:
+        """
+        Dispatch the ERROR stage to handlers when a terraform action fails.
+
+        This runs in place of the POST stage (which is skipped on failure) so
+        handlers can react to the failure with the failing result. Any error
+        raised by a handler here is logged and swallowed so it cannot mask the
+        original terraform failure. Hooks are intentionally not invoked.
+        """
+        try:
+            log.trace(
+                f"executing {TerraformStage.ERROR.value} {action.value} handlers for definition {name}"
+            )
+            self._app_state.handlers.exec_handlers(
+                action=action,
+                stage=TerraformStage.ERROR,
+                deployment=self.app_state.deployment,
+                definition=self.app_state.definitions[name],
+                working_dir=self.app_state.working_dir,
+                result=result,
+            )
+        except Exception as e:
+            log.error(f"error-stage handler error on definition {name}: {e}")
 
     def _exec_terraform_pre_plan(self, name: str) -> None:
         """
@@ -477,6 +506,7 @@ class TerraformCommand(BaseCommand):
 
         if result.exit_code == 1:
             log.error(f"error running terraform plan for {name}")
+            self._exec_error_handlers(name, TerraformAction.PLAN, result)
             self.ctx.exit(1)
 
         if result.exit_code == 2:
