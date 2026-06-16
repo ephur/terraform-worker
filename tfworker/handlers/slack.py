@@ -389,3 +389,7 @@ class SlackHandler(BaseHandler):
                 status = "failed"
             self._board.mark(definition.name, action, status)
             self._board.post_or_update(self._client)
+
+        elif stage == TerraformStage.ERROR:
+            self._board.mark(definition.name, action, "failed")
+            self._board.post_or_update(self._client)

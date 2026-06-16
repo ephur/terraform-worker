@@ -551,6 +551,17 @@ class TestSlackHandlerExecute:
         )
         assert handler._board._statuses["vpc"]["plan"] == "failed"
 
+    def test_error_stage_marks_failed_and_updates(self):
+        handler = self._make_handler()
+        defn = self._make_definition()
+        result = TerraformResult(1, b"", b"boom")
+        handler.execute(TerraformAction.APPLY, TerraformStage.PRE, "prod", defn, "/tmp")
+        handler.execute(
+            TerraformAction.APPLY, TerraformStage.ERROR, "prod", defn, "/tmp", result
+        )
+        assert handler._board._statuses["vpc"]["apply"] == "failed"
+        handler._client.chat_update.assert_called_once()
+
     def test_multiple_definitions_tracked(self):
         handler = self._make_handler()
         vpc = self._make_definition("vpc")
