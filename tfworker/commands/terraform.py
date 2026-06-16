@@ -235,12 +235,23 @@ class TerraformCommand(BaseCommand):
                 continue
             log.info(f"definition {name} needs a plan: {reason}")
             self._exec_terraform_plan(name=name)
-            if getattr(self.app_state.definitions[name], "always_apply", False):
+            if (
+                self.app_state.definitions[name].plan_failed
+                and self.app_state.terraform_options.plan_failures
+            ):
+                break
+            if not self.app_state.definitions[name].plan_failed and getattr(
+                self.app_state.definitions[name], "always_apply", False
+            ):
                 log.info(
                     f"definition {name} has always_apply set; applying immediately after plan"
                 )
                 self._exec_terraform_action(name=name, action=TerraformAction.APPLY)
                 self.app_state.definitions[name].needs_apply = False
+
+        if self.app_state.terraform_options.fail_on_plan_error:
+            if any(d.plan_failed for d in self.app_state.definitions.values()):
+                self.ctx.exit(1)
 
     def terraform_apply_or_destroy(self) -> None:
         log.trace("entering terraform apply or destroy")
@@ -506,8 +517,12 @@ class TerraformCommand(BaseCommand):
 
         if result.exit_code == 1:
             log.error(f"error running terraform plan for {name}")
+            definition.plan_failed = True
+            # dispatch the ERROR stage so handlers see the failure; the plan
+            # loop decides whether to halt and the exit code is governed by
+            # fail_on_plan_error. POST success handlers/hooks are skipped.
             self._exec_error_handlers(name, TerraformAction.PLAN, result)
-            self.ctx.exit(1)
+            return
 
         if result.exit_code == 2:
             log.debug(f"terraform plan for {name} indicates changes")
@@ -708,7 +723,7 @@ class TerraformResult:
 
     @property
     def stderr_str(self) -> str:
-        return self.stdout.decode()
+        return self.stderr.decode()
 
     def log_stdout(self, action: TerraformAction) -> None:
         log_method = TerraformCommandConfig.get_config().get_log_method(action)

@@ -396,6 +396,22 @@ class TestCLIOptionsTerraform:
             ["module1.resource", "module2.resource", "module3.resource"]
         )
 
+    def test_plan_failures_default(self):
+        opts = c.CLIOptionsTerraform()
+        assert opts.plan_failures is True
+
+    def test_plan_failures_false(self):
+        opts = c.CLIOptionsTerraform(plan_failures=False)
+        assert opts.plan_failures is False
+
+    def test_fail_on_plan_error_default(self):
+        opts = c.CLIOptionsTerraform()
+        assert opts.fail_on_plan_error is True
+
+    def test_fail_on_plan_error_false(self):
+        opts = c.CLIOptionsTerraform(fail_on_plan_error=False)
+        assert opts.fail_on_plan_error is False
+
 
 class TestCLIOptionsClean:
     """
