@@ -13,6 +13,7 @@ registry.terraform.io/
 coverage.xml
 reports/*
 plans*
+docs/superpowers/**
 
 # Snyk Security Extension - AI Rules (auto-generated)
 .github/instructions/snyk_rules.instructions.md

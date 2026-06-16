@@ -6,6 +6,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from tfworker.commands.terraform import TerraformResult
     from tfworker.custom_types import TerraformAction, TerraformStage
+    from tfworker.definitions.collection import DefinitionsCollection
     from tfworker.definitions.model import Definition
 
 
@@ -64,6 +65,24 @@ class BaseHandler(metaclass=ABCMeta):
             stage: the stage of the action (one of pre, post)
             kwargs: any additional arguments that may be required
         """
+        pass
+
+    def setup(
+        self,
+        deployment: str,
+        definitions: "DefinitionsCollection",
+        working_dir: str,
+        terraform_options,
+    ) -> None:
+        """Called once per run before any terraform actions begin. No-op by default."""
+        pass
+
+    def teardown(
+        self,
+        deployment: str,
+        working_dir: str,
+    ) -> None:
+        """Called once per run after all terraform actions finish. No-op by default."""
         pass
 
     def __str__(self):

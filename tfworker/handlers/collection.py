@@ -8,6 +8,7 @@ from tfworker.exceptions import FrozenInstanceError, HandlerError, UnknownHandle
 if TYPE_CHECKING:
     from tfworker.commands.terraform import TerraformResult
     from tfworker.custom_types import TerraformAction, TerraformStage
+    from tfworker.definitions.collection import DefinitionsCollection
     from tfworker.definitions.model import Definition
 
     from .base import BaseHandler  # noqa: F401
@@ -227,3 +228,27 @@ class HandlersCollection(Mapping):
                         self.add_result(r)
                 else:
                     self.add_result(ret)
+
+    def exec_setup(
+        self,
+        deployment: str,
+        definitions: "DefinitionsCollection",
+        working_dir: str,
+        terraform_options,
+    ) -> None:
+        """Call setup() on every ready handler in registration order."""
+        for name, handler in self._handlers.items():
+            if handler is not None and handler.is_ready():
+                log.trace(f"Calling setup on handler {name}")
+                handler.setup(deployment, definitions, working_dir, terraform_options)
+
+    def exec_teardown(
+        self,
+        deployment: str,
+        working_dir: str,
+    ) -> None:
+        """Call teardown() on every ready handler in registration order."""
+        for name, handler in self._handlers.items():
+            if handler is not None and handler.is_ready():
+                log.trace(f"Calling teardown on handler {name}")
+                handler.teardown(deployment, working_dir)
