@@ -55,9 +55,11 @@ class Definition(BaseModel):
     terraform_vars: Optional[Dict[str, Any]] = Field(
         {}, description="Variables to pass to terraform via a generated .tfvars file."
     )
-    remote_vars: Optional[Dict[str, str]] = Field(
+    remote_vars: Optional[Dict[str, str | Dict | list]] = Field(
         {},
-        description="Variables which are used to generate local references to remote state vars.",
+        description="Variables which are used to generate local references to remote state vars. "
+        "Supports strings (e.g., 'state.outputs.key'), dicts for mapping keys to remote refs, "
+        "and lists of remote refs.",
     )
     squelch_plan_output: bool = False
     squelch_apply_output: bool = False

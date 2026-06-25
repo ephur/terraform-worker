@@ -123,7 +123,9 @@ def test_vars_typer_complex():
 
 
 def test_create_local_vars(mocker, def_prepare, definition):
-    mocker.patch.object(Definition, "get_remote_vars", return_value={"foo": "bar"})
+    mocker.patch.object(
+        Definition, "get_remote_vars", return_value={"foo": "bar.outputs.baz"}
+    )
     def_prepare.create_local_vars("def1")
     outfile = (
         Path(definition.get_target_path(def_prepare._app_state.working_dir))
@@ -131,7 +133,7 @@ def test_create_local_vars(mocker, def_prepare, definition):
     )
     assert (
         outfile.read_text()
-        == "locals {\n  foo = data.terraform_remote_state.bar\n}\n\n"
+        == "locals {\n  foo = data.terraform_remote_state.bar.outputs.baz\n}\n\n"
     )
 
 
@@ -233,15 +235,17 @@ def test_get_provider_content(def_prepare, mocker, definition):
 
 
 def test_get_remotes(def_prepare, mocker, definition):
-    definition.remote_vars = {"a": "one.var", "b": "two.var"}
+    definition.remote_vars = {"a": "one.outputs.var", "b": "two.outputs.var"}
     def_prepare._app_state.terraform_options.backend_use_all_remotes = False
     def_prepare._app_state.backend.remotes = ["x", "y"]
 
     mock_get_remote_vars = mocker.patch.object(
-        Definition, "get_remote_vars", return_value={"a": "one.var", "b": "two.var"}
+        Definition,
+        "get_remote_vars",
+        return_value={"a": "one.outputs.var", "b": "two.outputs.var"},
     )
 
-    assert def_prepare._get_remotes("def1") == ["one", "two"]
+    assert set(def_prepare._get_remotes("def1")) == {"one", "two"}
     mock_get_remote_vars.assert_called_once_with(
         global_vars=def_prepare._app_state.loaded_config.global_vars.remote_vars
     )
@@ -251,17 +255,20 @@ def test_get_remotes(def_prepare, mocker, definition):
 
 
 def test_get_remotes_with_global_inheritance(def_prepare, mocker, definition):
-    definition.remote_vars = {"local_var": "local.state"}
+    definition.remote_vars = {"local_var": "local.outputs.state"}
     def_prepare._app_state.terraform_options.backend_use_all_remotes = False
 
     mock_get_remote_vars = mocker.patch.object(
         Definition,
         "get_remote_vars",
-        return_value={"local_var": "local.state", "global_var": "global.state"},
+        return_value={
+            "local_var": "local.outputs.state",
+            "global_var": "global.outputs.state",
+        },
     )
 
     result = def_prepare._get_remotes("def1")
-    assert result == ["local", "global"]
+    assert set(result) == {"local", "global"}
     mock_get_remote_vars.assert_called_once_with(
         global_vars=def_prepare._app_state.loaded_config.global_vars.remote_vars
     )
@@ -292,3 +299,337 @@ def test_get_template_vars(mocker, def_prepare, definition, monkeypatch):
     assert result["var"]["foo"] == "bar"
     assert result["var"]["baz"] == "qux"
     assert result["env"]["EXAMPLE"] == "value"
+
+
+# ===== Tests for nested remote_vars structures =====
+
+
+class TestCreateLocalVarsNested:
+    """Tests for create_local_vars with nested structures (dicts/lists)."""
+
+    def test_create_local_vars_with_dict_entire_outputs(
+        self, mocker, def_prepare, definition
+    ):
+        """Test creating locals with dict of entire outputs references."""
+        remote_vars = {
+            "vpcs": {
+                "platform": "network1.outputs",
+                "payments": "network2.outputs",
+            }
+        }
+        mocker.patch.object(Definition, "get_remote_vars", return_value=remote_vars)
+        def_prepare.create_local_vars("def1")
+
+        outfile = (
+            Path(definition.get_target_path(def_prepare._app_state.working_dir))
+            / WORKER_LOCALS_FILENAME
+        )
+        content = outfile.read_text()
+
+        # Check structure
+        assert "locals {" in content
+        assert "vpcs = {" in content
+        assert '"platform" = data.terraform_remote_state.network1.outputs' in content
+        assert '"payments" = data.terraform_remote_state.network2.outputs' in content
+
+    def test_create_local_vars_with_dict_specific_keys(
+        self, mocker, def_prepare, definition
+    ):
+        """Test creating locals with dict of specific output keys."""
+        remote_vars = {
+            "vpc_configs": {
+                "platform": "network1.outputs.vpc_config",
+                "payments": "network2.outputs.vpc_config",
+            }
+        }
+        mocker.patch.object(Definition, "get_remote_vars", return_value=remote_vars)
+        def_prepare.create_local_vars("def1")
+
+        outfile = (
+            Path(definition.get_target_path(def_prepare._app_state.working_dir))
+            / WORKER_LOCALS_FILENAME
+        )
+        content = outfile.read_text()
+
+        assert "vpc_configs = {" in content
+        assert (
+            '"platform" = data.terraform_remote_state.network1.outputs.vpc_config'
+            in content
+        )
+        assert (
+            '"payments" = data.terraform_remote_state.network2.outputs.vpc_config'
+            in content
+        )
+
+    def test_create_local_vars_with_list(self, mocker, def_prepare, definition):
+        """Test creating locals with list of references."""
+        remote_vars = {
+            "vpc_ids": [
+                "network1.outputs.vpc_id",
+                "network2.outputs.vpc_id",
+                "network3.outputs.vpc_id",
+            ]
+        }
+        mocker.patch.object(Definition, "get_remote_vars", return_value=remote_vars)
+        def_prepare.create_local_vars("def1")
+
+        outfile = (
+            Path(definition.get_target_path(def_prepare._app_state.working_dir))
+            / WORKER_LOCALS_FILENAME
+        )
+        content = outfile.read_text()
+
+        assert "vpc_ids = [" in content
+        assert "data.terraform_remote_state.network1.outputs.vpc_id," in content
+        assert "data.terraform_remote_state.network2.outputs.vpc_id," in content
+        assert "data.terraform_remote_state.network3.outputs.vpc_id," in content
+
+    def test_create_local_vars_mixed_simple_and_complex(
+        self, mocker, def_prepare, definition
+    ):
+        """Test creating locals with mix of simple strings and complex structures."""
+        remote_vars = {
+            # Simple (existing)
+            "environment": "env_info.outputs.environment",
+            # Dict
+            "vpcs": {
+                "platform": "network1.outputs",
+                "payments": "network2.outputs",
+            },
+            # List
+            "vpc_ids": [
+                "network1.outputs.vpc_id",
+                "network2.outputs.vpc_id",
+            ],
+        }
+        mocker.patch.object(Definition, "get_remote_vars", return_value=remote_vars)
+        def_prepare.create_local_vars("def1")
+
+        outfile = (
+            Path(definition.get_target_path(def_prepare._app_state.working_dir))
+            / WORKER_LOCALS_FILENAME
+        )
+        content = outfile.read_text()
+
+        # Simple string
+        assert (
+            "environment = data.terraform_remote_state.env_info.outputs.environment"
+            in content
+        )
+        # Dict
+        assert "vpcs = {" in content
+        assert '"platform" = data.terraform_remote_state.network1.outputs' in content
+        # List
+        assert "vpc_ids = [" in content
+        assert "data.terraform_remote_state.network1.outputs.vpc_id," in content
+
+    def test_create_local_vars_nested_dict_in_dict(
+        self, mocker, def_prepare, definition
+    ):
+        """Test creating locals with nested dict structures."""
+        remote_vars = {
+            "networks": {
+                "production": {
+                    "primary": "net1.outputs.vpc",
+                    "secondary": "net2.outputs.vpc",
+                },
+                "staging": {
+                    "primary": "net3.outputs.vpc",
+                },
+            }
+        }
+        mocker.patch.object(Definition, "get_remote_vars", return_value=remote_vars)
+        def_prepare.create_local_vars("def1")
+
+        outfile = (
+            Path(definition.get_target_path(def_prepare._app_state.working_dir))
+            / WORKER_LOCALS_FILENAME
+        )
+        content = outfile.read_text()
+
+        assert "networks = {" in content
+        assert '"production" = {' in content
+        assert '"primary" = data.terraform_remote_state.net1.outputs.vpc' in content
+        assert '"secondary" = data.terraform_remote_state.net2.outputs.vpc' in content
+        assert '"staging" = {' in content
+        assert '"primary" = data.terraform_remote_state.net3.outputs.vpc' in content
+
+    def test_create_local_vars_empty_dict(self, mocker, def_prepare, definition):
+        """Test creating locals with empty dict."""
+        remote_vars = {"empty": {}}
+        mocker.patch.object(Definition, "get_remote_vars", return_value=remote_vars)
+        def_prepare.create_local_vars("def1")
+
+        outfile = (
+            Path(definition.get_target_path(def_prepare._app_state.working_dir))
+            / WORKER_LOCALS_FILENAME
+        )
+        content = outfile.read_text()
+
+        assert "empty = {}" in content
+
+    def test_create_local_vars_empty_list(self, mocker, def_prepare, definition):
+        """Test creating locals with empty list."""
+        remote_vars = {"empty": []}
+        mocker.patch.object(Definition, "get_remote_vars", return_value=remote_vars)
+        def_prepare.create_local_vars("def1")
+
+        outfile = (
+            Path(definition.get_target_path(def_prepare._app_state.working_dir))
+            / WORKER_LOCALS_FILENAME
+        )
+        content = outfile.read_text()
+
+        assert "empty = []" in content
+
+
+class TestGetRemotesNested:
+    """Tests for _get_remotes with nested structures."""
+
+    def test_get_remotes_from_dict(self, mocker, def_prepare, definition):
+        """Test extracting remotes from dict structure."""
+        remote_vars = {
+            "vpcs": {
+                "platform": "network1.outputs",
+                "payments": "network2.outputs.vpc",
+            }
+        }
+        mocker.patch.object(Definition, "get_remote_vars", return_value=remote_vars)
+        def_prepare._app_state.terraform_options.backend_use_all_remotes = False
+
+        remotes = def_prepare._get_remotes("def1")
+        assert set(remotes) == {"network1", "network2"}
+
+    def test_get_remotes_from_list(self, mocker, def_prepare, definition):
+        """Test extracting remotes from list structure."""
+        remote_vars = {
+            "vpc_ids": [
+                "net1.outputs.vpc_id",
+                "net2.outputs.vpc_id",
+                "net3.outputs.vpc_id",
+            ]
+        }
+        mocker.patch.object(Definition, "get_remote_vars", return_value=remote_vars)
+        def_prepare._app_state.terraform_options.backend_use_all_remotes = False
+
+        remotes = def_prepare._get_remotes("def1")
+        assert set(remotes) == {"net1", "net2", "net3"}
+
+    def test_get_remotes_from_mixed_structures(self, mocker, def_prepare, definition):
+        """Test extracting remotes from mixed simple and complex structures."""
+        remote_vars = {
+            "env": "env_info.outputs.environment",
+            "vpcs": {
+                "platform": "network1.outputs",
+                "payments": "network2.outputs",
+            },
+            "db_endpoints": [
+                "db1.outputs.endpoint",
+                "db2.outputs.endpoint",
+            ],
+        }
+        mocker.patch.object(Definition, "get_remote_vars", return_value=remote_vars)
+        def_prepare._app_state.terraform_options.backend_use_all_remotes = False
+
+        remotes = def_prepare._get_remotes("def1")
+        assert set(remotes) == {"env_info", "network1", "network2", "db1", "db2"}
+
+    def test_get_remotes_deduplicates(self, mocker, def_prepare, definition):
+        """Test that duplicate state names are deduplicated."""
+        remote_vars = {
+            "vpc_id": "net1.outputs.vpc_id",
+            "subnet_ids": "net1.outputs.subnet_ids",
+            "cidr": "net1.outputs.cidr",
+        }
+        mocker.patch.object(Definition, "get_remote_vars", return_value=remote_vars)
+        def_prepare._app_state.terraform_options.backend_use_all_remotes = False
+
+        remotes = def_prepare._get_remotes("def1")
+        assert remotes == ["net1"]
+
+    def test_get_remotes_with_nested_dict(self, mocker, def_prepare, definition):
+        """Test extracting remotes from deeply nested structures."""
+        remote_vars = {
+            "networks": {
+                "production": {
+                    "primary": "net1.outputs",
+                    "secondary": "net2.outputs",
+                },
+                "staging": [
+                    "net3.outputs.vpc_id",
+                ],
+            }
+        }
+        mocker.patch.object(Definition, "get_remote_vars", return_value=remote_vars)
+        def_prepare._app_state.terraform_options.backend_use_all_remotes = False
+
+        remotes = def_prepare._get_remotes("def1")
+        assert set(remotes) == {"net1", "net2", "net3"}
+
+
+class TestGenerateTfValue:
+    """Tests for _generate_tf_value helper method."""
+
+    def test_generate_simple_string(self, def_prepare):
+        """Test generating HCL for simple string reference."""
+        result = def_prepare._generate_tf_value("network1.outputs.vpc_id")
+        assert result == "data.terraform_remote_state.network1.outputs.vpc_id"
+
+    def test_generate_string_entire_outputs(self, def_prepare):
+        """Test generating HCL for entire outputs reference."""
+        result = def_prepare._generate_tf_value("network1.outputs")
+        assert result == "data.terraform_remote_state.network1.outputs"
+
+    def test_generate_dict_single_level(self, def_prepare):
+        """Test generating HCL for single-level dict."""
+        value = {
+            "platform": "network1.outputs",
+            "payments": "network2.outputs",
+        }
+        result = def_prepare._generate_tf_value(value, indent=1)
+
+        assert "{" in result
+        assert '"platform" = data.terraform_remote_state.network1.outputs' in result
+        assert '"payments" = data.terraform_remote_state.network2.outputs' in result
+        assert "}" in result
+
+    def test_generate_list(self, def_prepare):
+        """Test generating HCL for list."""
+        value = [
+            "net1.outputs.vpc_id",
+            "net2.outputs.vpc_id",
+        ]
+        result = def_prepare._generate_tf_value(value, indent=1)
+
+        assert "[" in result
+        assert "data.terraform_remote_state.net1.outputs.vpc_id," in result
+        assert "data.terraform_remote_state.net2.outputs.vpc_id," in result
+        assert "]" in result
+
+    def test_generate_empty_dict(self, def_prepare):
+        """Test generating HCL for empty dict."""
+        result = def_prepare._generate_tf_value({})
+        assert result == "{}"
+
+    def test_generate_empty_list(self, def_prepare):
+        """Test generating HCL for empty list."""
+        result = def_prepare._generate_tf_value([])
+        assert result == "[]"
+
+    def test_generate_nested_dict(self, def_prepare):
+        """Test generating HCL for nested dict."""
+        value = {
+            "production": {
+                "primary": "net1.outputs",
+            }
+        }
+        result = def_prepare._generate_tf_value(value, indent=1)
+
+        assert '"production" = {' in result
+        assert '"primary" = data.terraform_remote_state.net1.outputs' in result
+
+    def test_generate_invalid_type(self, def_prepare):
+        """Test that invalid value type raises ValueError."""
+        with pytest.raises(ValueError) as exc_info:
+            def_prepare._generate_tf_value(123)  # Number not supported
+        assert "Unsupported remote_vars value type" in str(exc_info.value)
