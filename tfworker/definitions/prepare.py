@@ -95,8 +95,55 @@ class DefinitionPrepare:
             for k, v in definition.get_remote_vars(
                 global_vars=self._app_state.loaded_config.global_vars.remote_vars
             ).items():
-                tflocals.write(f"  {k} = data.terraform_remote_state.{v}\n")
+                # Generate Terraform HCL for the value (handles str/dict/list)
+                tf_value = self._generate_tf_value(v, indent=1)
+                tflocals.write(f"  {k} = {tf_value}\n")
             tflocals.write("}\n\n")
+
+    def _generate_tf_value(self, value: Union[str, Dict, list], indent: int = 0) -> str:
+        """
+        Recursively generate Terraform HCL for a remote_vars value.
+
+        Args:
+            value: The remote_vars value (string ref, dict, or list)
+            indent: Current indentation level
+
+        Returns:
+            Terraform HCL string
+
+        Raises:
+            ValueError: If the value type is unsupported
+        """
+        from tfworker.util.remote_vars import generate_tf_reference
+
+        if isinstance(value, str):
+            # Simple string reference: "state.outputs.key"
+            return generate_tf_reference(value)
+
+        elif isinstance(value, dict):
+            # Dict: {"k1": "state1.outputs", "k2": "state2.outputs.key"}
+            if not value:
+                return "{}"
+            lines = ["{"]
+            for key, val in value.items():
+                nested_value = self._generate_tf_value(val, indent + 1)
+                lines.append(f'{"  " * (indent + 1)}"{key}" = {nested_value}')
+            lines.append(f'{"  " * indent}}}')
+            return "\n".join(lines)
+
+        elif isinstance(value, list):
+            # List: ["state1.outputs", "state2.outputs.key"]
+            if not value:
+                return "[]"
+            lines = ["["]
+            for item in value:
+                nested_value = self._generate_tf_value(item, indent + 1)
+                lines.append(f'{"  " * (indent + 1)}{nested_value},')
+            lines.append(f'{"  " * indent}]')
+            return "\n".join(lines)
+
+        else:
+            raise ValueError(f"Unsupported remote_vars value type: {type(value)}")
 
     def create_worker_tf(self, name: str) -> None:
         """Create remote data sources, and required providers"""
@@ -197,20 +244,21 @@ class DefinitionPrepare:
 
     def _get_remotes(self, name: str) -> list:
         """Get the remote data sources"""
+        from tfworker.util.remote_vars import extract_remote_states
+
         definition = self._app_state.definitions[name]
         log.trace(f"getting remotes for definition {name}")
         if self._app_state.terraform_options.backend_use_all_remotes:
             log.trace(f"using all remotes for definition {name}")
             remotes = self._app_state.backend.remotes
         else:
-            remotes = list(
-                map(
-                    lambda x: x.split(".")[0],
-                    definition.get_remote_vars(
-                        global_vars=self._app_state.loaded_config.global_vars.remote_vars
-                    ).values(),
-                )
-            )
+            # Extract state names from all remote_vars values (recursive)
+            remote_states = set()
+            for value in definition.get_remote_vars(
+                global_vars=self._app_state.loaded_config.global_vars.remote_vars
+            ).values():
+                remote_states.update(extract_remote_states(value))
+            remotes = list(remote_states)
             log.trace(f"using remotes {remotes} for definition {name}")
         return remotes
 

@@ -41,7 +41,7 @@ jobs:
         run: poetry run isort --check tfworker tests
 
       - name: Lint (flake8)
-        run: poetry run flake8 --ignore E501,W503 tfworker tests
+        run: poetry run flake8 --ignore E203,E501,W503 tfworker tests
 
   test:
     name: Test

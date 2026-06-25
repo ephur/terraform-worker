@@ -374,6 +374,8 @@ def _populate_environment_with_terraform_remote_vars(
     """
     Populates the environment with Terraform variables.
 
+    Supports nested structures (dicts and lists) in addition to simple references.
+
     Args:
         local_env (Dict[str, str]): The environment variables.
         working_dir (str): The working directory of the Terraform definition.
@@ -386,15 +388,33 @@ def _populate_environment_with_terraform_remote_vars(
     with open(os.path.join(working_dir, WORKER_LOCALS_FILENAME)) as f:
         contents = f.read()
 
-    # I'm sorry. :-)
-    # this regex looks for variables in the form of:
-    # <var_name, ITEM> = data.terraform_remote_state.<the name of a remote definition, STATE>.outputs.<the name of an output, STATE_ITEM>
+    # Create a cache dict to avoid multiple backend calls for the same state
+    state_cache: Dict[str, Dict[str, Any]] = {}
+
+    # Try parsing with HCL2 for nested structures
+    try:
+        parsed = hcl2.loads(contents)
+        if "locals" in parsed and parsed["locals"]:
+            locals_block = parsed["locals"][0]
+            for var_name, var_value in locals_block.items():
+                resolved_value = _resolve_terraform_value(
+                    var_value, backend, state_cache
+                )
+                _set_hook_env_var(
+                    local_env,
+                    TFHookVarType.REMOTE,
+                    var_name,
+                    resolved_value,
+                    b64_encode,
+                )
+            return
+    except Exception as e:
+        log.debug(f"HCL2 parsing failed, falling back to regex: {e}")
+
+    # Fallback to legacy regex-based parsing for simple single-line references
     r = re.compile(
         r"\s*(?P<item>\w+)\s*\=.+data\.terraform_remote_state\.(?P<state>\w+)\.outputs\.(?P<state_item>\w+)\s*"
     )
-
-    # Create a cache dict to avoid multiple backend calls for the same state
-    state_cache: Dict[str, Dict[str, Any]] = {}
 
     for line in contents.splitlines():
         m = r.match(line)
@@ -413,22 +433,86 @@ def _populate_environment_with_terraform_remote_vars(
             )
 
             # Parse the Terraform output JSON to extract just the value field
-            # Terraform output format is: {"value": <actual_value>, "type": <type>, "sensitive": <bool>}
             try:
                 state_output = json.loads(state_value_json)
-                # Extract just the value field from the Terraform output structure
                 if isinstance(state_output, dict) and "value" in state_output:
                     state_value = state_output["value"]
                 else:
-                    # Fallback to the raw value if it's not in the expected format
                     state_value = state_value_json
             except (json.JSONDecodeError, TypeError):
-                # If parsing fails, use the raw value
                 state_value = state_value_json
 
             _set_hook_env_var(
                 local_env, TFHookVarType.REMOTE, item, state_value, b64_encode
             )
+
+
+def _resolve_terraform_value(
+    value: Any,
+    backend: "BaseBackend",
+    state_cache: Dict[str, Dict[str, Any]],
+) -> Any:
+    """
+    Recursively resolve Terraform remote state references to actual values.
+
+    Handles:
+    - Simple strings with terraform_remote_state references
+    - Nested dicts
+    - Lists
+    - Literal values
+
+    Args:
+        value: The value to resolve (str, dict, list, or literal)
+        backend: The backend instance to fetch state from
+        state_cache: Cache of already-fetched state data
+
+    Returns:
+        Resolved value with terraform_remote_state references replaced by actual values
+    """
+    from tfworker.util.remote_vars import parse_tf_reference
+
+    if isinstance(value, str):
+        # Check if it's a terraform_remote_state reference
+        if "data.terraform_remote_state" in value:
+            try:
+                # Extract state and output_key from the reference
+                state, output_key = parse_tf_reference(value)
+
+                # Get the state data
+                state_data = _get_or_fetch_state(state, backend, state_cache)
+                outputs = state_data.get("outputs", {})
+
+                if output_key is None:
+                    # Return entire outputs dict (all output values)
+                    return {k: v.get("value") for k, v in outputs.items()}
+                else:
+                    # Return specific output value
+                    if output_key not in outputs:
+                        raise HookError(
+                            f"Output '{output_key}' not found in state '{state}'"
+                        )
+                    return outputs[output_key].get("value")
+            except (ValueError, KeyError) as e:
+                log.warning(f"Failed to parse terraform reference '{value}': {e}")
+                return value
+        else:
+            # Plain string, return as-is
+            return value
+
+    elif isinstance(value, dict):
+        # Recursively resolve dict values
+        return {
+            k: _resolve_terraform_value(v, backend, state_cache)
+            for k, v in value.items()
+        }
+
+    elif isinstance(value, list):
+        # Recursively resolve list items
+        return [_resolve_terraform_value(item, backend, state_cache) for item in value]
+
+    else:
+        # Literal value (int, bool, etc.), return as-is
+        return value
 
 
 def _populate_environment_with_extra_vars(
@@ -483,7 +567,9 @@ def _set_hook_env_var(
 
         # Base64-encode and store as a string to satisfy env type requirements
         encoded = base64.b64encode(raw_bytes).decode()
-        local_env[f"{var_type}_{key.upper()}"] = encoded
+        var_name = f"{var_type}_{key.upper()}"
+        local_env[var_name] = encoded
+        _check_env_var_size(var_name, encoded, b64_encode=True)
         return
 
     # For non-base64 values, ensure we end up with a string and shell-escape it
@@ -504,7 +590,61 @@ def _set_hook_env_var(
     # Use shlex.quote to safely escape values for shell consumption by hooks
     value_escaped = shlex.quote(value_str)
 
-    local_env[f"{var_type}_{key.upper()}"] = value_escaped
+    var_name = f"{var_type}_{key.upper()}"
+    local_env[var_name] = value_escaped
+    _check_env_var_size(var_name, value_escaped, b64_encode=False)
+
+
+def _check_env_var_size(
+    var_name: str, var_value: str, b64_encode: bool = False
+) -> None:
+    """
+    Check environment variable size and warn if approaching or exceeding shell limits.
+
+    Different shells have different limits for environment variable sizes:
+    - bash: typically 128 KB (131072 bytes)
+    - zsh: typically 1 MB (1048576 bytes)
+    - sh/dash: typically 64 KB (65536 bytes)
+
+    Args:
+        var_name: The environment variable name
+        var_value: The environment variable value
+        b64_encode: Whether the value is base64 encoded
+    """
+    # Shell-specific limits (in bytes)
+    SHELL_LIMITS = {
+        "bash": 131072,  # 128 KB
+        "zsh": 1048576,  # 1 MB
+        "sh": 65536,  # 64 KB
+        "dash": 65536,  # 64 KB
+    }
+
+    var_size = len(var_value.encode("utf-8"))
+
+    # Determine the current shell from SHELL environment variable
+    current_shell = os.environ.get("SHELL", "").split("/")[-1] or "sh"
+    limit = SHELL_LIMITS.get(
+        current_shell, SHELL_LIMITS["sh"]
+    )  # Default to sh (most conservative)
+
+    # Calculate warning threshold (80% of limit)
+    warning_threshold = int(limit * 0.8)
+
+    if var_size > limit:
+        encoding_note = " (base64 encoded)" if b64_encode else ""
+        log.warn(
+            f"Environment variable {var_name} is {var_size:,} bytes{encoding_note}, "
+            f"which exceeds the typical {current_shell} limit of {limit:,} bytes. "
+            f"This may cause issues in hook scripts. "
+            f"Consider using --b64-encode-hook-values or restructuring the data."
+        )
+    elif var_size > warning_threshold:
+        encoding_note = " (base64 encoded)" if b64_encode else ""
+        log.info(
+            f"Environment variable {var_name} is {var_size:,} bytes{encoding_note}, "
+            f"approaching the {current_shell} limit of {limit:,} bytes "
+            f"({var_size * 100 // limit}% of limit)."
+        )
 
 
 def _execute_hook_script(

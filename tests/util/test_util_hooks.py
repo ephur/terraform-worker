@@ -533,3 +533,529 @@ class TestHelperFunctions:
         extra_vars = {"extra_key": "extra_value"}
         hooks._populate_environment_with_extra_vars(local_env, extra_vars, False)
         assert "TF_EXTRA_EXTRA_KEY" in local_env
+
+
+# Tests for nested remote_vars structures
+class TestResolveTerraformValue:
+    """Tests for _resolve_terraform_value() function."""
+
+    def test_resolve_simple_string_with_specific_output(self):
+        """Test resolving a simple terraform_remote_state reference to specific output."""
+        mock_backend = mock.Mock()
+        mock_backend.get_state.return_value = {
+            "version": 4,
+            "outputs": {
+                "vpc_id": {"value": "vpc-123", "type": "string"},
+            },
+            "resources": [],
+        }
+
+        state_cache = {}
+        value = "data.terraform_remote_state.network1.outputs.vpc_id"
+        result = hooks._resolve_terraform_value(value, mock_backend, state_cache)
+
+        assert result == "vpc-123"
+        mock_backend.get_state.assert_called_once_with("network1")
+
+    def test_resolve_string_with_entire_outputs(self):
+        """Test resolving terraform_remote_state reference to entire outputs dict."""
+        mock_backend = mock.Mock()
+        mock_backend.get_state.return_value = {
+            "version": 4,
+            "outputs": {
+                "vpc_id": {"value": "vpc-123", "type": "string"},
+                "subnet_ids": {"value": ["subnet-1", "subnet-2"], "type": "list"},
+            },
+            "resources": [],
+        }
+
+        state_cache = {}
+        value = "data.terraform_remote_state.network1.outputs"
+        result = hooks._resolve_terraform_value(value, mock_backend, state_cache)
+
+        assert result == {
+            "vpc_id": "vpc-123",
+            "subnet_ids": ["subnet-1", "subnet-2"],
+        }
+        mock_backend.get_state.assert_called_once_with("network1")
+
+    def test_resolve_plain_string(self):
+        """Test that plain strings (non-terraform refs) pass through unchanged."""
+        mock_backend = mock.Mock()
+        state_cache = {}
+
+        result = hooks._resolve_terraform_value(
+            "plain_string", mock_backend, state_cache
+        )
+        assert result == "plain_string"
+        mock_backend.get_state.assert_not_called()
+
+    def test_resolve_dict_with_terraform_refs(self):
+        """Test resolving dict with terraform_remote_state references as values."""
+        mock_backend = mock.Mock()
+        mock_backend.get_state.side_effect = [
+            {
+                "version": 4,
+                "outputs": {
+                    "vpc_id": {"value": "vpc-123", "type": "string"},
+                },
+                "resources": [],
+            },
+            {
+                "version": 4,
+                "outputs": {
+                    "vpc_id": {"value": "vpc-456", "type": "string"},
+                },
+                "resources": [],
+            },
+        ]
+
+        state_cache = {}
+        value = {
+            "platform": "data.terraform_remote_state.network1.outputs.vpc_id",
+            "payments": "data.terraform_remote_state.network2.outputs.vpc_id",
+        }
+        result = hooks._resolve_terraform_value(value, mock_backend, state_cache)
+
+        assert result == {
+            "platform": "vpc-123",
+            "payments": "vpc-456",
+        }
+        assert mock_backend.get_state.call_count == 2
+
+    def test_resolve_dict_with_entire_outputs(self):
+        """Test resolving dict where values are entire outputs dicts."""
+        mock_backend = mock.Mock()
+        mock_backend.get_state.side_effect = [
+            {
+                "version": 4,
+                "outputs": {
+                    "vpc_id": {"value": "vpc-123", "type": "string"},
+                    "cidr": {"value": "10.0.0.0/16", "type": "string"},
+                },
+                "resources": [],
+            },
+            {
+                "version": 4,
+                "outputs": {
+                    "vpc_id": {"value": "vpc-456", "type": "string"},
+                    "cidr": {"value": "10.1.0.0/16", "type": "string"},
+                },
+                "resources": [],
+            },
+        ]
+
+        state_cache = {}
+        value = {
+            "platform": "data.terraform_remote_state.network1.outputs",
+            "payments": "data.terraform_remote_state.network2.outputs",
+        }
+        result = hooks._resolve_terraform_value(value, mock_backend, state_cache)
+
+        assert result == {
+            "platform": {"vpc_id": "vpc-123", "cidr": "10.0.0.0/16"},
+            "payments": {"vpc_id": "vpc-456", "cidr": "10.1.0.0/16"},
+        }
+
+    def test_resolve_list_with_terraform_refs(self):
+        """Test resolving list with terraform_remote_state references."""
+        mock_backend = mock.Mock()
+        mock_backend.get_state.side_effect = [
+            {
+                "version": 4,
+                "outputs": {
+                    "vpc_id": {"value": "vpc-123", "type": "string"},
+                },
+                "resources": [],
+            },
+            {
+                "version": 4,
+                "outputs": {
+                    "vpc_id": {"value": "vpc-456", "type": "string"},
+                },
+                "resources": [],
+            },
+        ]
+
+        state_cache = {}
+        value = [
+            "data.terraform_remote_state.network1.outputs.vpc_id",
+            "data.terraform_remote_state.network2.outputs.vpc_id",
+        ]
+        result = hooks._resolve_terraform_value(value, mock_backend, state_cache)
+
+        assert result == ["vpc-123", "vpc-456"]
+        assert mock_backend.get_state.call_count == 2
+
+    def test_resolve_nested_dict(self):
+        """Test resolving deeply nested dict structures."""
+        mock_backend = mock.Mock()
+        mock_backend.get_state.return_value = {
+            "version": 4,
+            "outputs": {
+                "vpc_id": {"value": "vpc-123", "type": "string"},
+            },
+            "resources": [],
+        }
+
+        state_cache = {}
+        value = {
+            "production": {
+                "primary": "data.terraform_remote_state.network1.outputs.vpc_id",
+            }
+        }
+        result = hooks._resolve_terraform_value(value, mock_backend, state_cache)
+
+        assert result == {"production": {"primary": "vpc-123"}}
+
+    def test_resolve_with_caching(self):
+        """Test that state caching prevents duplicate backend calls."""
+        mock_backend = mock.Mock()
+        mock_backend.get_state.return_value = {
+            "version": 4,
+            "outputs": {
+                "vpc_id": {"value": "vpc-123", "type": "string"},
+                "subnet_id": {"value": "subnet-456", "type": "string"},
+            },
+            "resources": [],
+        }
+
+        state_cache = {}
+        value = {
+            "vpc": "data.terraform_remote_state.network1.outputs.vpc_id",
+            "subnet": "data.terraform_remote_state.network1.outputs.subnet_id",
+        }
+        result = hooks._resolve_terraform_value(value, mock_backend, state_cache)
+
+        assert result == {"vpc": "vpc-123", "subnet": "subnet-456"}
+        # Should only call backend once due to caching
+        mock_backend.get_state.assert_called_once_with("network1")
+
+    def test_resolve_literal_values(self):
+        """Test that literal values (int, bool, etc.) pass through unchanged."""
+        mock_backend = mock.Mock()
+        state_cache = {}
+
+        assert hooks._resolve_terraform_value(42, mock_backend, state_cache) == 42
+        assert hooks._resolve_terraform_value(True, mock_backend, state_cache) is True
+        assert hooks._resolve_terraform_value(None, mock_backend, state_cache) is None
+
+    def test_resolve_output_not_found(self):
+        """Test error when requested output doesn't exist."""
+        mock_backend = mock.Mock()
+        mock_backend.get_state.return_value = {
+            "version": 4,
+            "outputs": {
+                "vpc_id": {"value": "vpc-123", "type": "string"},
+            },
+            "resources": [],
+        }
+
+        state_cache = {}
+        value = "data.terraform_remote_state.network1.outputs.nonexistent"
+
+        with pytest.raises(hooks.HookError) as exc_info:
+            hooks._resolve_terraform_value(value, mock_backend, state_cache)
+        assert "Output 'nonexistent' not found" in str(exc_info.value)
+
+
+class TestPopulateEnvironmentWithNestedRemoteVars:
+    """Tests for _populate_environment_with_terraform_remote_vars with nested structures."""
+
+    @mock.patch("builtins.open", new_callable=mock.mock_open)
+    @mock.patch("tfworker.util.hooks.os.path.isfile", return_value=True)
+    @mock.patch("tfworker.util.hooks.hcl2.loads")
+    def test_populate_with_dict_of_entire_outputs(
+        self, mock_hcl2_loads, mock_isfile, mock_open
+    ):
+        """Test populating environment with dict of entire outputs."""
+        mock_open.return_value.read.return_value = """locals {
+  vpcs = {
+    "platform" = data.terraform_remote_state.network1.outputs
+    "payments" = data.terraform_remote_state.network2.outputs
+  }
+}
+"""
+        mock_hcl2_loads.return_value = {
+            "locals": [
+                {
+                    "vpcs": {
+                        "platform": "data.terraform_remote_state.network1.outputs",
+                        "payments": "data.terraform_remote_state.network2.outputs",
+                    }
+                }
+            ]
+        }
+
+        mock_backend = mock.Mock()
+        mock_backend.get_state.side_effect = [
+            {
+                "version": 4,
+                "outputs": {
+                    "vpc_id": {"value": "vpc-123", "type": "string"},
+                },
+                "resources": [],
+            },
+            {
+                "version": 4,
+                "outputs": {
+                    "vpc_id": {"value": "vpc-456", "type": "string"},
+                },
+                "resources": [],
+            },
+        ]
+
+        local_env = {}
+        hooks._populate_environment_with_terraform_remote_vars(
+            local_env, "working_dir", "terraform_path", False, mock_backend
+        )
+
+        assert "TF_REMOTE_VPCS" in local_env
+        # Should be JSON-encoded dict with nested dicts
+        import json
+
+        vpcs_value = json.loads(local_env["TF_REMOTE_VPCS"].strip("'"))
+        assert vpcs_value == {
+            "platform": {"vpc_id": "vpc-123"},
+            "payments": {"vpc_id": "vpc-456"},
+        }
+
+    @mock.patch("builtins.open", new_callable=mock.mock_open)
+    @mock.patch("tfworker.util.hooks.os.path.isfile", return_value=True)
+    @mock.patch("tfworker.util.hooks.hcl2.loads")
+    def test_populate_with_list(self, mock_hcl2_loads, mock_isfile, mock_open):
+        """Test populating environment with list of references."""
+        mock_open.return_value.read.return_value = """locals {
+  vpc_ids = [
+    data.terraform_remote_state.network1.outputs.vpc_id,
+    data.terraform_remote_state.network2.outputs.vpc_id,
+  ]
+}
+"""
+        mock_hcl2_loads.return_value = {
+            "locals": [
+                {
+                    "vpc_ids": [
+                        "data.terraform_remote_state.network1.outputs.vpc_id",
+                        "data.terraform_remote_state.network2.outputs.vpc_id",
+                    ]
+                }
+            ]
+        }
+
+        mock_backend = mock.Mock()
+        mock_backend.get_state.side_effect = [
+            {
+                "version": 4,
+                "outputs": {
+                    "vpc_id": {"value": "vpc-123", "type": "string"},
+                },
+                "resources": [],
+            },
+            {
+                "version": 4,
+                "outputs": {
+                    "vpc_id": {"value": "vpc-456", "type": "string"},
+                },
+                "resources": [],
+            },
+        ]
+
+        local_env = {}
+        hooks._populate_environment_with_terraform_remote_vars(
+            local_env, "working_dir", "terraform_path", False, mock_backend
+        )
+
+        assert "TF_REMOTE_VPC_IDS" in local_env
+        # Should be JSON-encoded list
+        import json
+
+        vpc_ids_value = json.loads(local_env["TF_REMOTE_VPC_IDS"].strip("'"))
+        assert vpc_ids_value == ["vpc-123", "vpc-456"]
+
+    @mock.patch("builtins.open", new_callable=mock.mock_open)
+    @mock.patch("tfworker.util.hooks.os.path.isfile", return_value=True)
+    @mock.patch("tfworker.util.hooks.hcl2.loads")
+    def test_fallback_to_regex_on_hcl2_parse_failure(
+        self, mock_hcl2_loads, mock_isfile, mock_open
+    ):
+        """Test that regex fallback works when HCL2 parsing fails."""
+        mock_locals_content = """locals {
+  local_key = data.terraform_remote_state.example.outputs.key
+}
+"""
+        mock_open.return_value.read.return_value = mock_locals_content
+        # Make HCL2 parsing fail
+        mock_hcl2_loads.side_effect = Exception("HCL2 parse error")
+
+        mock_backend = mock.Mock()
+        mock_backend.get_state.return_value = {
+            "version": 4,
+            "outputs": {
+                "key": {"value": "test_value", "type": "string"},
+            },
+            "resources": [],
+        }
+
+        local_env = {}
+        # Should fall back to regex parsing
+        with mock.patch(
+            "tfworker.util.hooks.get_state_item",
+            return_value='{"value":"test_value","type":"string"}',
+        ):
+            hooks._populate_environment_with_terraform_remote_vars(
+                local_env, "working_dir", "terraform_path", False, mock_backend
+            )
+
+        assert "TF_REMOTE_LOCAL_KEY" in local_env
+        assert local_env["TF_REMOTE_LOCAL_KEY"] == "test_value"
+
+
+class TestCheckEnvVarSize:
+    """Tests for _check_env_var_size() function."""
+
+    def test_small_variable_no_warning(self, monkeypatch):
+        """Test that small variables don't trigger warnings."""
+        mock_warn = mock.Mock()
+        mock_info = mock.Mock()
+        monkeypatch.setattr("tfworker.util.hooks.log.warn", mock_warn)
+        monkeypatch.setattr("tfworker.util.hooks.log.info", mock_info)
+
+        hooks._check_env_var_size("TEST_VAR", "small value", b64_encode=False)
+
+        # Should not log anything for small values
+        mock_warn.assert_not_called()
+        mock_info.assert_not_called()
+
+    def test_variable_approaching_limit_info(self, monkeypatch):
+        """Test that variables approaching limit (>80%) trigger info log."""
+        mock_info = mock.Mock()
+        monkeypatch.setattr("tfworker.util.hooks.log.info", mock_info)
+        monkeypatch.setenv("SHELL", "/bin/sh")
+
+        # sh limit is 65536, so 85% is ~55705 bytes
+        large_value = "x" * 55705
+
+        hooks._check_env_var_size("TEST_VAR", large_value, b64_encode=False)
+
+        mock_info.assert_called_once()
+        call_arg = mock_info.call_args[0][0]
+        assert "TEST_VAR" in call_arg
+        assert "approaching the sh limit" in call_arg
+        assert "84% of limit" in call_arg or "85% of limit" in call_arg
+
+    def test_variable_exceeding_limit_warning(self, monkeypatch):
+        """Test that variables exceeding limit trigger warning."""
+        mock_warn = mock.Mock()
+        monkeypatch.setattr("tfworker.util.hooks.log.warn", mock_warn)
+        monkeypatch.setenv("SHELL", "/bin/sh")
+
+        # sh limit is 65536, create value larger than that
+        large_value = "x" * 70000
+
+        hooks._check_env_var_size("TEST_VAR", large_value, b64_encode=False)
+
+        mock_warn.assert_called_once()
+        call_arg = mock_warn.call_args[0][0]
+        assert "TEST_VAR" in call_arg
+        assert "exceeds the typical sh limit" in call_arg
+        assert "70,000 bytes" in call_arg
+
+    def test_base64_encoded_note_in_warning(self, monkeypatch):
+        """Test that base64 encoding is noted in warning message."""
+        mock_warn = mock.Mock()
+        monkeypatch.setattr("tfworker.util.hooks.log.warn", mock_warn)
+        monkeypatch.setenv("SHELL", "/bin/sh")
+
+        large_value = "x" * 70000
+
+        hooks._check_env_var_size("TEST_VAR", large_value, b64_encode=True)
+
+        mock_warn.assert_called_once()
+        call_arg = mock_warn.call_args[0][0]
+        assert "(base64 encoded)" in call_arg
+
+    def test_bash_shell_limit(self, monkeypatch):
+        """Test that bash shell uses higher limit (128 KB)."""
+        mock_info = mock.Mock()
+        monkeypatch.setattr("tfworker.util.hooks.log.info", mock_info)
+        monkeypatch.setenv("SHELL", "/bin/bash")
+
+        # bash limit is 131072, so 85% is ~111411 bytes
+        large_value = "x" * 111411
+
+        hooks._check_env_var_size("TEST_VAR", large_value, b64_encode=False)
+
+        mock_info.assert_called_once()
+        call_arg = mock_info.call_args[0][0]
+        assert "approaching the bash limit of 131,072 bytes" in call_arg
+
+    def test_zsh_shell_limit(self, monkeypatch):
+        """Test that zsh shell uses highest limit (1 MB)."""
+        mock_info = mock.Mock()
+        monkeypatch.setattr("tfworker.util.hooks.log.info", mock_info)
+        monkeypatch.setenv("SHELL", "/usr/bin/zsh")
+
+        # zsh limit is 1048576, so 85% is ~891289 bytes
+        large_value = "x" * 891289
+
+        hooks._check_env_var_size("TEST_VAR", large_value, b64_encode=False)
+
+        mock_info.assert_called_once()
+        call_arg = mock_info.call_args[0][0]
+        assert "approaching the zsh limit of 1,048,576 bytes" in call_arg
+
+    def test_unknown_shell_uses_conservative_limit(self, monkeypatch):
+        """Test that unknown/missing shell uses conservative sh limit."""
+        mock_warn = mock.Mock()
+        monkeypatch.setattr("tfworker.util.hooks.log.warn", mock_warn)
+        monkeypatch.setenv("SHELL", "/usr/bin/unknown")
+
+        # Should default to sh limit (65536)
+        large_value = "x" * 70000
+
+        hooks._check_env_var_size("TEST_VAR", large_value, b64_encode=False)
+
+        mock_warn.assert_called_once()
+        call_arg = mock_warn.call_args[0][0]
+        assert "exceeds the typical unknown limit" in call_arg
+
+    def test_no_shell_env_uses_conservative_limit(self, monkeypatch):
+        """Test that missing SHELL env var uses conservative sh limit."""
+        mock_warn = mock.Mock()
+        monkeypatch.setattr("tfworker.util.hooks.log.warn", mock_warn)
+        monkeypatch.delenv("SHELL", raising=False)
+
+        # Should default to sh limit (65536)
+        large_value = "x" * 70000
+
+        hooks._check_env_var_size("TEST_VAR", large_value, b64_encode=False)
+
+        mock_warn.assert_called_once()
+        call_arg = mock_warn.call_args[0][0]
+        # When SHELL is not set, current_shell defaults to "sh"
+        assert "exceeds the typical sh limit" in call_arg
+
+
+class TestSetHookEnvVarWithSizeCheck:
+    """Test that _set_hook_env_var integrates size checking."""
+
+    def test_set_hook_env_var_with_large_dict_warns(self, monkeypatch):
+        """Test that setting large nested dict triggers size warning."""
+        mock_warn = mock.Mock()
+        monkeypatch.setattr("tfworker.util.hooks.log.warn", mock_warn)
+        monkeypatch.setenv("SHELL", "/bin/sh")
+
+        local_env = {}
+        # Create a large dict that exceeds sh limit (65536 bytes)
+        large_dict = {f"key_{i}": f"value_{i}" * 100 for i in range(1000)}
+
+        hooks._set_hook_env_var(
+            local_env, hooks.TFHookVarType.REMOTE, "LARGE_VAR", large_dict, False
+        )
+
+        assert "TF_REMOTE_LARGE_VAR" in local_env
+        # Should have logged a warning
+        mock_warn.assert_called_once()
+        call_arg = mock_warn.call_args[0][0]
+        assert "exceeds the typical" in call_arg
