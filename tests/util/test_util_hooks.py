@@ -204,6 +204,13 @@ class TestParseTfvarsFile:
         path.write_text(json.dumps(values))
         assert hooks._parse_tfvars_file(str(path)) == values
 
+    def test_parse_tfvars_json_file_invalid_raises_hook_error(self, tmp_path):
+        """Malformed JSON surfaces as a HookError, which _exec_hook handles."""
+        path = tmp_path / "worker_generated.auto.tfvars.json"
+        path.write_text("{not json")
+        with pytest.raises(HookError, match="could not parse"):
+            hooks._parse_tfvars_file(str(path))
+
     def test_tfvars_json_hook_env_matches_legacy(self, tmp_path):
         """
         Hooks see the same TF_VAR_* values for strings, bools, numbers and

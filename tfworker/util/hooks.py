@@ -315,10 +315,17 @@ def _parse_tfvars_file(tfvars_path: str) -> Dict[str, Any]:
 
     Raises:
         FileNotFoundError: If the file doesn't exist
+        HookError: If a .json file is not valid JSON
     """
     if tfvars_path.endswith(".json"):
         with open(tfvars_path, "r") as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except ValueError as e:
+                # JSONDecodeError and UnicodeDecodeError are ValueErrors; report
+                # them as a HookError so _exec_hook handles them like any other
+                # hook failure
+                raise HookError(f"could not parse {tfvars_path} as JSON: {e}") from e
 
     try:
         with open(tfvars_path, "r") as f:
