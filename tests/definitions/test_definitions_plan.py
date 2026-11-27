@@ -58,6 +58,21 @@ class TestDefinitionsPlan:
         assert result[1].startswith("empty")
         assert not mock_definition.plan_file.exists()
 
+    def test_needs_plan_forced_ignores_existing_file(
+        self, mock_click_context, mock_app_state
+    ):
+        mock_app_state.root_options.backend_plans = True
+        mock_app_state.terraform_options.force_plan = True
+        dp = DefinitionPlan(mock_click_context, mock_app_state)
+        dp.set_plan_file(mock_definition)
+        mock_definition.plan_file.write_text("saved plan")
+        try:
+            result = dp.needs_plan(mock_definition)
+            assert result[0] is True
+            assert result[1] == "plan forced"
+        finally:
+            mock_definition.plan_file.unlink()
+
     def test_needs_plan_existing_file(self, mock_click_context, mock_app_state):
         mock_app_state.root_options.backend_plans = True
         dp = DefinitionPlan(mock_click_context, mock_app_state)

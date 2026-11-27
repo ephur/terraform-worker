@@ -405,6 +405,95 @@ def test_log_subprocess_result_json(mock_secho):
     assert kwargs == {"fg": None}
 
 
+@patch("tfworker.util.log.secho")
+def test_log_text_format_dict_message_only(mock_secho):
+    """Fields already stated in the message are not repeated on a terminal."""
+    log.log_level = log.LogLevel.INFO
+    log.log_format = log.LogFormat.TEXT
+
+    log.info(
+        {
+            "message": "running terraform init for karpenter",
+            "definition": "karpenter",
+            "terraform_action": "init",
+        }
+    )
+
+    mock_secho.assert_called_once_with(
+        "running terraform init for karpenter", fg="green"
+    )
+
+
+@patch("tfworker.util.log.secho")
+def test_log_text_format_dict_shows_unstated_fields(mock_secho):
+    """A field the message does not state is appended rather than dropped."""
+    log.log_level = log.LogLevel.INFO
+    log.log_format = log.LogFormat.TEXT
+
+    log.info({"message": "running cmd", "working_dir": "/opt/deploy"})
+
+    mock_secho.assert_called_once_with(
+        "running cmd [working_dir=/opt/deploy]", fg="green"
+    )
+
+
+@patch("tfworker.util.log.secho")
+def test_log_text_format_string_unchanged(mock_secho):
+    """String messages render exactly as they did before dict support."""
+    log.log_level = log.LogLevel.INFO
+    log.log_format = log.LogFormat.TEXT
+
+    log.info("3 of 109 definitions failed to initialize:")
+
+    mock_secho.assert_called_once_with(
+        "3 of 109 definitions failed to initialize:", fg="green"
+    )
+
+
+@patch("tfworker.util.log.secho")
+def test_run_context_added_to_json_records(mock_secho):
+    log.log_level = log.LogLevel.INFO
+    log.log_format = log.LogFormat.JSON
+    log.set_context(deployment="apps-staging", run_id="drift-apps-staging")
+
+    log.info("building Deployment: apps-staging")
+
+    payload = json.loads(mock_secho.call_args[0][0])
+    assert payload["deployment"] == "apps-staging"
+    assert payload["run_id"] == "drift-apps-staging"
+
+
+@patch("tfworker.util.log.secho")
+def test_run_context_ignores_none_and_yields_to_message_fields(mock_secho):
+    log.log_level = log.LogLevel.INFO
+    log.log_format = log.LogFormat.JSON
+    log.set_context(deployment="apps-staging", run_id=None)
+
+    log.info({"message": "per record wins", "deployment": "apps-qa"})
+
+    payload = json.loads(mock_secho.call_args[0][0])
+    assert "run_id" not in payload
+    assert payload["deployment"] == "apps-qa"
+
+
+@patch("tfworker.util.log.secho")
+def test_run_context_absent_from_text_records(mock_secho):
+    log.log_level = log.LogLevel.INFO
+    log.log_format = log.LogFormat.TEXT
+    log.set_context(deployment="apps-staging")
+
+    log.info("building Deployment: apps-staging")
+
+    mock_secho.assert_called_once_with("building Deployment: apps-staging", fg="green")
+
+
+def test_clear_context():
+    log.set_context(deployment="apps-staging")
+    assert log._run_context
+    log.clear_context()
+    assert log._run_context == {}
+
+
 # performance testing the two different redact methods
 @pytest.mark.performance
 def test_redact_items_regex_performance():

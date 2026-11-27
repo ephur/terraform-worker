@@ -26,9 +26,31 @@ class LogFormat(Enum):
 log_level = LogLevel.ERROR
 log_format = LogFormat.TEXT
 
+# Fields added to every structured record; set once per run so central logging
+# can tell one deployment's run from another sharing the same service/index.
+_run_context: Dict[str, Any] = {}
+
 
 def json_logging_enabled() -> bool:
     return log_format == LogFormat.JSON
+
+
+def set_context(**fields: Any) -> None:
+    """
+    Add fields to every subsequent structured log record.
+
+    Values that are None are ignored, so a caller can pass optional run
+    metadata without checking each one first.
+
+    Args:
+        **fields: the fields to attach to every record
+    """
+    _run_context.update({k: v for k, v in fields.items() if v is not None})
+
+
+def clear_context() -> None:
+    """Drop the run context; used between runs and by tests."""
+    _run_context.clear()
 
 
 def log_subprocess_result(
@@ -65,9 +87,30 @@ def _format_json_message(msg: Union[str, Dict[str, Any]], level: LogLevel) -> st
         "timestamp": datetime.now(UTC).isoformat(),
         "level": level.name,
     }
+    payload.update(_run_context)
     payload.update(_normalize_message(msg))
     payload.setdefault("message", "")
     return json.dumps(payload, sort_keys=True)
+
+
+def _format_text_message(msg: Union[str, Dict[str, Any]]) -> str:
+    """
+    Render a message for a human reading a terminal.
+
+    A structured message prints as its text plus any field the text does not
+    already state. Most context (the definition, the action) is named in the
+    message itself, so this keeps terminal output as terse as it was while
+    never silently dropping a field that only exists in the structure.
+    """
+    if not isinstance(msg, dict):
+        return str(msg)
+
+    fields = _normalize_message(msg)
+    message = str(fields.pop("message", ""))
+    extras = " ".join(
+        f"{key}={value}" for key, value in fields.items() if str(value) not in message
+    )
+    return f"{message} [{extras}]" if extras else message
 
 
 def log(
@@ -96,11 +139,12 @@ def log(
         msg = redact_items_token(msg)
 
     if level.value >= log_level.value:
-        rendered_msg = msg
         color = level_colors[level]
         if log_format == LogFormat.JSON:
             rendered_msg = _format_json_message(msg, level)
             color = None
+        else:
+            rendered_msg = _format_text_message(msg)
         secho(rendered_msg, fg=color)
     return
 

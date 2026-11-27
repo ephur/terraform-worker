@@ -66,6 +66,81 @@ class TestS3BackendInit:
         ):
             S3Backend(mock_authenticators, "test-deployment")
 
+    @pytest.mark.parametrize(
+        "error_factory,error_args",
+        [
+            (
+                botocore.exceptions.TokenRetrievalError,
+                {"provider": "sso", "error_msg": "Token has expired"},
+            ),
+            (botocore.exceptions.NoCredentialsError, {}),
+            (
+                botocore.exceptions.PartialCredentialsError,
+                {"provider": "test", "cred_var": "AWS_SECRET_ACCESS_KEY"},
+            ),
+        ],
+        ids=["token_retrieval", "no_credentials", "partial_credentials"],
+    )
+    @mock_aws
+    def test_init_auth_errors(
+        self, mock_authenticators, mocker, error_factory, error_args
+    ):
+        """Test that various auth errors raise helpful BackendError."""
+        error = error_factory(**error_args)
+        mocker.patch.object(S3Backend, "_check_table_exists", side_effect=error)
+
+        with pytest.raises(
+            BackendError, match="AWS authentication failed:"
+        ) as exc_info:
+            S3Backend(mock_authenticators, "test-deployment")
+
+        assert exc_info.value.__cause__ is error
+
+    @pytest.mark.parametrize(
+        "error_code",
+        [
+            "ExpiredToken",
+            "InvalidClientTokenId",
+            "SignatureDoesNotMatch",
+            "AccessDenied",
+        ],
+        ids=["expired_token", "invalid_token", "bad_signature", "access_denied"],
+    )
+    @mock_aws
+    def test_init_client_error_auth_codes(
+        self, mock_authenticators, mocker, error_code
+    ):
+        """Test that ClientError with auth codes raises helpful BackendError."""
+        client_error = botocore.exceptions.ClientError(
+            {"Error": {"Code": error_code, "Message": "Auth error"}},
+            "DescribeTable",
+        )
+        mocker.patch.object(S3Backend, "_check_table_exists", side_effect=client_error)
+
+        with pytest.raises(
+            BackendError, match="AWS authentication failed:"
+        ) as exc_info:
+            S3Backend(mock_authenticators, "test-deployment")
+
+        assert exc_info.value.__cause__ is client_error
+
+    @mock_aws
+    def test_init_non_auth_client_error(self, mock_authenticators, mocker):
+        """Test that non-auth ClientError is re-raised."""
+        client_error = botocore.exceptions.ClientError(
+            {"Error": {"Code": "ThrottlingException", "Message": "Rate exceeded"}},
+            "DescribeTable",
+        )
+        mocker.patch.object(
+            S3Backend,
+            "_check_table_exists",
+            side_effect=client_error,
+        )
+
+        # Should re-raise the original ClientError, not BackendError
+        with pytest.raises(botocore.exceptions.ClientError):
+            S3Backend(mock_authenticators, "test-deployment")
+
 
 class TestS3BackendCheckBucketExists:
 

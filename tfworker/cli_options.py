@@ -322,10 +322,10 @@ class CLIOptionsTerraform(FreezableBaseModel):
         json_schema_extra={"env": "WORKER_PLAN_DESTROY"},
         description="Create a destroy plan (mutually exclusive with --plan)",
     )
-    force: bool = Field(
+    force_plan: bool = Field(
         False,
-        json_schema_extra={"env": "WORKER_FORCE"},
-        description="Force apply/destroy without plan change",
+        json_schema_extra={"env": "WORKER_FORCE_PLAN"},
+        description="Plan even when a saved plan is available, replacing the saved plan",
     )
     plan_file_path: Optional[str] = Field(
         None,
@@ -391,6 +391,16 @@ class CLIOptionsTerraform(FreezableBaseModel):
         True,
         json_schema_extra={"env": "WORKER_FAIL_ON_PLAN_ERROR"},
         description="Exit non-zero at end of planning if any definition had a plan error",
+    )
+    init_failures: bool = Field(
+        True,
+        json_schema_extra={"env": "WORKER_INIT_FAILURES"},
+        description="Stop initializing remaining definitions when a definition fails to prepare or init",
+    )
+    fail_on_init_error: bool = Field(
+        True,
+        json_schema_extra={"env": "WORKER_FAIL_ON_INIT_ERROR"},
+        description="Exit non-zero at end of init if any definition failed to prepare or init",
     )
 
     @model_validator(mode="before")

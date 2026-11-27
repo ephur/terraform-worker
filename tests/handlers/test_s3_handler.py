@@ -146,9 +146,33 @@ class TestVerifyLineage:
         self.upload_state(s3, handler.bucket, state_key, serial=2, lineage="y")
         assert handler._verify_lineage(plan, state_key) is False
 
-    def test_state_missing_raises(self, handler_with_bucket, tmp_path):
+    def test_state_missing_empty_plan_state_matches(
+        self, handler_with_bucket, tmp_path
+    ):
+        handler, _ = handler_with_bucket
+        plan = self.create_plan(tmp_path, serial=0, lineage="")
+        assert handler._verify_lineage(plan, "missing") is True
+
+    def test_state_missing_plan_with_state_mismatch(
+        self, handler_with_bucket, tmp_path
+    ):
         handler, _ = handler_with_bucket
         plan = self.create_plan(tmp_path)
+        assert handler._verify_lineage(plan, "missing") is False
+
+    def test_state_download_error_raises(
+        self, handler_with_bucket, tmp_path, monkeypatch
+    ):
+        handler, _ = handler_with_bucket
+        plan = self.create_plan(tmp_path, serial=0, lineage="")
+
+        def raise_error(*args, **kwargs):
+            raise botocore.exceptions.ClientError(
+                {"Error": {"Code": "AccessDenied"}},
+                "GetObject",
+            )
+
+        monkeypatch.setattr(handler.s3_client, "get_object", raise_error)
         with pytest.raises(HandlerError):
             handler._verify_lineage(plan, "missing")
 
@@ -219,6 +243,33 @@ class TestCheckPlan:
         handler._check_plan("dep", definition)
         assert not planfile.exists()
 
+    def test_force_plan_discards_saved_plan_without_downloading(
+        self, handler_with_bucket, mock_app_state, tmp_path, monkeypatch
+    ):
+        """A forced plan drops the saved plan up front: _post_plan only uploads
+        when terraform reports changes, so a forced plan finding none would
+        otherwise leave the superseded plan available to a later apply."""
+        handler, _ = handler_with_bucket
+        mock_app_state.terraform_options.force_plan = True
+        planfile = tmp_path / "plan.tfplan"
+        planfile.write_text("stale local plan")
+        definition = MagicMock()
+        definition.name = "def"
+        definition.plan_file = str(planfile)
+
+        get_mock = MagicMock()
+        monkeypatch.setattr(handler, "_s3_get_plan", get_mock)
+        with patch.object(handler, "_s3_delete_plan", return_value=True) as del_mock:
+            handler._check_plan("dep", definition)
+
+        # the non-empty local plan is replaced rather than raising
+        assert not planfile.exists()
+        get_mock.assert_not_called()
+        remotefile = handler.get_remote_file("def")
+        deleted = [call.args[0] for call in del_mock.call_args_list]
+        assert remotefile in deleted
+        assert remotefile.replace(".tfplan", ".log") in deleted
+
     def test_downloaded_bad_lineage_removed(
         self, handler_with_bucket, tmp_path, monkeypatch
     ):
@@ -238,6 +289,86 @@ class TestCheckPlan:
             handler._check_plan("dep", definition)
             del_mock.assert_called_once()
         assert not planfile.exists()
+
+
+class TestGetPlan:
+    """get_plan is what an apply-only run uses; it reports whether a plan landed."""
+
+    def test_missing_remote_returns_false(self, handler_with_bucket, tmp_path):
+        handler, _ = handler_with_bucket
+        planfile = tmp_path / "plan.tfplan"
+        definition = MagicMock()
+        definition.name = "def"
+        definition.plan_file = str(planfile)
+        assert handler.get_plan(definition) is False
+        assert not planfile.exists()
+
+    def test_downloads_and_returns_true(
+        self, handler_with_bucket, tmp_path, monkeypatch
+    ):
+        handler, _ = handler_with_bucket
+        planfile = tmp_path / "plan.tfplan"
+        definition = MagicMock()
+        definition.name = "def"
+        definition.plan_file = str(planfile)
+
+        def fake_get(local, remote):
+            Path(local).write_text("data")
+            return True
+
+        monkeypatch.setattr(handler, "_s3_get_plan", fake_get)
+        monkeypatch.setattr(handler, "_verify_lineage", lambda p, s: True)
+        assert handler.get_plan(definition) is True
+        assert planfile.exists()
+
+    def test_bad_lineage_returns_false(
+        self, handler_with_bucket, tmp_path, monkeypatch
+    ):
+        handler, _ = handler_with_bucket
+        planfile = tmp_path / "plan.tfplan"
+        definition = MagicMock()
+        definition.name = "def"
+        definition.plan_file = str(planfile)
+
+        def fake_get(local, remote):
+            Path(local).write_text("data")
+            return True
+
+        monkeypatch.setattr(handler, "_s3_get_plan", fake_get)
+        monkeypatch.setattr(handler, "_verify_lineage", lambda p, s: False)
+        with patch.object(handler, "_s3_delete_plan") as del_mock:
+            assert handler.get_plan(definition) is False
+            del_mock.assert_called_once()
+        assert not planfile.exists()
+
+    def test_state_missing_plan_with_state_removed(self, handler_with_bucket, tmp_path):
+        handler, s3 = handler_with_bucket
+        planfile = tmp_path / "plan.tfplan"
+        definition = MagicMock()
+        definition.name = "def"
+        definition.plan_file = str(planfile)
+        source_dir = tmp_path / "src"
+        source_dir.mkdir()
+        source = TestVerifyLineage().create_plan(source_dir)
+        remotefile = handler.get_remote_file("def")
+        s3.put_object(Bucket=handler.bucket, Key=remotefile, Body=source.read_bytes())
+
+        assert handler.get_plan(definition) is False
+        assert not planfile.exists()
+        assert s3.list_objects(Bucket=handler.bucket).get("Contents") is None
+
+    def test_vanished_after_download_raises(
+        self, handler_with_bucket, tmp_path, monkeypatch
+    ):
+        handler, _ = handler_with_bucket
+        planfile = tmp_path / "plan.tfplan"
+        definition = MagicMock()
+        definition.name = "def"
+        definition.plan_file = str(planfile)
+
+        monkeypatch.setattr(handler, "_s3_get_plan", lambda local, remote: True)
+        with pytest.raises(HandlerError):
+            handler.get_plan(definition)
 
 
 class TestHasPlan:

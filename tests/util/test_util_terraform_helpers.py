@@ -13,6 +13,7 @@ from tfworker.util.system import get_platform
 from tfworker.util.terraform import generate_terraform_lockfile
 from tfworker.util.terraform_helpers import (
     _create_mirror_configuration,
+    _find_loaded_required_providers,
     _find_required_providers,
     _get_cached_hash,
     _get_provider_cache_dir,
@@ -412,3 +413,132 @@ class TestLockfileConcreteVersionValidation:
                 included_providers=None,
                 cache_dir=str(tmp_path),
             )
+
+
+def _required(name, source):
+    return f"""
+terraform {{
+  required_providers {{
+    {name} = {{
+      source  = "{source}"
+      version = ">= 1.0.0"
+    }}
+  }}
+}}
+"""
+
+
+class TestTerraformHelpersFindLoadedRequiredProviders:
+
+    def _write_manifest(self, root, modules):
+        manifest = root / ".terraform" / "modules" / "modules.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(
+            json.dumps({"Modules": [{"Key": "", "Source": "", "Dir": "."}] + modules})
+        )
+
+    def test_subdir_source_reads_only_the_subdir(self, tmp_path):
+        (tmp_path / "main.tf").write_text(_required("aws", "hashicorp/aws"))
+        # a //sub git source fetches the whole repository
+        repo = tmp_path / ".terraform" / "modules" / "shared"
+        (repo / "sub").mkdir(parents=True)
+        (repo / "versions.tf").write_text(_required("archive", "hashicorp/archive"))
+        (repo / "sub" / "versions.tf").write_text(_required("tls", "hashicorp/tls"))
+        self._write_manifest(
+            tmp_path,
+            [
+                {
+                    "Key": "shared",
+                    "Source": "git::x//sub",
+                    "Dir": ".terraform/modules/shared/sub",
+                }
+            ],
+        )
+
+        providers = _find_loaded_required_providers(str(tmp_path))
+        assert sorted(providers) == ["aws", "tls"]
+
+    def test_local_module_is_read(self, tmp_path):
+        (tmp_path / "local").mkdir()
+        (tmp_path / "local" / "versions.tf").write_text(
+            _required("random", "hashicorp/random")
+        )
+        (tmp_path / "unused").mkdir()
+        (tmp_path / "unused" / "versions.tf").write_text(
+            _required("tls", "hashicorp/tls")
+        )
+        self._write_manifest(
+            tmp_path, [{"Key": "local", "Source": "./local", "Dir": "local"}]
+        )
+
+        providers = _find_loaded_required_providers(str(tmp_path))
+        assert sorted(providers) == ["random"]
+
+    def test_provider_blocks_are_required(self, tmp_path):
+        (tmp_path / "worker_generated_terraform.tf").write_text(
+            'provider "aws" {\n  region = "us-east-1"\n}\n'
+            'provider "aws" {\n  alias = "use2"\n  region = "us-east-2"\n}\n'
+        )
+        self._write_manifest(tmp_path, [])
+
+        providers = _find_loaded_required_providers(str(tmp_path))
+        assert sorted(providers) == ["aws"]
+
+    def test_provider_block_read_before_required_providers(self, tmp_path):
+        # providers.tf sorts before versions.tf, so the block is read first
+        (tmp_path / "providers.tf").write_text('provider "aws" {\n  region = "x"\n}\n')
+        (tmp_path / "versions.tf").write_text(_required("aws", "hashicorp/aws"))
+        self._write_manifest(tmp_path, [])
+
+        providers = _find_loaded_required_providers(str(tmp_path))
+        assert providers["aws"]["source"] == "hashicorp/aws"
+
+    def test_generated_provider_block_and_module_requirement(self, tmp_path):
+        (tmp_path / "worker_generated_terraform.tf").write_text('provider "tls" {}\n')
+        (tmp_path / "local").mkdir()
+        (tmp_path / "local" / "versions.tf").write_text(
+            _required("tls", "hashicorp/tls")
+        )
+        self._write_manifest(
+            tmp_path, [{"Key": "local", "Source": "./local", "Dir": "local"}]
+        )
+
+        providers = _find_loaded_required_providers(str(tmp_path))
+        assert providers["tls"]["source"] == "hashicorp/tls"
+
+    def test_provider_block_only_has_no_source(self, tmp_path):
+        (tmp_path / "providers.tf").write_text('provider "tls" {}\n')
+        self._write_manifest(tmp_path, [])
+
+        providers = _find_loaded_required_providers(str(tmp_path))
+        assert providers == {"tls": {"source": "", "version": SpecifierSet("")}}
+
+    @pytest.mark.parametrize(
+        "manifest",
+        ["{not json", "[]", '{"Modules": {}}', '{"Modules": ["x"]}'],
+    )
+    def test_malformed_manifest_raises(self, tmp_path, manifest):
+        path = tmp_path / ".terraform" / "modules" / "modules.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(manifest)
+
+        with pytest.raises(TFWorkerException):
+            _find_loaded_required_providers(str(tmp_path))
+
+    def test_missing_module_dir_is_skipped(self, tmp_path):
+        (tmp_path / "main.tf").write_text(_required("aws", "hashicorp/aws"))
+        self._write_manifest(
+            tmp_path, [{"Key": "gone", "Source": "./gone", "Dir": "gone"}]
+        )
+
+        providers = _find_loaded_required_providers(str(tmp_path))
+        assert sorted(providers) == ["aws"]
+
+    def test_falls_back_to_walking_without_a_manifest(self, tmp_path):
+        (tmp_path / "main.tf").write_text(_required("aws", "hashicorp/aws"))
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "versions.tf").write_text(_required("tls", "hashicorp/tls"))
+
+        providers = _find_loaded_required_providers(str(tmp_path))
+        assert providers == _find_required_providers(str(tmp_path))
+        assert sorted(providers) == ["aws", "tls"]

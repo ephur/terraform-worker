@@ -113,6 +113,20 @@ class HandlersCollection(Mapping):
                 return True
         return False
 
+    def get_available_plan(self, definition: "Definition") -> bool:
+        """
+        Retrieve the available plan from whichever ready handler reports one.
+
+        Returns True when a usable plan is in place at the definition's plan
+        file; a handler that finds its plan unsuitable returns False.
+        """
+        self.check_plan_conflicts(definition)
+
+        for handler in self._handlers.values():
+            if handler and handler.is_ready() and handler.has_plan(definition):
+                return handler.get_plan(definition)
+        return False
+
     def freeze(self):
         """
         freeze is used to prevent further modification of the handlers collection.

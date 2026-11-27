@@ -1,7 +1,9 @@
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import boto3.session
 import pytest
+from botocore.credentials import RefreshableCredentials
 from botocore.exceptions import NoCredentialsError
 from moto import mock_aws
 from pydantic import ValidationError
@@ -40,6 +42,34 @@ def aws_auth_config():
 @pytest.fixture
 def boto_session():
     return boto3.Session(region_name="us-east-1")
+
+
+def _stub_sts_session(
+    calls: list, expires_in: timedelta, renewed_in: timedelta = timedelta(hours=1)
+):
+    """A session stand-in whose sts client hands out dated credentials.
+
+    The first assumption expires after `expires_in` and later ones after
+    `renewed_in`, so a test can hand out credentials that are already due for
+    renewal. Each assumption returns a distinct access key, so a test can tell
+    a renewal from the original.
+    """
+    session = MagicMock()
+
+    def assume_role(**kwargs):
+        calls.append(kwargs)
+        offset = expires_in if len(calls) == 1 else renewed_in
+        return {
+            "Credentials": {
+                "AccessKeyId": f"AK{len(calls)}",
+                "SecretAccessKey": "SK",
+                "SessionToken": "TK",
+                "Expiration": datetime.now(timezone.utc) + offset,
+            }
+        }
+
+    session.client.return_value.assume_role.side_effect = assume_role
+    return session
 
 
 class TestAWSAuthenticatorConfig:
@@ -222,11 +252,44 @@ class TestAssumeRoleSession:
         new_session = _assume_role_session(boto_session, aws_auth_config, backend=False)
         assert new_session is not None
 
-    @patch("boto3.Session", side_effect=NoCredentialsError)
-    def test_assume_role_failure_raises_exception(self, boto_session, aws_auth_config):
-        """Test that an exception is raised if assuming the role fails."""
+    def test_assume_role_failure_raises_exception(self, aws_auth_config):
+        """An unusable role or source credential fails while authenticating."""
+        session = MagicMock()
+        session.client.return_value.assume_role.side_effect = NoCredentialsError()
+
         with pytest.raises(TFWorkerException):
-            _assume_role_session(boto_session, aws_auth_config, backend=False)
+            _assume_role_session(session, aws_auth_config, backend=False)
+
+    def test_assume_role_credentials_are_refreshable(
+        self, boto_session, aws_auth_config
+    ):
+        """The session renews its credentials rather than holding fixed strings."""
+        new_session = _assume_role_session(boto_session, aws_auth_config)
+
+        assert isinstance(new_session.get_credentials(), RefreshableCredentials)
+
+    def test_assume_role_assumes_once_up_front(self, aws_auth_config):
+        """The first assumption is eager, so a bad role fails here."""
+        calls = []
+        session = _stub_sts_session(calls, expires_in=timedelta(hours=1))
+
+        new_session = _assume_role_session(session, aws_auth_config)
+
+        assert len(calls) == 1
+        assert calls[0]["RoleArn"] == aws_auth_config.aws_role_arn
+        assert new_session.get_credentials().access_key == "AK1"
+
+    def test_assume_role_renews_expired_credentials(self, aws_auth_config):
+        """Expired credentials are re-assumed when they are next used."""
+        calls = []
+        session = _stub_sts_session(calls, expires_in=timedelta(minutes=-1))
+
+        new_session = _assume_role_session(session, aws_auth_config)
+        assert len(calls) == 1
+
+        # reading the key is what a signing client does, and what env() does
+        assert new_session.get_credentials().access_key == "AK2"
+        assert len(calls) == 2
 
 
 class TestGetBackendSession:
@@ -239,7 +302,7 @@ class TestGetBackendSession:
         auth_config = AWSAuthenticatorConfig(
             **MOCK_AWS_CREDS,
             backend_role_arn="arn:aws:iam::123456789012:role/backendRole",
-            backend_region="us-west-2"
+            backend_region="us-west-2",
         )
         init_session = MagicMock()
         mock_assume_role_session.return_value = MagicMock()
@@ -312,7 +375,7 @@ class TestGetInitSessionArgs:
         assert _get_init_session_args(auth_config) == expected
 
     def test_with_all_parameters(self):
-        """Test with all parameters provided."""
+        """Explicit credentials win; the profile is dropped rather than combined."""
         auth_config = AWSAuthenticatorConfig(
             aws_profile="test_profile",
             aws_access_key_id="test_id",
@@ -321,10 +384,22 @@ class TestGetInitSessionArgs:
             aws_region="us-east-1",
         )
         expected = {
-            "profile_name": "test_profile",
             "aws_access_key_id": "test_id",
             "aws_secret_access_key": "test_secret",
             "aws_session_token": "test_token",
+        }
+        assert _get_init_session_args(auth_config) == expected
+
+    def test_profile_kept_with_partial_credentials(self):
+        """A key id without a secret is not a usable credential, so the profile stands."""
+        auth_config = AWSAuthenticatorConfig(
+            aws_profile="test_profile",
+            aws_access_key_id="test_id",
+            aws_region="us-east-1",
+        )
+        expected = {
+            "profile_name": "test_profile",
+            "aws_access_key_id": "test_id",
         }
         assert _get_init_session_args(auth_config) == expected
 

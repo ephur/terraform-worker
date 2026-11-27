@@ -49,6 +49,16 @@ class BaseHandler(metaclass=ABCMeta):
         """
         return False
 
+    def get_plan(self, definition: "Definition") -> bool:  # pragma: no cover
+        """
+        get_plan is called to retrieve the plan has_plan reported, putting it at
+        the definition's plan file. Handlers that report a plan must implement it.
+
+        Returns:
+            bool: True if a usable plan is in place for this definition
+        """
+        return False
+
     @abstractmethod
     def execute(
         self,

@@ -2,7 +2,9 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from shlex import quote as shlex_quote
-from typing import TYPE_CHECKING, Dict, Union
+from typing import TYPE_CHECKING, Dict, List, Union
+
+import click
 
 import tfworker.util.hooks as hooks
 import tfworker.util.log as log
@@ -11,11 +13,12 @@ from tfworker.commands.base import BaseCommand
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.definitions import Definition
 from tfworker.exceptions import HandlerError, HookError, TFWorkerException
-from tfworker.util.system import pipe_exec
+from tfworker.util.system import pipe_exec, pipe_exec_logged
 from tfworker.util.terraform import quote_index_brackets
 
 if TYPE_CHECKING:
     from tfworker.app_state import AppState
+    from tfworker.definitions.plan import DefinitionPlan
 
 
 class TerraformCommand(BaseCommand):
@@ -40,6 +43,13 @@ class TerraformCommand(BaseCommand):
         else:
             self._terraform_config = TerraformCommandConfig(self._app_state)
         return self._terraform_config
+
+    @property
+    def init_errors(self) -> Dict[str, str]:
+        """Failure message per definition that could not be prepared/initialized."""
+        if not hasattr(self, "_init_errors"):
+            self._init_errors: Dict[str, str] = {}
+        return self._init_errors
 
     def prep_providers(self) -> None:
         """
@@ -135,6 +145,22 @@ class TerraformCommand(BaseCommand):
         return definitions_needing_init
 
     def terraform_init(self) -> None:
+        """
+        Prepare and initialize all definitions that require it.
+
+        Preparation (copying files, rendering templates, `terraform get`) and
+        `terraform init` are treated as a single "init" phase; a failure in
+        either marks the definition as failed rather than terminating the run
+        on the spot. Two options govern the phase, mirroring the plan options:
+
+        - `init_failures`: halt the phase when a definition fails, leaving the
+          remaining definitions uninitialized (default, matches prior behavior)
+        - `fail_on_init_error`: exit non-zero once the phase completes if any
+          definition failed (default)
+
+        With `--no-init-failures` every definition is attempted, so a single
+        run reports every failure instead of one at a time.
+        """
         from tfworker.definitions.prepare import DefinitionPrepare
 
         def_prep = DefinitionPrepare(self.app_state)
@@ -143,39 +169,72 @@ class TerraformCommand(BaseCommand):
         if not definition_names:
             return
 
+        # created before any worker threads can race to create it
+        self.init_errors
+
         # Use sequential processing for small numbers of definitions
         if len(definition_names) < 4:
             log.info(f"Initializing {len(definition_names)} definitions sequentially")
-            for name in definition_names:
-                log.info(f"initializing definition: {name}")
-                try:
-                    self._prepare_definition(def_prep, name)
-                    self._terraform_init_single(name)
-                except TFWorkerException as e:
-                    log.error(f"Error with definition {name}: {e}")
-                    self.ctx.exit(1)
-            return
+            self._init_sequential(def_prep, definition_names)
+        else:
+            log.info(f"Initializing {len(definition_names)} definitions in parallel")
+            self._init_parallel(def_prep, definition_names)
 
-        log.info(f"Initializing {len(definition_names)} definitions in parallel")
+        self._report_init_results(definition_names)
+
+    def _init_sequential(self, def_prep, definition_names: List[str]) -> None:
+        """
+        Prepare and init definitions one at a time.
+
+        When `init_failures` is set the loop stops at the first failure and the
+        definitions it never reached are marked as skipped.
+        """
+        halt_on_failure = self.app_state.terraform_options.init_failures
+
+        for index, name in enumerate(definition_names):
+            log.info(f"initializing definition: {name}")
+            # short circuits: a definition that did not prepare is not inited
+            succeeded = self._prepare_definition_guarded(
+                def_prep, name
+            ) and self._init_definition_guarded(name)
+            if not succeeded and halt_on_failure:
+                self._mark_init_skipped(definition_names[index + 1 :])
+                return
+
+    def _init_parallel(self, def_prep, definition_names: List[str]) -> None:
+        """
+        Prepare and init definitions with worker pools.
+
+        Every definition is submitted to each phase, so all preparation
+        failures (a bad module source is the common case) surface in a single
+        run. `init_failures` is honored between the phases: when a preparation
+        fails, terraform init is not run for the definitions that prepared
+        cleanly, and they are marked as skipped.
+        """
+        halt_on_failure = self.app_state.terraform_options.init_failures
 
         # Phase 1: Prepare all definitions in parallel (file operations)
         log.info("Phase 1: Preparing definition files in parallel")
         with ThreadPoolExecutor(
             max_workers=self.app_state.loaded_config.parallel_options.max_preparation_workers
         ) as executor:
-            prepare_futures = []
-            for name in definition_names:
-                future = executor.submit(self._prepare_definition, def_prep, name)
-                prepare_futures.append((name, future))
+            prepare_futures = [
+                (
+                    name,
+                    executor.submit(self._prepare_definition_guarded, def_prep, name),
+                )
+                for name in definition_names
+            ]
 
             # Wait for all preparations to complete
-            for name, future in prepare_futures:
-                try:
-                    future.result()
-                    log.debug(f"Completed preparation for definition: {name}")
-                except Exception as e:
-                    log.error(f"Error preparing definition {name}: {e}")
-                    self.ctx.exit(1)
+            prepared = [name for name, future in prepare_futures if future.result()]
+
+        if len(prepared) != len(definition_names) and halt_on_failure:
+            self._mark_init_skipped(prepared)
+            return
+
+        if not prepared:
+            return
 
         # Phase 2: Run terraform init in parallel (smaller pool)
         log.info("Phase 2: Running terraform init in parallel")
@@ -187,10 +246,10 @@ class TerraformCommand(BaseCommand):
             with ThreadPoolExecutor(
                 max_workers=self.app_state.loaded_config.parallel_options.max_init_workers
             ) as executor:
-                init_futures = []
-                for name in definition_names:
-                    future = executor.submit(self._terraform_init_single, name)
-                    init_futures.append((name, future))
+                init_futures = [
+                    (name, executor.submit(self._terraform_init_single, name))
+                    for name in prepared
+                ]
 
                 # Collect results and handle completions
                 show_output = self._app_state.terraform_options.stream_output
@@ -199,7 +258,41 @@ class TerraformCommand(BaseCommand):
             # Clear the stream output override
             self.terraform_config.clear_stream_output_override()
 
-        log.info("All definitions initialized successfully")
+    def _report_init_results(self, definition_names: List[str]) -> None:
+        """
+        Report the outcome of the init phase, and exit if it is fatal.
+
+        Every failure of the phase is reported together here; the exit code is
+        governed by `fail_on_init_error` so a run can be configured to gather
+        all failures and still continue.
+        """
+        failed = [
+            name
+            for name in definition_names
+            if self.app_state.definitions[name].init_failed
+        ]
+        skipped = [
+            name
+            for name in definition_names
+            if self.app_state.definitions[name].init_skipped
+        ]
+
+        if not failed:
+            log.info("All definitions initialized successfully")
+            return
+
+        log.error(
+            f"{len(failed)} of {len(definition_names)} definitions failed to initialize:"
+        )
+        for name in failed:
+            log.error(f"  {name}: {self.init_errors.get(name, 'unknown error')}")
+        if skipped:
+            log.warn(
+                f"{len(skipped)} definitions were not initialized: {', '.join(skipped)}"
+            )
+
+        if self.app_state.terraform_options.fail_on_init_error:
+            self.ctx.exit(1)
 
     def terraform_plan(self) -> None:
         from tfworker.definitions.plan import DefinitionPlan
@@ -215,20 +308,36 @@ class TerraformCommand(BaseCommand):
             needed, reason = def_plan.needs_plan(self.app_state.definitions[name])
             if not needed:
                 if "plan file exists" in reason:
-                    for name in self.app_state.definitions.keys():
-                        self.app_state.definitions[name].needs_apply = True
+                    self.app_state.definitions[name].needs_apply = True
 
         # if --no-plan and --no-plan-destroy are specified, skip the plan regardless
         if (
             not self.app_state.terraform_options.plan
             and not self.app_state.terraform_options.plan_destroy
         ):
-            log.debug("--no-plan option specified; skipping plan execution")
+            # a saved plan is fetched by the plan phase, which this run does not
+            # have; without this an apply-only run has nothing to apply
+            self._fetch_saved_plans(def_plan)
+            # info, not debug: this ends the phase without touching a single
+            # definition, and a run that quietly does nothing is indistinguishable
+            # from a run that died
+            log.info(
+                "no plan requested (--no-plan and --no-plan-destroy); "
+                "no definitions will be planned"
+            )
             return
 
         for name in self.app_state.definitions.keys():
+            if self._init_incomplete(name):
+                log.warn(
+                    f"skipping plan for definition: {name}; it was not initialized"
+                )
+                continue
             log.info(f"running pre-plan for definition: {name}")
-            self._exec_terraform_pre_plan(name=name)
+            if not self._exec_terraform_pre_plan(name=name):
+                if self.app_state.terraform_options.plan_failures:
+                    break
+                continue
             needed, reason = def_plan.needs_plan(self.app_state.definitions[name])
             if not needed:
                 log.info(f"Plan not needed for definition: {name}, reason: {reason}")
@@ -253,6 +362,72 @@ class TerraformCommand(BaseCommand):
             if any(d.plan_failed for d in self.app_state.definitions.values()):
                 self.ctx.exit(1)
 
+    def _fetch_saved_plans(self, def_plan: "DefinitionPlan") -> None:
+        """
+        Retrieve the plans a previous run saved so an apply-only run can use them.
+
+        Only the handler holding the plan is asked for it; the pre-plan stage is
+        not dispatched, as handlers such as snyk and trivy hook it to scan and a
+        run that is not planning should not trigger them.
+
+        A definition whose plan is already on disk is left alone: that is the
+        local plan file the `plan_file_path` workflow leaves behind, and it
+        takes precedence over anything a handler holds.
+
+        Failing to fetch one definition's plan is treated as that definition's
+        plan failure, so the same two options govern it as govern the plan
+        phase: `plan_failures` halts the phase, and `fail_on_plan_error` decides
+        whether the run ends non-zero. Neither applies to the apply phase
+        itself, which has no equivalent failure handling yet.
+        """
+        options = self.app_state.terraform_options
+        if not (options.apply or options.destroy):
+            return
+        if not (self.app_state.root_options.backend_plans or options.plan_file_path):
+            return
+
+        for name, definition in self.app_state.definitions.items():
+            def_plan.set_plan_file(definition)
+            needed, reason = def_plan.needs_plan(definition)
+
+            if not needed and "plan file exists" in reason:
+                definition.needs_apply = True
+                continue
+
+            if needed:
+                log.info(
+                    f"no saved plan for definition: {name}; it will not be applied"
+                )
+                definition.needs_apply = False
+                continue
+
+            try:
+                retrieved = self.app_state.handlers.get_available_plan(definition)
+            except HandlerError as e:
+                log.error(f"handler error fetching the saved plan for {name}: {e}")
+                definition.plan_failed = True
+                definition.needs_apply = False
+                if options.plan_failures:
+                    log.warn(
+                        "halting the fetch; the definitions behind "
+                        f"{name} have no plan to apply"
+                    )
+                    break
+                continue
+
+            definition.needs_apply = retrieved
+            if retrieved:
+                log.info(f"definition {name} will be applied from a saved plan")
+            else:
+                log.warn(
+                    f"saved plan for definition {name} could not be used; "
+                    "it will not be applied"
+                )
+
+        if options.fail_on_plan_error:
+            if any(d.plan_failed for d in self.app_state.definitions.values()):
+                self.ctx.exit(1)
+
     def terraform_apply_or_destroy(self) -> None:
         log.trace("entering terraform apply or destroy")
 
@@ -261,11 +436,21 @@ class TerraformCommand(BaseCommand):
         elif self.app_state.terraform_options.apply:
             action: TerraformAction = TerraformAction.APPLY
         else:
-            log.debug("neither apply nor destroy specified; skipping")
+            # info for the same reason as the plan phase: this is the last thing
+            # the run would have done
+            log.info(
+                "no apply or destroy requested (--no-apply and --no-destroy); "
+                "no definitions will be applied"
+            )
             return
 
         for name in self.app_state.definitions.keys():
             log.trace(f"running {action} for definition: {name}")
+            if self._init_incomplete(name):
+                log.warn(
+                    f"skipping {action} for definition: {name}; it was not initialized"
+                )
+                continue
             if action == TerraformAction.DESTROY:
                 if self.app_state.terraform_options.limit:
                     if name not in self.app_state.terraform_options.limit:
@@ -285,9 +470,22 @@ class TerraformCommand(BaseCommand):
                 log.info(f"running {action} for definition: {name}")
                 self._exec_terraform_action(name=name, action=action)
 
+    def _init_incomplete(self, name: str) -> bool:
+        """
+        Return True when the definition was not successfully initialized.
+
+        Covers both a definition that failed to prepare/init and one the init
+        phase never reached after halting on an earlier failure.
+        """
+        definition: Definition = self.app_state.definitions[name]
+        return definition.init_failed or definition.init_skipped
+
     def _handle_parallel_init_results(self, init_futures, show_output: bool) -> None:
         """
         Handle results from parallel terraform init execution.
+
+        Failures are recorded against their definition rather than terminating
+        the run here, so every definition's outcome is reported.
 
         Args:
             init_futures: List of (name, future) tuples from parallel execution
@@ -296,15 +494,30 @@ class TerraformCommand(BaseCommand):
         for name, future in init_futures:
             try:
                 result = future.result()
-                log.debug(f"Completed terraform init for definition: {name}")
+            except click.exceptions.Exit:
+                # a handler or hook failure already chose the exit code
+                raise
+            except Exception as e:
+                self._record_init_failure(name, str(e))
+                continue
 
-                # Log successful output only if original stream_output was enabled
-                if show_output and result and not log.json_logging_enabled():
-                    self._log_terraform_result(name, result)
+            if result is not None and result.exit_code:
+                # _exec_terraform_action logged the output and dispatched the
+                # ERROR stage with the real result; a hook failure has already
+                # recorded a more specific message
+                if not self.app_state.definitions[name].init_failed:
+                    self._record_init_failure(
+                        name,
+                        f"terraform init exited {result.exit_code}",
+                        dispatch_error_stage=False,
+                    )
+                continue
 
-            except (TFWorkerException, KeyError) as e:
-                log.error(f"Error initializing definition {name}: {e}")
-                self.ctx.exit(1)
+            log.debug(f"Completed terraform init for definition: {name}")
+
+            # Log successful output only if original stream_output was enabled
+            if show_output and result and not log.json_logging_enabled():
+                self._log_terraform_result(name, result)
 
     def _log_terraform_result(self, name: str, result: "TerraformResult") -> None:
         """
@@ -323,6 +536,101 @@ class TerraformCommand(BaseCommand):
                 if line.strip():
                     log.info(f"[{name}] stderr: {line}")
 
+    def _record_init_failure(
+        self, name: str, message: str, dispatch_error_stage: bool = True
+    ) -> None:
+        """
+        Record that a definition could not be prepared or initialized.
+
+        The definition is flagged so the plan/apply phases skip it, the message
+        is kept for the end of phase report, and the ERROR stage is dispatched
+        so handlers see a failed init instead of one that never ran. When
+        terraform itself failed the ERROR stage was already dispatched with the
+        real result, so `dispatch_error_stage` suppresses a second dispatch.
+
+        Args:
+            name: the definition that failed
+            message: why it failed
+            dispatch_error_stage: dispatch the ERROR stage for the init action
+        """
+        self.app_state.definitions[name].init_failed = True
+        self.init_errors[name] = message
+        log.error(f"error initializing definition {name}: {message}")
+
+        if dispatch_error_stage:
+            # preparation failures happen before terraform runs; synthesize a
+            # result so handlers have the failure detail they report on
+            self._exec_error_handlers(
+                name,
+                TerraformAction.INIT,
+                TerraformResult(1, b"", message.encode()),
+            )
+
+    def _mark_init_skipped(self, names: List[str]) -> None:
+        """
+        Mark the definitions the init phase never reached.
+
+        They are not planned or applied, and handlers report them as skipped
+        rather than failed; only definitions that were actually attempted are
+        counted as failures.
+        """
+        skipped = [
+            name for name in names if not self.app_state.definitions[name].init_failed
+        ]
+        if not skipped:
+            return
+
+        for name in skipped:
+            self.app_state.definitions[name].init_skipped = True
+        log.warn(
+            f"not initializing {len(skipped)} definitions after an init failure; "
+            "use --no-init-failures to initialize every definition"
+        )
+
+    def _prepare_definition_guarded(self, def_prep, name: str) -> bool:
+        """
+        Prepare a definition, recording any failure instead of raising it.
+
+        Returns:
+            bool: True when the definition is ready for terraform init
+        """
+        try:
+            self._prepare_definition(def_prep, name)
+        except click.exceptions.Exit:
+            # a handler or hook failure already chose the exit code
+            raise
+        except Exception as e:
+            self._record_init_failure(name, str(e))
+            return False
+
+        log.debug(f"Completed preparation for definition: {name}")
+        return True
+
+    def _init_definition_guarded(self, name: str) -> bool:
+        """
+        Run terraform init for a definition, recording any failure.
+
+        Returns:
+            bool: True when terraform init completed cleanly
+        """
+        try:
+            result = self._terraform_init_single(name)
+        except click.exceptions.Exit:
+            raise
+        except Exception as e:
+            self._record_init_failure(name, str(e))
+            return False
+
+        if result is not None and result.exit_code:
+            if not self.app_state.definitions[name].init_failed:
+                self._record_init_failure(
+                    name,
+                    f"terraform init exited {result.exit_code}",
+                    dispatch_error_stage=False,
+                )
+            return False
+        return True
+
     def _prepare_definition(self, def_prep, name: str) -> None:
         """Prepare a single definition for terraform init"""
         log.trace(f"preparing definition: {name}")
@@ -338,18 +646,32 @@ class TerraformCommand(BaseCommand):
             )
             def_prep.create_terraform_lockfile(name=name)
         except TFWorkerException as e:
-            raise TFWorkerException(f"error preparing definition {name}: {e}") from e
+            raise TFWorkerException(f"preparation failed: {e}") from e
 
     def _terraform_init_single(self, name: str) -> "TerraformResult":
-        """Run terraform init for a single definition"""
+        """
+        Run terraform init for a single definition
+
+        The failing result is returned rather than exiting, the init phase
+        decides whether a failure halts the run.
+        """
         log.trace(f"running terraform init for definition: {name}")
-        return self._exec_terraform_action(name=name, action=TerraformAction.INIT)
+        return self._exec_terraform_action(
+            name=name, action=TerraformAction.INIT, exit_on_error=False
+        )
 
     def _exec_terraform_action(
-        self, name: str, action: TerraformAction
+        self, name: str, action: TerraformAction, exit_on_error: bool = True
     ) -> "TerraformResult":
         """
         Execute terraform action
+
+        Args:
+            name: the definition to run the action for
+            action: the terraform action to run
+            exit_on_error: exit the run when terraform fails; when False the
+                failing result is returned to the caller after the ERROR stage
+                has been dispatched
         """
         if action == TerraformAction.PLAN:
             raise TFWorkerException(
@@ -376,11 +698,8 @@ class TerraformCommand(BaseCommand):
         log.trace(
             f"executing {TerraformStage.PRE} {action.value} hooks for definition {name}"
         )
-        self._exec_hook(
-            definition,
-            action,
-            TerraformStage.PRE,
-        )
+        if not self._exec_hook(definition, action, TerraformStage.PRE):
+            return self._hook_failure(name, action, TerraformStage.PRE, exit_on_error)
 
         log.trace(f"running terraform {action.value} for definition {name}")
         result = self._run(name, action)
@@ -400,7 +719,9 @@ class TerraformCommand(BaseCommand):
                         if line.strip():
                             log.error(f"[{name}] stderr: {line}")
             self._exec_error_handlers(name, action, result)
-            self.ctx.exit(1)
+            if exit_on_error:
+                self.ctx.exit(1)
+            return result
 
         try:
             log.trace(
@@ -421,12 +742,8 @@ class TerraformCommand(BaseCommand):
         log.trace(
             f"executing {TerraformStage.POST.value} {action.value} hooks for definition {name}"
         )
-        self._exec_hook(
-            definition,
-            action,
-            TerraformStage.POST,
-            result,
-        )
+        if not self._exec_hook(definition, action, TerraformStage.POST, result):
+            return self._hook_failure(name, action, TerraformStage.POST, exit_on_error)
 
         if action == TerraformAction.APPLY:
             if definition.plan_file is not None:
@@ -463,9 +780,12 @@ class TerraformCommand(BaseCommand):
         except Exception as e:
             log.error(f"error-stage handler error on definition {name}: {e}")
 
-    def _exec_terraform_pre_plan(self, name: str) -> None:
+    def _exec_terraform_pre_plan(self, name: str) -> bool:
         """
         Execute terraform pre plan with hooks and handlers for the given definition
+
+        Returns:
+            bool: False when a pre-plan hook failed, so the definition is not planned
         """
         definition: Definition = self.app_state.definitions[name]
 
@@ -483,11 +803,16 @@ class TerraformCommand(BaseCommand):
             self.ctx.exit(2)
 
         log.trace(f"executing pre plan hooks for definition {name}")
-        self._exec_hook(
+        if not self._exec_hook(
             self._app_state.definitions[name],
             TerraformAction.PLAN,
             TerraformStage.PRE,
-        )
+        ):
+            self._hook_failure(
+                name, TerraformAction.PLAN, TerraformStage.PRE, exit_on_error=False
+            )
+            return False
+        return True
 
     def _exec_terraform_plan(self, name: str) -> None:
         """
@@ -544,12 +869,15 @@ class TerraformCommand(BaseCommand):
             self.ctx.exit(2)
 
         log.trace(f"executing post plan hooks for definition {name}")
-        self._exec_hook(
+        if not self._exec_hook(
             self._app_state.definitions[name],
             TerraformAction.PLAN,
             TerraformStage.POST,
             result,
-        )
+        ):
+            self._hook_failure(
+                name, TerraformAction.PLAN, TerraformStage.POST, exit_on_error=False
+            )
 
     def _generate_plan_output_json(self, name) -> None:
         """
@@ -599,11 +927,26 @@ class TerraformCommand(BaseCommand):
         # "terraform apply planfile" for both regular and destroy plans
         terraform_command = "apply" if action == TerraformAction.DESTROY else action
 
-        log.debug(
-            f"handling terraform {action} action for definition {definition_name}"
-        )
+        command = f"{self.app_state.terraform_options.terraform_bin} {terraform_command} {params}"
+        # the definition and action travel as fields so a central log can be
+        # filtered by them; the command line itself is detail for a debug run
+        context = {
+            "definition": definition_name,
+            "terraform_action": action.value,
+        }
         log.info(
-            f"running cmd: {self.app_state.terraform_options.terraform_bin} {terraform_command} {params}"
+            {
+                "message": f"running terraform {terraform_command} for {definition_name}",
+                **context,
+            }
+        )
+        log.debug(
+            {
+                "message": f"running cmd: {command}",
+                "command": f"terraform {terraform_command}",
+                "working_dir": str(working_dir),
+                **context,
+            }
         )
 
         if definition.squelch_apply_output and action == TerraformAction.APPLY:
@@ -617,45 +960,20 @@ class TerraformCommand(BaseCommand):
             )
             stream_output = False
 
-        aggregate_output = log.json_logging_enabled()
-        effective_stream_output = stream_output and not aggregate_output
-
-        pipe_exec_kwargs = {
-            "cwd": working_dir,
-            "env": self.terraform_config.env,
-            "stream_output": effective_stream_output,
-        }
-        if effective_stream_output:
-            pipe_exec_kwargs["stream_log_level"] = log.LogLevel.INFO
-
         result: TerraformResult = TerraformResult(
-            *pipe_exec(
-                f"{self.app_state.terraform_options.terraform_bin} {terraform_command} {params}",
-                **pipe_exec_kwargs,
-            )
-        )
-
-        if aggregate_output:
-            # For terraform plan, exit code 2 means changes detected (not an error)
-            # For other commands, any non-zero exit code is an error
-            if action == TerraformAction.PLAN and result.exit_code == 2:
-                log_level = log.LogLevel.INFO
-            elif result.exit_code != 0:
-                log_level = log.LogLevel.ERROR
-            else:
-                log_level = log.LogLevel.INFO
-            log.log_subprocess_result(
-                command=f"terraform {terraform_command}",
-                exit_code=result.exit_code,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                level=log_level,
-                extra={
-                    "definition": definition_name,
-                    "terraform_action": action.value,
-                },
+            *pipe_exec_logged(
+                command,
+                label=f"terraform {terraform_command}",
+                cwd=working_dir,
+                env=self.terraform_config.env,
+                stream_output=stream_output,
+                # terraform plan returns 2 when there are changes, which is a
+                # successful plan, not a failure
+                ok_exit_codes=((0, 2) if action == TerraformAction.PLAN else (0,)),
+                extra=context,
                 message=f"terraform {terraform_command} output for {definition_name}",
             )
+        )
 
         log.debug(f"exit code: {result.exit_code}")
         return result
@@ -666,15 +984,21 @@ class TerraformCommand(BaseCommand):
         action: TerraformAction,
         stage: TerraformStage,
         result: Union["TerraformResult", None] = None,
-    ) -> None:
+    ) -> bool:
         """
         Find and execute the appropriate hooks for a supplied definition
+
+        A hook failure is reported to the caller rather than ending the run, so
+        the phase the hook belongs to decides what happens to the definition.
 
         Args:
             definition (Definition): the definition to execute the hooks for
             action (TerraformAction): the action to execute the hooks for
             stage (TerraformStage): the stage to execute the hooks for
             result (TerraformResult): the result of the terraform command
+
+        Returns:
+            bool: False when a hook ran and failed, True otherwise
         """
         hook_dir = definition.get_target_path(self.app_state.working_dir)
 
@@ -683,7 +1007,7 @@ class TerraformCommand(BaseCommand):
                 log.trace(
                     f"no {stage}-{action} hooks found for definition {definition.name}"
                 )
-                return
+                return True
 
             log.info(
                 f"executing {stage}-{action} hooks for definition {definition.name}"
@@ -704,7 +1028,53 @@ class TerraformCommand(BaseCommand):
             )
         except HookError as e:
             log.error(f"hook execution error on definition {definition.name}: \n{e}")
+            return False
+        return True
+
+    def _hook_failure(
+        self,
+        name: str,
+        action: TerraformAction,
+        stage: TerraformStage,
+        exit_on_error: bool,
+    ) -> "TerraformResult":
+        """
+        Record a hook failure as a failure of the phase the hook belongs to.
+
+        Init and plan hook failures are recorded against the definition and
+        governed by that phase's options, so a single bad hook does not end a
+        run; the definition itself is finished either way, no later phase acts
+        on it. Apply and destroy have no such options, so a hook failure there
+        remains fatal.
+
+        Args:
+            name: the definition whose hook failed
+            action: the action the hook belongs to
+            stage: the stage the hook belongs to
+            exit_on_error: end the run rather than returning the failure
+
+        Returns:
+            TerraformResult: a failing result standing in for the phase
+        """
+        definition: Definition = self.app_state.definitions[name]
+        message = f"{stage.value}-{action.value} hook failed"
+        result = TerraformResult(2, b"", message.encode())
+
+        if action == TerraformAction.INIT:
+            # marks init_failed and dispatches the ERROR stage
+            self._record_init_failure(name, message)
+        elif action == TerraformAction.PLAN:
+            definition.plan_failed = True
+            # a plan whose hook failed must not be applied, even one that
+            # already reported changes
+            definition.needs_apply = False
+            self._exec_error_handlers(name, action, result)
+        else:
+            self._exec_error_handlers(name, action, result)
+
+        if exit_on_error:
             self.ctx.exit(2)
+        return result
 
 
 class TerraformResult:
@@ -761,7 +1131,6 @@ class TerraformCommandConfig:
 
     def __init__(self, app_state: "AppState"):
         self._app_state = app_state
-        self._env = None
         self._force_no_stream_output = False
 
     @classmethod
@@ -788,9 +1157,14 @@ class TerraformCommandConfig:
 
     @property
     def env(self):
-        if self._env is None:
-            self._env = self._get_env()
-        return self._env
+        """
+        Environment for a terraform command, resolved per access.
+
+        Not cached: an authenticator may hand out credentials that expire, and
+        the environment a command inherits is fixed once it starts, so each
+        command needs the values that are current when it launches.
+        """
+        return self._get_env()
 
     @property
     def b64_encode(self):

@@ -2,7 +2,8 @@ import shlex
 from typing import Dict
 
 import boto3
-from botocore.credentials import Credentials
+from botocore.credentials import Credentials, RefreshableCredentials
+from botocore.session import get_session as get_botocore_session
 from pydantic import model_validator
 
 import tfworker.util.log as log
@@ -20,8 +21,10 @@ class AWSAuthenticatorConfig(BaseAuthenticatorConfig):
     Attributes:
         aws_region (str): the AWS region to use. This is required.
         aws_access_key_id (str): an aws access key id. Either this or a profile is required.
+            When provided with a secret access key, it takes precedence over aws_profile.
         aws_external_id (str): a unique ID that can be used for cross account assumptions. Defaults to None.
         aws_profile (str): an aws profile. Either this or an access key id is required.
+            Ignored when an access key id and secret access key are also provided.
         aws_role_arn (str): if provided, the role to assume using other creds. Defaults to None.
         aws_secret_access_key (str): an aws secret access key. Either this or a profile is required.
         aws_session_token (str): an aws session token. Defaults to None.
@@ -201,6 +204,14 @@ def _assume_role_session(
     """
     Uses the provided session to assume a role
 
+    The returned session renews its own credentials rather than keeping the
+    strings from a single assume-role call. Those expire, in an hour when the
+    caller is itself a role session, and a run that outlives them fails every
+    later AWS call with ExpiredToken. Renewal re-assumes through the session
+    passed in, so it continues for as long as that session can authenticate:
+    indefinitely for long lived keys or any refreshing credential provider,
+    and until they expire for temporary credentials supplied directly.
+
     Args:
         session (boto3.session): the session to use for the assumption
         backend (bool): whether this is for the backend. Defaults to False.
@@ -211,8 +222,6 @@ def _assume_role_session(
     Raises:
         TFWorkerException: if there is an error assuming the role
     """
-    sts_client = session.client("sts")
-
     if backend:
         assume_args = {
             "RoleArn": auth_config.backend_role_arn,
@@ -231,13 +240,33 @@ def _assume_role_session(
     if auth_config.aws_external_id:
         assume_args["ExternalId"] = auth_config.aws_external_id
 
-    role_creds = sts_client.assume_role(**assume_args)["Credentials"]
+    def refresh() -> Dict[str, str]:
+        """Assume the role, in the shape botocore expects for a refresh"""
+        role_creds = session.client("sts").assume_role(**assume_args)["Credentials"]
+        log.debug(
+            f"assumed {assume_args['RoleArn']}, credentials expire "
+            f"{role_creds['Expiration'].isoformat()}"
+        )
+        return {
+            "access_key": role_creds["AccessKeyId"],
+            "secret_key": role_creds["SecretAccessKey"],
+            "token": role_creds["SessionToken"],
+            "expiry_time": role_creds["Expiration"].isoformat(),
+        }
+
     try:
+        # the first assumption happens here, so an unusable role or source
+        # credential fails while authenticating rather than at first use
+        credentials = RefreshableCredentials.create_from_metadata(
+            metadata=refresh(),
+            refresh_using=refresh,
+            method="sts-assume-role",
+        )
+        # botocore has no public setter for a credential provider
+        botocore_session = get_botocore_session()
+        botocore_session._credentials = credentials
         new_session = boto3.Session(
-            aws_access_key_id=role_creds["AccessKeyId"],
-            aws_secret_access_key=role_creds["SecretAccessKey"],
-            aws_session_token=role_creds["SessionToken"],
-            region_name=region,
+            botocore_session=botocore_session, region_name=region
         )
     except Exception as e:
         raise TFWorkerException(f"error assuming role: {e}") from e
@@ -284,6 +313,15 @@ def _get_init_session_args(auth_config: AWSAuthenticatorConfig) -> Dict[str, str
     """
     Returns a dictionary of arguments to pass to the initial boto3 session
 
+    Explicit credentials take precedence over a profile: when an access key and
+    secret are supplied, the profile is not passed to boto3 at all. The two are
+    alternative sources for the same session, and passing both requires the
+    named profile to also exist wherever the worker runs -- boto3 raises
+    ProfileNotFound while constructing the session, before the explicit
+    credentials it would have preferred are ever consulted. Environments that
+    supply credentials directly (CI, a container using its task/pod identity to
+    assume a role) can therefore ignore the aws_profile in the config file.
+
     Args:
         auth_config (AWSAuthenticatorConfig): the configuration for the authenticator
 
@@ -292,8 +330,18 @@ def _get_init_session_args(auth_config: AWSAuthenticatorConfig) -> Dict[str, str
     """
     session_args = dict()
 
+    has_explicit_creds = (
+        auth_config.aws_access_key_id is not None
+        and auth_config.aws_secret_access_key is not None
+    )
+
     if auth_config.aws_profile is not None:
-        session_args["profile_name"] = auth_config.aws_profile
+        if has_explicit_creds:
+            log.debug(
+                f"ignoring profile {auth_config.aws_profile}, explicit credentials were provided"
+            )
+        else:
+            session_args["profile_name"] = auth_config.aws_profile
 
     if auth_config.aws_access_key_id is not None:
         session_args["aws_access_key_id"] = auth_config.aws_access_key_id

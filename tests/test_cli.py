@@ -71,7 +71,7 @@ class TestCliCommands:
 
         result = runner.invoke(cli.cli, ["clean", "dep"])
         assert result.exit_code == 0
-        root.assert_called_once()
+        root.assert_called_once_with(deployment="dep")
         clean_cls.assert_called_once_with(deployment="dep")
         clean_cls.return_value.exec.assert_called_once()
 
@@ -95,7 +95,7 @@ class TestCliCommands:
 
         result = runner.invoke(cli.cli, ["terraform", "dep"])
         assert result.exit_code == 0
-        root.assert_called_once()
+        root.assert_called_once_with(deployment="dep")
         tfc_cls.assert_called_once_with(deployment="dep")
         for meth in [
             "prep_providers",
@@ -157,7 +157,7 @@ class TestCliCommands:
 
         result = runner.invoke(cli.cli, ["env", "dep"])
         assert result.exit_code == 0
-        root.assert_called_once()
+        root.assert_called_once_with(deployment="dep")
         env_cls.assert_called_once_with(deployment="dep")
         env_cls.return_value.exec.assert_called_once()
 

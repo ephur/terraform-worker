@@ -7,7 +7,7 @@ init-dev:
 default: lint test
 
 lint: init-dev
-	poetry run flake8 --ignore E501,W503 tfworker tests
+	poetry run flake8 --ignore E203,E501,W503 tfworker tests
 
 format: init-dev
 	poetry run black tfworker tests

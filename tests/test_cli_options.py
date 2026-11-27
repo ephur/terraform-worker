@@ -412,6 +412,22 @@ class TestCLIOptionsTerraform:
         opts = c.CLIOptionsTerraform(fail_on_plan_error=False)
         assert opts.fail_on_plan_error is False
 
+    def test_init_failures_default(self):
+        opts = c.CLIOptionsTerraform()
+        assert opts.init_failures is True
+
+    def test_init_failures_false(self):
+        opts = c.CLIOptionsTerraform(init_failures=False)
+        assert opts.init_failures is False
+
+    def test_fail_on_init_error_default(self):
+        opts = c.CLIOptionsTerraform()
+        assert opts.fail_on_init_error is True
+
+    def test_fail_on_init_error_false(self):
+        opts = c.CLIOptionsTerraform(fail_on_init_error=False)
+        assert opts.fail_on_init_error is False
+
 
 class TestCLIOptionsClean:
     """

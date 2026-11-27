@@ -167,33 +167,69 @@ class S3Handler(BaseHandler):
                     result=result,
                 )
 
+    def _force_plan(self) -> bool:
+        """Whether this run plans regardless of any saved plan."""
+        return bool(getattr(self.app_state.terraform_options, "force_plan", False))
+
     def _check_plan(self, deployment: str, definition: "Definition", **kwargs):
         """check_plan runs while the plan is being checked, it should fetch a file from the backend and store it in the local location"""
-        # ensure planfile does not exist or is zero bytes if it does
         remotefile = self.get_remote_file(definition.name)
-        statefile = f"{self.prefix}/{definition.name}/terraform.tfstate"
         planfile = Path(definition.plan_file)
+
+        if self._force_plan():
+            # A forced plan supersedes the saved one, so drop it now rather than
+            # relying on the upload: _post_plan only uploads when terraform
+            # reports changes, so a forced plan that finds none would otherwise
+            # leave the superseded plan in place for a later apply to run.
+            if planfile.exists():
+                planfile.unlink()
+            if self._s3_delete_plan(remotefile):
+                log.debug(
+                    f"forced plan: discarded saved plan s3://{self.bucket}/{remotefile}"
+                )
+            self._s3_delete_plan(remotefile.replace(".tfplan", ".log"))
+            return None
+
+        # ensure planfile does not exist or is zero bytes if it does
         if planfile.exists():
             if planfile.stat().st_size == 0:
                 planfile.unlink()
             else:
                 raise HandlerError(f"planfile already exists: {planfile}")
 
-        if self._s3_get_plan(planfile.resolve(), remotefile):
-            if not planfile.exists():
-                raise HandlerError(f"planfile not found after download: {planfile}")
-            # verify the lineage and serial from the planfile matches the statefile
-            if not self._verify_lineage(planfile, statefile):
-                log.warn(
-                    f"planfile {remotefile} lineage does not match statefile, remote plan is unsuitable and will be removed"
-                )
-                self._s3_delete_plan(remotefile)
-                planfile.unlink()
-            else:
-                log.info(
-                    f"remote planfile downloaded: s3://{self.bucket}/{remotefile} -> {planfile}"
-                )
+        self.get_plan(definition)
         return None
+
+    def get_plan(self, definition: "Definition") -> bool:
+        """
+        Download the saved plan has_plan reported and leave it at the
+        definition's plan file, refusing one that no longer matches the state.
+
+        Returns:
+            bool: True if a usable plan is in place for this definition
+        """
+        remotefile = self.get_remote_file(definition.name)
+        statefile = f"{self.prefix}/{definition.name}/terraform.tfstate"
+        planfile = Path(definition.plan_file)
+
+        if not self._s3_get_plan(planfile.resolve(), remotefile):
+            return False
+        if not planfile.exists():
+            raise HandlerError(f"planfile not found after download: {planfile}")
+
+        # verify the lineage and serial from the planfile matches the statefile
+        if not self._verify_lineage(planfile, statefile):
+            log.warn(
+                f"planfile {remotefile} lineage does not match statefile, remote plan is unsuitable and will be removed"
+            )
+            self._s3_delete_plan(remotefile)
+            planfile.unlink()
+            return False
+
+        log.info(
+            f"remote planfile downloaded: s3://{self.bucket}/{remotefile} -> {planfile}"
+        )
+        return True
 
     def _post_plan(self, definition: str, result: "TerraformResult", **kwargs):
         """
@@ -280,7 +316,10 @@ class S3Handler(BaseHandler):
                 ].read()
             )
         except botocore.exceptions.ClientError as e:
-            raise HandlerError(f"Error downloading statefile: {e}")
+            if e.response["Error"]["Code"] not in ("NoSuchKey", "404"):
+                raise HandlerError(f"Error downloading statefile: {e}")
+            # no prior state; only a plan made against empty state is valid
+            state = None
 
         # load the planfile as a json object
         plan = None
@@ -290,6 +329,9 @@ class S3Handler(BaseHandler):
                     plan = json.loads(f.read())
         except Exception as e:
             raise HandlerError(f"Error loading planfile: {e}")
+
+        if state is None:
+            return bool(plan) and plan.get("serial") == 0 and not plan.get("lineage")
 
         # compare the lineage and serial from the planfile to the statefile
         if not (state and plan):

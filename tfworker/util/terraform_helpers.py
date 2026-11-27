@@ -154,15 +154,8 @@ def _find_required_providers(
     for root, _, files in os.walk(search_dir, followlinks=True):
         for file in files:
             if file.endswith(".tf"):
-                with open(f"{root}/{file}", "r") as f:
-                    try:
-                        content = hcl2.load(f)
-                    except UnexpectedToken as e:
-                        log.info(
-                            f"not processing {root}/{file} for required providers; see debug output for HCL parsing errors"
-                        )
-                        log.debug(f"HCL processing errors in {root}/{file}: {e}")
-                        continue
+                content = _load_tf_file(f"{root}/{file}")
+                if content is not None:
                     _update_parsed_providers(
                         providers, _parse_required_providers(content)
                     )
@@ -170,6 +163,99 @@ def _find_required_providers(
         f"Found required providers: {[x for x in providers.keys()]} in {search_dir}"
     )
     return providers
+
+
+def _find_loaded_required_providers(
+    search_dir: str,
+) -> Dict[str, Dict[str, Union[str, SpecifierSet]]]:
+    """
+    Find the providers terraform will require for the configuration in search_dir.
+
+    Terraform reads the root module's own .tf files, and for each module call only
+    the directory modules.json records for it. A git source with a //subdir
+    fetches the whole repository, so walking the tree finds required_providers
+    terraform never loads, and a lockfile naming them fails
+    `terraform init -lockfile=readonly`. Provider blocks count too, since
+    terraform requires a provider for each one it is configured with.
+
+    Falls back to walking search_dir when modules have not been fetched yet.
+
+    Args:
+        search_dir (str): The root module directory, after `terraform get`.
+
+    Returns:
+        Dict[str, Dict[str, Union[str, SpecifierSet]]]: Each provider's "source"
+        and "version"; a provider known only from a provider block has an empty
+        source and no version constraint.
+
+    Raises:
+        TFWorkerException: If modules.json cannot be read or is not the expected shape.
+    """
+    manifest = os.path.join(search_dir, ".terraform", "modules", "modules.json")
+    if not os.path.isfile(manifest):
+        return _find_required_providers(search_dir)
+
+    module_dirs = {"."} | set(_read_module_dirs(manifest))
+
+    providers = {}
+    # added after every required_providers entry is merged, so an empty source
+    # from a provider block is never compared against a declared one
+    configured = set()
+    for module_dir in sorted(module_dirs):
+        path = os.path.normpath(os.path.join(search_dir, module_dir))
+        if not os.path.isdir(path):
+            log.debug(f"module directory {path} from {manifest} does not exist")
+            continue
+        for file in sorted(os.listdir(path)):
+            if not file.endswith(".tf"):
+                continue
+            content = _load_tf_file(os.path.join(path, file))
+            if content is None:
+                continue
+            _update_parsed_providers(providers, _parse_required_providers(content))
+            configured.update(_parse_provider_blocks(content))
+    for name in sorted(configured - providers.keys()):
+        providers[name] = {"source": "", "version": _get_specifier_set("")}
+    log.trace(
+        f"Found loaded required providers: {[x for x in providers.keys()]} in {search_dir}"
+    )
+    return providers
+
+
+def _read_module_dirs(manifest: str) -> List[str]:
+    """The module directories recorded in a modules.json manifest."""
+    try:
+        with open(manifest, "r") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        raise TFWorkerException(f"unable to read module manifest {manifest}: {e}")
+
+    modules = data.get("Modules") if isinstance(data, dict) else None
+    if not isinstance(modules, list) or not all(isinstance(m, dict) for m in modules):
+        raise TFWorkerException(
+            f"module manifest {manifest} has no list of modules under 'Modules'"
+        )
+    return [m["Dir"] for m in modules if isinstance(m.get("Dir"), str) and m["Dir"]]
+
+
+def _load_tf_file(path: str) -> Union[dict, None]:
+    """Parse a .tf file, or return None if it cannot be parsed."""
+    with open(path, "r") as f:
+        try:
+            return hcl2.load(f)
+        except UnexpectedToken as e:
+            # Unparsable .tf files are routine here: the walk covers vendored
+            # module trees, and a file this parser chokes on is not necessarily
+            # one terraform rejects, so this is detail for a debug run.
+            log.debug(
+                f"not processing {path} for required providers; HCL parsing error: {e}"
+            )
+            return None
+
+
+def _parse_provider_blocks(content: dict) -> List[str]:
+    """The names of the providers configured by provider blocks in the content."""
+    return [name for block in content.get("provider", []) for name in block]
 
 
 def _parse_required_providers(content: dict) -> Dict[str, "ProviderRequirements"]:

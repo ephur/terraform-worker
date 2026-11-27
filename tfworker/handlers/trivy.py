@@ -8,7 +8,7 @@ import tfworker.util.log as log
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import HandlerError
 
-from ..util.system import pipe_exec, strip_ansi
+from ..util.system import pipe_exec_logged, strip_ansi
 from .base import BaseHandler
 from .registry import HandlerRegistry
 
@@ -185,31 +185,16 @@ class TrivyHandler(BaseHandler):
         try:
             if self._debug:
                 log.debug(f"cmd: {' '.join(trivy_args)}")
-            aggregate_output = log.json_logging_enabled()
-            effective_stream_output = self._stream_output and not aggregate_output
-
-            pipe_exec_kwargs = {
-                "cwd": str(definition_path),
-                "stream_output": effective_stream_output,
-            }
-            if effective_stream_output:
-                pipe_exec_kwargs["stream_log_level"] = log.LogLevel.INFO
-            exit_code, stdout, stderr = pipe_exec(
+            exit_code, stdout, stderr = pipe_exec_logged(
                 f"{' '.join(trivy_args)}",
-                **pipe_exec_kwargs,
+                label="trivy",
+                cwd=str(definition_path),
+                stream_output=self._stream_output,
+                extra={
+                    "definition_path": str(definition_path),
+                    "handler": "trivy",
+                },
             )
-            if aggregate_output:
-                log.log_subprocess_result(
-                    command="trivy",
-                    exit_code=exit_code,
-                    stdout=stdout,
-                    stderr=stderr,
-                    level=log.LogLevel.ERROR if exit_code else log.LogLevel.INFO,
-                    extra={
-                        "definition_path": str(definition_path),
-                        "handler": "trivy",
-                    },
-                )
         except Exception as e:
             raise HandlerError(f"Error executing trivy scan: {e}")
 

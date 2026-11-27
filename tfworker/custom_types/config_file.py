@@ -1,6 +1,8 @@
 from typing import Any, Dict, Optional
 
-from pydantic import ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from tfworker.definitions.model import DefinitionRemoteOptions
 
 from .freezable_basemodel import FreezableBaseModel
 
@@ -41,6 +43,26 @@ class GlobalVars(FreezableBaseModel):
     )
 
 
+class DefinitionsSource(BaseModel):
+    """
+    A source fetched like a definition whose command prints more definitions.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(description="The local path or git URL of the source.")
+    remote_path_options: Optional[DefinitionRemoteOptions] = Field(
+        None, description="Options for fetching a remote source."
+    )
+    command: str = Field(
+        description="Command run in the fetched copy; prints definitions as YAML or JSON."
+    )
+    after: Optional[str] = Field(
+        None,
+        description="Insert generated definitions after this definition; appended when unset.",
+    )
+
+
 class ConfigFile(FreezableBaseModel):
     """
     This model is used to validate and deserialize the configuration file.
@@ -50,6 +72,9 @@ class ConfigFile(FreezableBaseModel):
 
     definitions: Dict[str, Any] = Field(
         {}, description="The definition configurations."
+    )
+    definitions_sources: Dict[str, DefinitionsSource] = Field(
+        {}, description="Sources whose commands generate definitions."
     )
     global_vars: Optional[GlobalVars] = Field(
         default_factory=GlobalVars,

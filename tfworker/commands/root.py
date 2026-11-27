@@ -18,12 +18,12 @@ class RootCommand:
     all sub-commands.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, deployment: str) -> None:
         """
         Initliaze the RootCommand object; this is the main entry point for the CLI.
 
         Args:
-            args (dict, optional): A dictionary of arguments to initialize the RootCommand with. Defaults to {}.
+            deployment (str): The deployment name, exposed to config templates as `deployment`.
         """
         log.trace("initializing root command object")
         app_state = click.get_current_context().obj
@@ -33,7 +33,9 @@ class RootCommand:
         log.debug(f"loading config file(s): {options.config_file}")
         app_state.loaded_config = load_config(
             options.config_file,
-            self._prepare_template_vars(options),
+            self._prepare_template_vars(options, deployment),
+            deployment=deployment,
+            repository_path=options.repository_path,
         )
         log.safe_trace(f"loaded config: {app_state.loaded_config}")
         # update the app_config with configuration from the command line
@@ -58,12 +60,15 @@ class RootCommand:
         return Path(working_dir).resolve()
 
     @staticmethod
-    def _prepare_template_vars(options: CLIOptionsRoot) -> Dict[str, Any]:
+    def _prepare_template_vars(
+        options: CLIOptionsRoot, deployment: str
+    ) -> Dict[str, Any]:
         """
         Prepare the template variables.
 
         Args:
             options (CLIOptionsRoot): The root options.
+            deployment (str): The deployment name; overrides a `deployment` config var.
 
         Returns:
             Dict[str, Any]: The template variables.
@@ -98,5 +103,6 @@ class RootCommand:
                         log.trace(f"skipping {i} as it is not a string")
 
             log.trace(f"skipping {k} as it is not a string or list of strings")
+        template_items["deployment"] = deployment
         log.trace(f"template_items: {template_items}")
         return template_items

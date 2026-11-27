@@ -206,3 +206,19 @@ class TestDefinitionModel:
         )
         testdef = Definition(**mock_definition())
         assert testdef.get_used_providers("working_dir_two") is None
+
+    def test_get_loaded_providers(self, mocker):
+        mocker.patch(
+            "tfworker.util.terraform.find_loaded_required_providers",
+            return_value={"aws": ""},
+        )
+        testdef = Definition(**mock_definition())
+        assert testdef.get_loaded_providers("working_dir") == ["aws"]
+
+    def test_get_loaded_providers_no_providers(self, mocker):
+        mocker.patch(
+            "tfworker.util.terraform.find_loaded_required_providers",
+            return_value=None,
+        )
+        testdef = Definition(**mock_definition())
+        assert testdef.get_loaded_providers("working_dir") is None

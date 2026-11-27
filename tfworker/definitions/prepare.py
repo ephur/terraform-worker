@@ -1,6 +1,6 @@
 import json
 from os import environ
-from typing import TYPE_CHECKING, Dict, Union
+from typing import TYPE_CHECKING, Dict, List, Union
 
 import jinja2
 
@@ -14,7 +14,7 @@ from tfworker.constants import (
 )
 from tfworker.copier import Copier, CopyFactory
 from tfworker.exceptions import ReservedFileError, TFWorkerException
-from tfworker.util.system import pipe_exec, strip_ansi
+from tfworker.util.system import pipe_exec_logged, strip_ansi
 from tfworker.util.terraform import generate_terraform_lockfile
 
 if TYPE_CHECKING:
@@ -95,8 +95,55 @@ class DefinitionPrepare:
             for k, v in definition.get_remote_vars(
                 global_vars=self._app_state.loaded_config.global_vars.remote_vars
             ).items():
-                tflocals.write(f"  {k} = data.terraform_remote_state.{v}\n")
+                # Generate Terraform HCL for the value (handles str/dict/list)
+                tf_value = self._generate_tf_value(v, indent=1)
+                tflocals.write(f"  {k} = {tf_value}\n")
             tflocals.write("}\n\n")
+
+    def _generate_tf_value(self, value: Union[str, Dict, list], indent: int = 0) -> str:
+        """
+        Recursively generate Terraform HCL for a remote_vars value.
+
+        Args:
+            value: The remote_vars value (string ref, dict, or list)
+            indent: Current indentation level
+
+        Returns:
+            Terraform HCL string
+
+        Raises:
+            ValueError: If the value type is unsupported
+        """
+        from tfworker.util.remote_vars import generate_tf_reference
+
+        if isinstance(value, str):
+            # Simple string reference: "state.outputs.key"
+            return generate_tf_reference(value)
+
+        elif isinstance(value, dict):
+            # Dict: {"k1": "state1.outputs", "k2": "state2.outputs.key"}
+            if not value:
+                return "{}"
+            lines = ["{"]
+            for key, val in value.items():
+                nested_value = self._generate_tf_value(val, indent + 1)
+                lines.append(f'{"  " * (indent + 1)}"{key}" = {nested_value}')
+            lines.append(f'{"  " * indent}}}')
+            return "\n".join(lines)
+
+        elif isinstance(value, list):
+            # List: ["state1.outputs", "state2.outputs.key"]
+            if not value:
+                return "[]"
+            lines = ["["]
+            for item in value:
+                nested_value = self._generate_tf_value(item, indent + 1)
+                lines.append(f'{"  " * (indent + 1)}{nested_value},')
+            lines.append(f'{"  " * indent}]')
+            return "\n".join(lines)
+
+        else:
+            raise ValueError(f"Unsupported remote_vars value type: {type(value)}")
 
     def create_worker_tf(self, name: str) -> None:
         """Create remote data sources, and required providers"""
@@ -133,7 +180,7 @@ class DefinitionPrepare:
         log.trace(f"creating terraform lockfile for definition {name}")
         result = generate_terraform_lockfile(
             providers=self._app_state.providers,
-            included_providers=definition.get_used_providers(
+            included_providers=definition.get_loaded_providers(
                 self._app_state.working_dir
             ),
             cache_dir=self._app_state.terraform_options.provider_cache,
@@ -152,35 +199,27 @@ class DefinitionPrepare:
 
         definition = self._app_state.definitions[name]
         log.trace(f"downloading modules for definition {name}")
-        aggregate_output = log.json_logging_enabled()
-        effective_stream_output = stream_output and not aggregate_output
-
-        pipe_exec_kwargs = {
-            "cwd": definition.get_target_path(self._app_state.working_dir),
-            "stream_output": effective_stream_output,
-        }
-        if effective_stream_output:
-            pipe_exec_kwargs["stream_log_level"] = log.LogLevel.INFO
+        log.debug(
+            {
+                "message": f"running terraform get for {name}",
+                "definition": name,
+                "terraform_action": "get",
+            }
+        )
 
         result: TerraformResult = TerraformResult(
-            *pipe_exec(
+            *pipe_exec_logged(
                 "terraform get",
-                **pipe_exec_kwargs,
+                label="terraform get",
+                cwd=definition.get_target_path(self._app_state.working_dir),
+                stream_output=stream_output,
+                stream_log_level=log.LogLevel.DEBUG,
+                success_level=log.LogLevel.DEBUG,
+                extra={"definition": name, "terraform_action": "get"},
+                message=f"terraform get output for {name}",
+                debug_when_not_streaming=True,
             )
         )
-        if aggregate_output:
-            log.log_subprocess_result(
-                command="terraform get",
-                exit_code=result.exit_code,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                level=log.LogLevel.ERROR if result.exit_code else log.LogLevel.INFO,
-                extra={"definition": name},
-                message=f"terraform get output for {name}",
-            )
-        elif not stream_output:
-            log.debug(f"terraform get result: {result.stdout}")
-            log.debug(f"terraform get error: {result.stderr}")
         if result.exit_code != 0:
             raise TFWorkerException(
                 f"could not download modules for definition {name}: {strip_ansi(result.stderr.decode())}"
@@ -197,20 +236,21 @@ class DefinitionPrepare:
 
     def _get_remotes(self, name: str) -> list:
         """Get the remote data sources"""
+        from tfworker.util.remote_vars import extract_remote_states
+
         definition = self._app_state.definitions[name]
         log.trace(f"getting remotes for definition {name}")
         if self._app_state.terraform_options.backend_use_all_remotes:
             log.trace(f"using all remotes for definition {name}")
             remotes = self._app_state.backend.remotes
         else:
-            remotes = list(
-                map(
-                    lambda x: x.split(".")[0],
-                    definition.get_remote_vars(
-                        global_vars=self._app_state.loaded_config.global_vars.remote_vars
-                    ).values(),
-                )
-            )
+            # Extract state names from all remote_vars values (recursive)
+            remote_states = set()
+            for value in definition.get_remote_vars(
+                global_vars=self._app_state.loaded_config.global_vars.remote_vars
+            ).values():
+                remote_states.update(extract_remote_states(value))
+            remotes = list(remote_states)
             log.trace(f"using remotes {remotes} for definition {name}")
         return remotes
 
@@ -267,13 +307,16 @@ class DefinitionPrepare:
         }
 
 
-def get_coppier(path: str, root_path: str) -> Copier:
+def get_coppier(
+    path: str, root_path: str, conflicts: Union[List[str], None] = None
+) -> Copier:
     """
     Returns an appropriate copier for the definition path
 
     Args:
         path (str): the path to the definition
         root_path (str): the root path of the repository
+        conflicts (List[str]): files that must not exist in the source; defaults to RESERVED_FILES
 
     Returns:
         Copier: the copier to use
@@ -281,7 +324,9 @@ def get_coppier(path: str, root_path: str) -> Copier:
     Raises:
         NotImplementedError: if there is no copier to handle the path
     """
-    copier = CopyFactory.create(path, root_path=root_path, conflicts=RESERVED_FILES)
+    if conflicts is None:
+        conflicts = RESERVED_FILES
+    copier = CopyFactory.create(path, root_path=root_path, conflicts=conflicts)
     return copier
 
 

@@ -3,7 +3,7 @@ from unittest import mock
 import pytest
 
 import tfworker.util.log as log
-from tfworker.util.system import get_platform, pipe_exec, strip_ansi
+from tfworker.util.system import get_platform, pipe_exec, pipe_exec_logged, strip_ansi
 
 
 def mock_pipe_exec(args, stdin=None, cwd=None, env=None):
@@ -122,6 +122,117 @@ class TestUtilSystem:
         log_call.assert_not_called()
         printer.assert_not_called()
         log.log_format = old_format
+
+    # ------------------------------------------------------------------
+    # pipe_exec_logged: one place deciding stream vs aggregate
+    # ------------------------------------------------------------------
+    def test_pipe_exec_logged_text_streams_and_does_not_aggregate(self, mocker):
+        exec_fn = mocker.patch(
+            "tfworker.util.system.pipe_exec", return_value=(0, b"out", b"")
+        )
+        aggregate = mocker.patch("tfworker.util.system.log.log_subprocess_result")
+        log.log_format = log.LogFormat.TEXT
+
+        result = pipe_exec_logged(
+            "terraform init", label="terraform init", cwd="/tmp", env={"A": "B"}
+        )
+
+        assert result == (0, b"out", b"")
+        assert exec_fn.call_args.kwargs["stream_output"] is True
+        assert exec_fn.call_args.kwargs["stream_log_level"] == log.LogLevel.INFO
+        assert exec_fn.call_args.kwargs["env"] == {"A": "B"}
+        aggregate.assert_not_called()
+
+    def test_pipe_exec_logged_json_aggregates_and_does_not_stream(self, mocker):
+        exec_fn = mocker.patch(
+            "tfworker.util.system.pipe_exec", return_value=(0, b"out", b"err")
+        )
+        aggregate = mocker.patch("tfworker.util.system.log.log_subprocess_result")
+        log.log_format = log.LogFormat.JSON
+
+        pipe_exec_logged(
+            "terraform init",
+            label="terraform init",
+            extra={"definition": "example"},
+            message="terraform init output for example",
+        )
+
+        assert exec_fn.call_args.kwargs["stream_output"] is False
+        assert "stream_log_level" not in exec_fn.call_args.kwargs
+        aggregate.assert_called_once_with(
+            command="terraform init",
+            exit_code=0,
+            stdout=b"out",
+            stderr=b"err",
+            level=log.LogLevel.INFO,
+            extra={"definition": "example"},
+            message="terraform init output for example",
+        )
+
+    def test_pipe_exec_logged_failure_logs_at_error(self, mocker):
+        mocker.patch("tfworker.util.system.pipe_exec", return_value=(1, b"", b"boom"))
+        aggregate = mocker.patch("tfworker.util.system.log.log_subprocess_result")
+        log.log_format = log.LogFormat.JSON
+
+        pipe_exec_logged("terraform init", label="terraform init")
+
+        assert aggregate.call_args.kwargs["level"] == log.LogLevel.ERROR
+
+    def test_pipe_exec_logged_ok_exit_codes(self, mocker):
+        """terraform plan returns 2 for changes, which is not a failure."""
+        mocker.patch("tfworker.util.system.pipe_exec", return_value=(2, b"", b""))
+        aggregate = mocker.patch("tfworker.util.system.log.log_subprocess_result")
+        log.log_format = log.LogFormat.JSON
+
+        pipe_exec_logged("terraform plan", label="terraform plan", ok_exit_codes=(0, 2))
+        assert aggregate.call_args.kwargs["level"] == log.LogLevel.INFO
+
+        pipe_exec_logged("terraform apply", label="terraform apply")
+        assert aggregate.call_args.kwargs["level"] == log.LogLevel.ERROR
+
+    def test_pipe_exec_logged_success_level_override(self, mocker):
+        mocker.patch("tfworker.util.system.pipe_exec", return_value=(0, b"", b""))
+        aggregate = mocker.patch("tfworker.util.system.log.log_subprocess_result")
+        log.log_format = log.LogFormat.JSON
+
+        pipe_exec_logged("hook", label="hook", success_level=log.LogLevel.DEBUG)
+
+        assert aggregate.call_args.kwargs["level"] == log.LogLevel.DEBUG
+
+    def test_pipe_exec_logged_debug_when_not_streaming(self, mocker):
+        mocker.patch("tfworker.util.system.pipe_exec", return_value=(0, b"out", b"err"))
+        debug = mocker.patch("tfworker.util.system.log.debug")
+        log.log_format = log.LogFormat.TEXT
+
+        pipe_exec_logged(
+            "terraform get",
+            label="terraform get",
+            stream_output=False,
+            debug_when_not_streaming=True,
+        )
+
+        debug.assert_any_call("terraform get result: out")
+        debug.assert_any_call("terraform get error: err")
+
+    def test_pipe_exec_logged_omits_env_when_not_given(self, mocker):
+        exec_fn = mocker.patch(
+            "tfworker.util.system.pipe_exec", return_value=(0, b"", b"")
+        )
+        log.log_format = log.LogFormat.TEXT
+
+        pipe_exec_logged("terraform get", label="terraform get")
+
+        assert "env" not in exec_fn.call_args.kwargs
+
+    def test_pipe_exec_logged_uses_supplied_exec_fn(self, mocker):
+        default_exec = mocker.patch("tfworker.util.system.pipe_exec")
+        other = mocker.Mock(return_value=(0, b"", b""))
+        log.log_format = log.LogFormat.TEXT
+
+        pipe_exec_logged("hook.sh", label="hook", exec_fn=other)
+
+        other.assert_called_once()
+        default_exec.assert_not_called()
 
     @pytest.mark.parametrize(
         "opsys, machine, mock_platform_opsys, mock_platform_machine",

@@ -96,6 +96,14 @@ class HandlerError(TFWorkerException):
         return f"Handler error: {self.message}"
 
 
+class DefinitionsSourceError(TFWorkerException):
+    """
+    A definitions source could not be fetched, run, or applied.
+    """
+
+    pass
+
+
 class FrozenInstanceError(TFWorkerException):
     """
     This is an exception that indicates an attempt to modify a frozen instance.

@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 import tfworker.util.log as log
 
@@ -55,9 +55,11 @@ class Definition(BaseModel):
     terraform_vars: Optional[Dict[str, Any]] = Field(
         {}, description="Variables to pass to terraform via a generated .tfvars file."
     )
-    remote_vars: Optional[Dict[str, str]] = Field(
+    remote_vars: Optional[Dict[str, str | Dict | list]] = Field(
         {},
-        description="Variables which are used to generate local references to remote state vars.",
+        description="Variables which are used to generate local references to remote state vars. "
+        "Supports strings (e.g., 'state.outputs.key'), dicts for mapping keys to remote refs, "
+        "and lists of remote refs.",
     )
     squelch_plan_output: bool = False
     squelch_apply_output: bool = False
@@ -69,7 +71,15 @@ class Definition(BaseModel):
     ready: bool = False
     needs_apply: bool = False
     plan_failed: bool = False
-    plan_file: Optional[Union[str, None]] = None
+    # preparation (copy/template/terraform get) or terraform init failed
+    init_failed: bool = False
+    # init was never attempted because an earlier failure halted the init phase
+    init_skipped: bool = False
+    plan_file: Optional[Union[Path, str, None]] = None
+
+    @field_serializer("plan_file")
+    def serialize_plan_file(self, plan_file: Path | str | None):
+        return str(plan_file)
 
     def get_target_path(self, working_dir: str) -> str:
         """
@@ -209,6 +219,24 @@ class Definition(BaseModel):
             Union[List[str], None]: The list of providers used by the definition or none
         """
         return cached_get_used_providers(self.get_target_path(working_dir))
+
+    def get_loaded_providers(self, working_dir: str) -> Union[List[str], None]:
+        """
+        Get the providers terraform will require, once modules are fetched
+
+        Unlike get_used_providers this reads only the modules terraform loads,
+        so it matches what `terraform init` locks.
+
+        Args:
+            working_dir (str): The working directory
+
+        Returns:
+            Union[List[str], None]: The list of providers terraform will require or none
+        """
+        from tfworker.util.terraform import find_loaded_required_providers
+
+        providers = find_loaded_required_providers(self.get_target_path(working_dir))
+        return list(providers.keys()) if providers else None
 
     def existing_planfile(self, working_dir: str) -> bool:
         """

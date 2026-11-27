@@ -99,6 +99,9 @@ underlying terraform operations.
 The **\\-\\-config-file** option specifies the local filesystem path of the configuration
 file for the current operation.
 
+Any :ref:`definitions-sources` in the configuration are fetched and run while it is loaded, before the
+subcommand's options (such as ``--limit``) are validated.
+
 .. index::
    triple: worker; options; --config-file
 

@@ -7,6 +7,7 @@ import click
 import pytest
 from moto import mock_aws
 
+import tfworker.util.log as log
 from tfworker.app_state import AppState
 from tfworker.authenticators import AuthenticatorsCollection
 from tfworker.backends import Backends
@@ -22,6 +23,36 @@ def aws_credentials():
     os.environ["AWS_SECURITY_TOKEN"] = "testing"
     os.environ["AWS_SESSION_TOKEN"] = "testing"
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+
+
+DEFINITIONS_SOURCE_SCRIPT = """#!/bin/sh
+cat <<EOF
+generated:
+  template_vars:
+    cwd: $(pwd)
+    deployment: $WORKER_DEPLOYMENT
+    inherited: $SOURCE_TEST_VAR
+EOF
+"""
+
+
+@pytest.fixture(scope="function")
+def definitions_source(tmp_path):
+    """A local definitions source, tmp_path/catalog, with an executable bin/list-definitions."""
+    src = tmp_path / "catalog"
+    script = src / "bin" / "list-definitions"
+    script.parent.mkdir(parents=True)
+    script.write_text(DEFINITIONS_SOURCE_SCRIPT)
+    script.chmod(0o755)
+    return src
+
+
+@pytest.fixture(scope="function")
+def work_dir(tmp_path):
+    """An empty working directory under tmp_path."""
+    work = tmp_path / "work"
+    work.mkdir()
+    return work
 
 
 @pytest.fixture(scope="function")
@@ -78,6 +109,7 @@ def mock_cli_options_terraform():
     mock_terraform.apply = True
     mock_terraform.destroy = False
     mock_terraform.plan_file_path = None
+    mock_terraform.force_plan = False
     return mock_terraform
 
 
@@ -198,3 +230,19 @@ def mock_click_context_backend_west(mock_app_state_backend_west):
 def setup_method(mocker, mock_click_context):
     """A fixture to setup the click context which is used throughout"""
     mocker.patch("click.get_current_context", return_value=mock_click_context)
+
+
+@pytest.fixture(autouse=True)
+def reset_log_globals():
+    """Restore the log module's globals after every test.
+
+    Level, format, and run context are module state; a test that switches to
+    JSON logging (or fails before restoring it) would otherwise change how
+    every later test behaves.
+    """
+    level, fmt = log.log_level, log.log_format
+    context = dict(log._run_context)
+    yield
+    log.log_level, log.log_format = level, fmt
+    log.clear_context()
+    log.set_context(**context)

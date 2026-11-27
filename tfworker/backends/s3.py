@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Generator
 import boto3.dynamodb
 import botocore
 import botocore.errorfactory
+import botocore.exceptions
 import botocore.paginate
 import click
 
@@ -77,9 +78,27 @@ class S3Backend(BaseBackend):
         self._s3_client: botocore.client.S3 = (
             self._authenticator.backend_session.client("s3")
         )
-        self._ensure_locking_table()
-        self._ensure_backend_bucket()
-        self._bucket_files: list = self._list_bucket_definitions()
+
+        try:
+            self._ensure_locking_table()
+            self._ensure_backend_bucket()
+            self._bucket_files: list = self._list_bucket_definitions()
+        except (
+            botocore.exceptions.TokenRetrievalError,
+            botocore.exceptions.NoCredentialsError,
+            botocore.exceptions.PartialCredentialsError,
+        ) as e:
+            raise BackendError(f"AWS authentication failed: {e}") from e
+        except botocore.exceptions.ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code in (
+                "ExpiredToken",
+                "InvalidClientTokenId",
+                "SignatureDoesNotMatch",
+                "AccessDenied",
+            ):
+                raise BackendError(f"AWS authentication failed: {e}") from e
+            raise
 
     @property
     def remotes(self) -> list:

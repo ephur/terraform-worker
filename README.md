@@ -191,7 +191,28 @@ terraform {
 
 In this config, the worker manages two separate terraform modules, a `network` and a `database` definition, and shares an output from the network definition with the database definition. This is made available inside of the `database` definition through the `local.subnet` value.
 
-`aws_region` is substituted at runtime for the value of `--aws-region` passed through the command line.
+`aws_region` is substituted at runtime for the value of `--aws-region` passed through the command line. The deployment being run is available as `{{ deployment }}`.
+
+### Definitions sources
+
+A `definitions_sources` entry generates definitions at config load. The source is fetched like a definition, its `command` runs in the fetched copy with `WORKER_DEPLOYMENT` set to the deployment, and the YAML or JSON mapping it prints is inserted into `definitions` after the `after` definition (or at the end). Generated definitions without a `path` use the source's `path` and `remote_path_options`.
+
+```yaml
+terraform:
+  definitions_sources:
+    catalog:
+      path: git@github.com:example/service-catalog.git
+      remote_path_options:
+        branch: main
+      command: bin/list-definitions
+      after: network
+
+  definitions:
+    network:
+      path: /definitions/aws/network-existing
+```
+
+The command runs with the worker's environment and credentials; only use trusted sources. See the configuration concepts in the docs for the full contract.
 
 ## Troubleshooting
 

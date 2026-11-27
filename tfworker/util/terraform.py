@@ -6,6 +6,7 @@ from functools import lru_cache
 from typing import Dict, List, Tuple, Union
 
 import click
+from packaging.specifiers import SpecifierSet
 
 import tfworker.util.log as log
 import tfworker.util.terraform_helpers as tfhelpers
@@ -15,7 +16,7 @@ from tfworker.constants import (
 )
 from tfworker.exceptions import TFWorkerException
 from tfworker.providers import Provider, ProviderGID, ProvidersCollection
-from tfworker.util.system import pipe_exec
+from tfworker.util.system import pipe_exec, pipe_exec_logged
 
 
 @lru_cache
@@ -86,25 +87,12 @@ def mirror_providers(
         with tfhelpers._write_mirror_configuration(
             providers, working_dir, cache_dir
         ) as temp_dir:
-            return_code, stdout, stderr = pipe_exec(
+            return_code, stdout, stderr = pipe_exec_logged(
                 f"{terraform_bin} providers mirror {cache_dir}",
+                label="terraform providers mirror",
                 cwd=temp_dir,
-                stream_output=not log.json_logging_enabled(),
-                **(
-                    {"stream_log_level": log.LogLevel.INFO}
-                    if not log.json_logging_enabled()
-                    else {}
-                ),
+                extra={"cache_dir": cache_dir},
             )
-            if log.json_logging_enabled():
-                log.log_subprocess_result(
-                    command="terraform providers mirror",
-                    exit_code=return_code,
-                    stdout=stdout,
-                    stderr=stderr,
-                    level=log.LogLevel.ERROR if return_code else log.LogLevel.INFO,
-                    extra={"cache_dir": cache_dir},
-                )
             if return_code != 0:
                 raise TFWorkerException(f"Unable to mirror providers: {stderr}")
     except IndexError:
@@ -221,6 +209,25 @@ def find_required_providers(
         as the key and the provider details as the value.
     """
     required_providers = tfhelpers._find_required_providers(search_dir)
+    if len(required_providers) == 0:
+        return None
+    return required_providers
+
+
+def find_loaded_required_providers(
+    search_dir: str,
+) -> Union[None, Dict[str, Dict[str, Union[str, SpecifierSet]]]]:
+    """
+    Find the required providers of only the modules terraform loads.
+
+    Args:
+        search_dir (str): The root module directory, after `terraform get`.
+
+    Returns:
+        Dict[str, Dict[str, Union[str, SpecifierSet]]]: Each provider's "source"
+        and "version", or None if there are none.
+    """
+    required_providers = tfhelpers._find_loaded_required_providers(search_dir)
     if len(required_providers) == 0:
         return None
     return required_providers

@@ -16,17 +16,23 @@ from pydantic import BaseModel, ValidationError
 import tfworker.util.log as log
 from tfworker.app_state import AppState
 from tfworker.custom_types.config_file import ConfigFile
+from tfworker.definitions.sources import apply_definitions_sources
+from tfworker.exceptions import DefinitionsSourceError
 from tfworker.util.cli import handle_config_error
 
 from .. import cli_options
 
 
 def load_config(
-    config_file: Union[str, List[str]], config_vars: Dict[str, str]
+    config_file: Union[str, List[str]],
+    config_vars: Dict[str, str],
+    deployment: str,
+    repository_path: str,
 ) -> ConfigFile:
     """Load one or more configuration files and merge them.
 
-    Later files override values from earlier ones.
+    Later files override values from earlier ones. Definitions sources are
+    resolved from repository_path and run for deployment.
     """
 
     config_files = [config_file] if isinstance(config_file, str) else config_file
@@ -44,6 +50,19 @@ def load_config(
             loaded = yaml.safe_load(rendered)["terraform"]
 
         merge(merged_config, loaded)
+
+    if merged_config.get("definitions_sources"):
+        try:
+            apply_definitions_sources(
+                merged_config,
+                deployment,
+                repository_path,
+            )
+        except ValidationError as e:
+            handle_config_error(e)
+        except DefinitionsSourceError as e:
+            log.error(str(e))
+            click.get_current_context().exit(1)
 
     try:
         parsed_config = ConfigFile.model_validate(merged_config)
@@ -130,6 +149,34 @@ def resolve_model_with_cli_options(
         )
 
 
+def _parameter_source(
+    name: str,
+) -> Union[click.core.ParameterSource, None]:
+    """
+    Find where a parameter's value came from.
+
+    A command's context only knows its own parameters, so an option declared on
+    a parent group reports no source at all when looked up from a subcommand.
+    Walking up the contexts finds the one that owns the parameter; without it,
+    every group level option looks unset and the config file overwrites values
+    the caller set explicitly.
+
+    Args:
+        name (str): the parameter name
+
+    Returns:
+        Union[click.core.ParameterSource, None]: the source, or None when no
+            context declares the parameter
+    """
+    ctx = click.get_current_context(silent=True)
+    while ctx is not None:
+        source = ctx.get_parameter_source(name)
+        if source is not None:
+            return source
+        ctx = ctx.parent
+    return None
+
+
 def _update_model_if_match(
     app_state: AppState,
     model_classes: List[Type[BaseModel]],
@@ -170,13 +217,11 @@ def _set_model_parameters(
         field (str): The field name.
         skip_param_sources (List[click.core.ParameterSource]): List of parameter sources to skip.
     """
-    ctx = click.get_current_context()
     for k, v in app_state.loaded_config.worker_options.items():
         if k in model.model_fields:
-            if ctx.get_parameter_source(k) in skip_param_sources:
-                log.trace(
-                    f"skipping {k} as it is set via {ctx.get_parameter_source(k)}"
-                )
+            source = _parameter_source(k)
+            if source in skip_param_sources:
+                log.trace(f"skipping {k} as it is set via {source}")
                 continue
             log.trace(f"Setting {k} to {v} on {field}")
             try:

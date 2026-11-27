@@ -41,6 +41,35 @@ Here is the JSON schema:
                        },
                        "additionalProperties": false
                    },
+                   "definitions_sources": {
+                       "$id": "#root/terraform/definitions_sources",
+                       "title": "Definitions sources",
+                       "type": "object",
+                       "patternProperties": {
+                           "^.*$": {
+                               "type": "object",
+                               "required": [
+                                   "path",
+                                   "command"
+                               ],
+                               "properties": {
+                                   "path": { "type": "string" },
+                                   "remote_path_options": {
+                                       "type": "object",
+                                       "properties": {
+                                           "branch": { "type": "string" },
+                                           "sub_path": { "type": "string" }
+                                       },
+                                       "additionalProperties": false
+                                   },
+                                   "command": { "type": "string" },
+                                   "after": { "type": "string" }
+                               },
+                               "additionalProperties": false
+                           }
+                       },
+                       "additionalProperties": false
+                   },
                    "terraform_vars": {
                        "$id": "#root/terraform/terraform_vars",
                        "title": "Terraform_vars",

@@ -78,9 +78,15 @@ def test_missing_dependency_ignored():
 
 class HandlerWithPlan(DummyHandler):
     tag = "with_plan"
+    retrieved = False
+    plan_usable = True
 
     def has_plan(self, definition):
         return True
+
+    def get_plan(self, definition):
+        self.retrieved = True
+        return self.plan_usable
 
 
 class HandlerWithoutPlan(DummyHandler):
@@ -179,6 +185,38 @@ class TestHasAvailablePlan:
             }
         )
         assert h.has_available_plan(DummyDef()) is False
+
+
+class TestGetAvailablePlan:
+    def test_retrieves_from_the_handler_with_the_plan(self):
+        with_plan = HandlerWithPlan()
+        h = HandlersCollection({"a": HandlerWithoutPlan(), "b": with_plan})
+        assert h.get_available_plan(DummyDef()) is True
+        assert with_plan.retrieved is True
+
+    def test_returns_false_when_no_handler_has_a_plan(self):
+        h = HandlersCollection({"a": HandlerWithoutPlan()})
+        assert h.get_available_plan(DummyDef()) is False
+
+    def test_returns_false_when_the_plan_is_unusable(self):
+        with_plan = HandlerWithPlan()
+        with_plan.plan_usable = False
+        h = HandlersCollection({"a": with_plan})
+        assert h.get_available_plan(DummyDef()) is False
+
+    def test_raises_on_conflict(self):
+        h = HandlersCollection({"a": HandlerWithPlan(), "b": HandlerWithPlan()})
+        with pytest.raises(
+            HandlerError, match="Multiple handlers claim to have a plan"
+        ):
+            h.get_available_plan(DummyDef())
+
+    def test_ignores_not_ready_handlers(self):
+        not_ready = HandlerWithPlan()
+        not_ready._ready = False
+        h = HandlersCollection({"a": not_ready})
+        assert h.get_available_plan(DummyDef()) is False
+        assert not_ready.retrieved is False
 
 
 class TestExecSetupTeardown:

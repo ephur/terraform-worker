@@ -65,6 +65,9 @@ class DefinitionPlan:
         ):
             return True, "no saved plans possible"
 
+        if self._app_state.terraform_options.force_plan:
+            return True, "plan forced"
+
         plan_file: Path = Path(definition.plan_file)
 
         if plan_file.exists() and plan_file.stat().st_size > 0:
