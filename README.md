@@ -1,6 +1,6 @@
 # terraform-worker
 
-`terraform-worker` is a command line tool for pipelining terraform operations while sharing state between them. The worker consumese a yaml configuration file which is broken up into two sections, definitions (which were really just top level modules) and sub-modules. The definitions are put into a worker config in order, with the terraform variables, and remote state variables.  Following is a sample configuration file and command:
+`terraform-worker` is a command line tool for pipelining terraform operations while sharing state between them. The worker consumes a yaml configuration file which is broken up into two sections, definitions (which were really just top level modules) and sub-modules. The definitions are put into a worker config in order, with the terraform variables, and remote state variables.  Following is a sample configuration file and command:
 
 *./worker.yaml*
 ```yaml
