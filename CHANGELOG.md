@@ -12,10 +12,10 @@
 - A `.tf` and `.tf.j2` file with the same name now raises the intended "already exists" error instead of `UnboundLocalError` (#182).
 - Hook remote vars (`TF_REMOTE_*`) are now resolved by the HCL2 path: python-hcl2 wraps references as `${...}`, which the parser rejected, and a call to the nonexistent `log.warning` crashed into the regex fallback. Simple references produce the same values as before; nested references in maps and lists are now resolved (#183).
 - Removed `_check_handlers_ready`, which never removed anything. The handlers collection already filters on `is_ready()` (#184).
+- The Dockerfile builds again (#201): Python 3.13-slim, the worker installed with uv from `uv.lock`, and Terraform as a `TERRAFORM_VERSION` build arg (default 1.17.2) whose checksum is verified. CI now builds the image and smoke-tests it.
 - `--config-var` values containing `=` no longer crash definition preparation or get dropped from config templates (#187).
 
 # Changes 0.12.0 -> 0.13.0 (2024-06...)
-
 
 ## Notes
 This version reconsiders many of the core elements of the worker application.
