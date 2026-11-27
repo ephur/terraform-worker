@@ -26,15 +26,16 @@ jobs:
       issues: read
       id-token: write
     steps:
-      - name: Check for credentials
+      - name: Check for federation settings
         id: creds
         env:
-          HAS_CREDENTIALS: ${{ secrets.ANTHROPIC_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+          RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          ORG_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
         run: |
-          if [ "$HAS_CREDENTIALS" = "true" ]; then
+          if [ -n "$RULE_ID" ] && [ -n "$ORG_ID" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::No ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN secret; skipping Claude review."
+            echo "::notice::ANTHROPIC_FEDERATION_RULE_ID or ANTHROPIC_ORGANIZATION_ID repository variable not set; skipping Claude review."
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -47,8 +48,10 @@ jobs:
         if: steps.creds.outputs.present == 'true'
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_federation_rule_id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          anthropic_service_account_id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+          anthropic_workspace_id: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
