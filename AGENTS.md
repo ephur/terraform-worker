@@ -6,12 +6,12 @@
 - Keep modules single‑purpose, use `snake_case.py` filenames, and avoid mixed responsibilities.
 
 ## Build, Test, and Development Commands
-- Install tooling: `poetry install --with dev`
+- Install tooling: `uv sync` (installs the `dev` dependency group by default)
 - Run tests: `make test` (uses `pytest` with coverage via `pytest-cov`).
 - Lint: `make lint`
 - Format: `make format`
 - Type check: `make typecheck`
-- Use `poetry run <tool>` when invoking tools directly (e.g., `poetry run pytest -k my_test`).
+- Use `uv run <tool>` when invoking tools directly (e.g., `uv run pytest -k my_test`).
 
 ## Coding Style & Naming Conventions
 - Python with 4‑space indents and explicit type hints on public APIs.
@@ -22,7 +22,7 @@
 - Frameworks: `pytest` organized with `unittest.TestCase` classes; mock using `pytest-mock` or `unittest.mock`.
 - Coverage: >98% for new/changed code, >90% overall (enforced via `pytest-cov`).
 - Structure: mirror `tfworker/` in `tests/`; test files named `test_<module>.py`.
-- Run locally with `make test` or `poetry run pytest`. Write fast, isolated tests and use dependency injection for seams.
+- Run locally with `make test` or `uv run pytest`. Write fast, isolated tests and use dependency injection for seams.
 
 ## Typing
 - Add annotations to all new modules and public functions; keep them precise.

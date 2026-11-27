@@ -293,11 +293,10 @@ class TestS3BackendClean:
     def test_clean_with_limit(self, mock_authenticators):
         backend = S3Backend(mock_authenticators, "test-deployment")
         self.s3.put_object(Bucket="test-bucket", Key="prefix/resource1")
-        with patch.object(
-            backend, "_clean_bucket_state"
-        ) as mock_clean_bucket_state, patch.object(
-            backend, "_clean_locking_state"
-        ) as mock_clean_locking_state:
+        with (
+            patch.object(backend, "_clean_bucket_state") as mock_clean_bucket_state,
+            patch.object(backend, "_clean_locking_state") as mock_clean_locking_state,
+        ):
             backend.clean("test-deployment", limit=("resource1",))
             mock_clean_bucket_state.assert_called_once_with(definition="resource1")
             mock_clean_locking_state.assert_called_once_with(
@@ -308,11 +307,10 @@ class TestS3BackendClean:
     def test_clean_without_limit(self, mock_authenticators):
         backend = S3Backend(mock_authenticators, "test-deployment")
         self.s3.put_object(Bucket="test-bucket", Key="prefix/test-deployment/file1")
-        with patch.object(
-            backend, "_clean_bucket_state"
-        ) as mock_clean_bucket_state, patch.object(
-            backend, "_clean_locking_state"
-        ) as mock_clean_locking_state:
+        with (
+            patch.object(backend, "_clean_bucket_state") as mock_clean_bucket_state,
+            patch.object(backend, "_clean_locking_state") as mock_clean_locking_state,
+        ):
             backend.clean("test-deployment")
             mock_clean_bucket_state.assert_called_once_with()
             mock_clean_locking_state.assert_called_once_with("test-deployment")

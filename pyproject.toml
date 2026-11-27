@@ -1,74 +1,97 @@
-[tool.poetry]
+[project]
 name = "terraform-worker"
-version = "0.12.0"
+dynamic = ["version"]
 description = "An orchestration tool for Terraform"
-authors = ["Richard Maynard <richard.maynard@gmail.com>"]
-packages = [
-    { include="tfworker", from="." },
-]
+authors = [{ name = "Richard Maynard", email = "richard.maynard@gmail.com" }]
 readme = "README.md"
-
-repository = "https://github.com/ephur/terraform-worker"
-homepage = "https://github.com/ephur/terraform-worker"
-documentation = "https://github.com/ephur/terraform-worker"
-
 license = "Apache-2.0"
-
+requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: System Administrators",
     "Intended Audience :: Information Technology",
-    "License :: OSI Approved :: Apache Software License",
     "Natural Language :: English",
     "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3.8",
-    "Topic :: System :: Systems Administration"
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = [
+    "atlassian-python-api>=3.41.21,<4",
+    "boto3>=1.43.121,<2",
+    "click>=8.4.1,<9",
+    "google-cloud-storage>=2.19.0,<3",
+    "jinja2>=3.1.6,<4",
+    "mergedeep>=1.3.4,<2",
+    "pydantic>=2.13.4,<3",
+    "python-hcl2>=4.3.5,<5",
+    "pyyaml>=6.0.3,<7",
+    "pydantic-settings>=2.14.1,<3",
+    "packaging>=24.2,<25",
+    "openai>=1.109.1,<2",
+    "pygithub>=2.5,<3",
+    "urllib3>=2.7.0",
+    "slack-sdk>=3.42.0,<4",
 ]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-atlassian-python-api = "^3.41.21"
-boto3 = "^1.43.121"
-click = "^8.4.1"
-google-cloud-storage = "^2.19.0"
-jinja2 = "^3.1.6"
-mergedeep = "^1.3.4"
-pydantic = "^2.13.4"
-python-hcl2 = "^4.3.5"
-pyyaml = "^6.0.3"
-setuptools = "^78.1.1"
-pydantic-settings = "^2.14.1"
-packaging = "^24.2"
-openai = "^1.109.1"
-pygithub = "^2.5"
-urllib3 = ">=2.7.0"
-slack-sdk = "^3.42.0"
+[project.urls]
+Homepage = "https://github.com/ephur/terraform-worker"
+Repository = "https://github.com/ephur/terraform-worker"
+Documentation = "https://github.com/ephur/terraform-worker"
 
-[tool.poetry.scripts]
-worker = 'tfworker.cli:cli'
+[project.scripts]
+worker = "tfworker.cli:cli"
 
-[tool.poetry.group.dev]
-optional = true
+[dependency-groups]
+dev = [
+    "black>=26.5.1,<27",
+    "coverage>=7.14.1,<8",
+    "deepdiff>=8.6.2,<9",
+    "flake8>=7.3.0,<8",
+    "ipython>=8.39.0,<9",
+    "isort>=5.13.2,<6",
+    "pytest>=9.1.0,<10",
+    "pytest-cov>=5.0.0,<6",
+    "pytest-mock>=3.15.1,<4",
+    "pytest-socket>=0.8.1,<0.9",
+    "pytest-timeout>=2.4.0,<3",
+    "seed-isort-config>=2.2.0,<3",
+    "sphinx>=7.4.7,<8",
+    "moto[sts,dynamodb,s3]>=5.2.2,<6",
+    "mypy>=1.20.2,<2",
+]
 
-[tool.poetry.group.dev.dependencies]
-black = ">=26.5.1,<27.0"
-coverage = "^7.14.1"
-deepdiff = ">=8.6.2,<9"
-flake8 = "^7.3.0"
-ipython = "^8.39.0"
-isort = "^5.13.2"
-pytest = ">=9.1.0,<10.0.0"
-pytest-cov = "^5.0.0"
-pytest-mock = "^3.15.1"
-pytest-socket = "^0.8.1"
-pytest-timeout = "^2.4.0"
-seed-isort-config = "^2.2.0"
-Sphinx = "^7.4.7"
-wheel = ">=0.48,<0.49"
-moto = {version = "^5.2.2", extras = ["sts", "dynamodb", "s3"]}
-mypy = "^1.20.2"
+[tool.uv]
+default-groups = ["dev"]
 
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+# The package version is derived from git tags. Upstream release tags look
+# like v1.2.3. A downstream fork with its own tag scheme only needs to change
+# the tag-pattern regex and the --match glob in git_describe_command, e.g. for
+# tags like release/ap/1.2.3:
+#   tag-pattern = '^release/ap/(?P<version>\d+\.\d+\.\d+.*)$'
+#   git_describe_command = [..., "--match", "release/ap/[0-9]*"]
+[tool.hatch.version]
+source = "vcs"
+tag-pattern = '^v(?P<version>\d+\.\d+\.\d+.*)$'
+
+[tool.hatch.version.raw-options]
+git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--match", "v[0-9]*"]
+# Used only when building outside a git checkout (e.g. from a tarball).
+fallback_version = "0.12.0"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tfworker"]
+
+[tool.hatch.build.targets.sdist]
+include = ["tfworker", "tests", "docs", "README.md", "LICENSE", "CHANGELOG.md"]
 
 [tool.pytest.ini_options]
 addopts = "--capture=sys --cov=tfworker --cov-report= -m 'not performance'"
@@ -80,7 +103,3 @@ markers = [
 python_version = "3.11"
 show_error_codes = true
 pretty = true
-
-[build-system]
-requires = ["poetry>=0.12"]
-build-backend = "poetry.masonry.api"

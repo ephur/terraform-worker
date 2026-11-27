@@ -15,33 +15,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Set up uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-        with:
-          virtualenvs-in-project: true
-
-      - name: Cache virtualenv
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ matrix.python-version }}-${{ hashFiles('poetry.lock') }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
 
       - name: Install dependencies
-        run: poetry install --with dev
+        run: uv sync --locked
 
       - name: Check formatting (black)
-        run: poetry run black --check tfworker tests
+        run: uv run black --check tfworker tests
 
       - name: Check import order (isort)
-        run: poetry run isort --check tfworker tests
+        run: uv run isort --check tfworker tests
 
       - name: Lint (flake8)
-        run: poetry run flake8 --ignore E203,E501,W503 tfworker tests
+        run: uv run flake8 --ignore E203,E501,W503 tfworker tests
 
   test:
     name: Test
@@ -52,27 +43,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Set up uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Install Poetry
-        uses: snok/install-poetry@v1
-        with:
-          virtualenvs-in-project: true
-
-      - name: Cache virtualenv
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ matrix.python-version }}-${{ hashFiles('poetry.lock') }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
 
       - name: Install dependencies
-        run: poetry install --with dev
+        run: uv sync --locked
 
       - name: Run tests
-        run: poetry run pytest -p no:warnings --disable-socket
+        run: uv run pytest -p no:warnings --disable-socket
 
       - name: Check coverage
-        run: poetry run coverage report --fail-under=60 -m --skip-empty
+        run: uv run coverage report --fail-under=60 -m --skip-empty
