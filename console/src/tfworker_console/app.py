@@ -6,6 +6,7 @@ from tfworker.report import PLAN_SCHEMA, RUN_SCHEMA, STATUS_SCHEMA
 
 from . import api, version, web
 from .db import engine_for, session_factory
+from .groups import load_groups
 from .reconcile import Reconciler
 from .scheduler import ReconcileScheduler
 from .settings import ConsoleSettings
@@ -29,6 +30,7 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
     app.state.settings = settings
     app.state.sessions = None
     app.state.reconciler = None
+    app.state.groups = load_groups(settings.groups_file)
     if settings.database_url:
         app.state.sessions = session_factory(engine_for(settings.database_url))
         app.state.reconciler = Reconciler(

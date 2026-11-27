@@ -11,11 +11,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel
-from sqlalchemy import and_, select
+from sqlalchemy import and_, false, select, tuple_
 from sqlalchemy.orm import Session
 from tfworker.backends.lock import LockInfo, WorkerLease
 
 from . import db
+from .groups import Groups
 
 Health = Literal["failing", "drifted", "pending", "locked", "ok"]
 # exceptions first, in this order
@@ -30,18 +31,44 @@ HEALTH_ORDER: Dict[str, int] = {
 
 @dataclass
 class Scope:
-    """Narrows every view to some stores and deployments; empty means all."""
+    """
+    Narrows every view to some stores, deployments and groups; empty means all.
+
+    ``members`` holds the (store, deployment) pairs in the chosen groups, as
+    resolved by `resolve`; ``resolver`` places deployments in groups.
+    """
 
     stores: List[str] = field(default_factory=list)
     deployments: List[str] = field(default_factory=list)
+    groups: List[str] = field(default_factory=list)
+    resolver: Groups = field(default_factory=Groups)
+    members: Optional[List[Tuple[str, str]]] = None
 
-    def where(self, model):
+    def resolve(self, session: Session) -> "Scope":
+        if self.groups:
+            known = session.execute(select(db.Deployment.store, db.Deployment.name))
+            self.members = self.resolver.members(
+                self.groups, [tuple(row) for row in known]
+            )
+        return self
+
+    def where(self, model, deployment=None):
+        deployment = deployment if deployment is not None else model.deployment
         clauses = []
         if self.stores:
             clauses.append(model.store.in_(self.stores))
         if self.deployments:
-            clauses.append(model.deployment.in_(self.deployments))
+            clauses.append(deployment.in_(self.deployments))
+        if self.members is not None:
+            clauses.append(
+                tuple_(model.store, deployment).in_(self.members)
+                if self.members
+                else false()
+            )
         return clauses
+
+    def group(self, store: str, deployment: str) -> str:
+        return self.resolver.of(store, deployment)
 
 
 class Event(BaseModel):
@@ -57,6 +84,7 @@ class Event(BaseModel):
 class DefinitionHealth(BaseModel):
     store: str
     deployment: str
+    group: str
     definition: str
     health: Health
     last_plan: Optional[Event] = None
@@ -67,6 +95,14 @@ class DefinitionHealth(BaseModel):
     locked: bool = False
 
 
+class GroupView(BaseModel):
+    name: str
+    plan_ttl: Optional[float] = None
+    force_unlock: Literal["operators", "admins"]
+    deployments: List[str]
+    counts: Dict[str, int]
+
+
 class Fleet(BaseModel):
     counts: Dict[str, int]
     exceptions: List[DefinitionHealth]
@@ -74,6 +110,7 @@ class Fleet(BaseModel):
 
 class DeploymentSummary(BaseModel):
     store: str
+    group: str
     # the prefix segment, which identifies the deployment
     deployment: str
     # the name its newest run record gives, when that differs
@@ -87,6 +124,7 @@ class DeploymentSummary(BaseModel):
 class LockView(BaseModel):
     store: str
     deployment: str
+    group: str
     definition: str
     lock_id: str
     who: str
@@ -98,11 +136,14 @@ class LockView(BaseModel):
     # the state is judged as of the last reconcile that saw the lock
     observed_at: datetime
     observed_seconds_ago: float
+    # who the group's policy lets force-unlock it
+    force_unlock: Literal["operators", "admins"]
 
 
 class PlanView(BaseModel):
     store: str
     deployment: str
+    group: str
     definition: str
     plan_id: str
     run_id: str
@@ -111,7 +152,7 @@ class PlanView(BaseModel):
     destroy: bool
     created_at: datetime
     expires_at: Optional[datetime] = None
-    # pending but past expires_at; the worker will refuse to apply it
+    # pending, but past its own expiry or its group's plan TTL
     expired: bool = False
     add: int = 0
     change: int = 0
@@ -121,6 +162,7 @@ class PlanView(BaseModel):
 class RunView(BaseModel):
     store: str
     deployment: str
+    group: str
     record_id: str
     run_id: str
     status: str
@@ -230,7 +272,7 @@ def _pending_keys(session: Session, scope: Scope, now: datetime) -> set:
     return {
         (row.store, row.deployment, row.definition)
         for row in session.scalars(query)
-        if row.body.get("storage") != "preview" and not _plan_expired(row, now)
+        if row.body.get("storage") != "preview" and not _plan_expired(row, now, scope)
     }
 
 
@@ -258,6 +300,7 @@ def _healths(session: Session, scope: Scope, now: datetime) -> List[DefinitionHe
             DefinitionHealth(
                 store=store,
                 deployment=deployment,
+                group=scope.group(store, deployment),
                 definition=name,
                 health=_health(body, key in locks, key in pending),
                 last_plan=_event(body.get("last_plan")),
@@ -272,7 +315,13 @@ def _healths(session: Session, scope: Scope, now: datetime) -> List[DefinitionHe
         )
     return sorted(
         healths,
-        key=lambda h: (HEALTH_ORDER[h.health], h.store, h.deployment, h.definition),
+        key=lambda h: (
+            HEALTH_ORDER[h.health],
+            scope.resolver.rank(h.group),
+            h.store,
+            h.deployment,
+            h.definition,
+        ),
     )
 
 
@@ -297,17 +346,14 @@ def deployments(
     by_deployment: Dict[Tuple[str, str], List[DefinitionHealth]] = defaultdict(list)
     for item in _healths(session, scope, now):
         by_deployment[(item.store, item.deployment)].append(item)
-    query = select(db.Deployment).order_by(db.Deployment.store, db.Deployment.name)
-    if scope.stores:
-        query = query.where(db.Deployment.store.in_(scope.stores))
-    if scope.deployments:
-        query = query.where(db.Deployment.name.in_(scope.deployments))
+    query = select(db.Deployment).where(*scope.where(db.Deployment, db.Deployment.name))
     result = []
     for row in session.scalars(query):
         items = by_deployment[(row.store, row.name)]
         result.append(
             DeploymentSummary(
                 store=row.store,
+                group=scope.group(row.store, row.name),
                 deployment=row.name,
                 record_name=row.record_name,
                 prefix=row.prefix,
@@ -316,10 +362,37 @@ def deployments(
                 counts=_count(items),
             )
         )
+    result.sort(key=lambda d: (scope.resolver.rank(d.group), d.store, d.deployment))
     return result
 
 
-def _lock_view(row: db.Lock, now: datetime, stale_after: float) -> LockView:
+def groups(session: Session, scope: Scope, now: datetime) -> List[GroupView]:
+    """Every group in sort order with its policy, members and health counts."""
+    members: Dict[str, List[DeploymentSummary]] = defaultdict(list)
+    for summary in deployments(session, scope, now):
+        members[summary.group].append(summary)
+    result = []
+    for name in scope.resolver.names:
+        group = scope.resolver.group(name)
+        counts = {health: 0 for health in HEALTH_ORDER}
+        for summary in members[name]:
+            for health, n in summary.counts.items():
+                counts[health] += n
+        result.append(
+            GroupView(
+                name=name,
+                plan_ttl=group.plan_ttl,
+                force_unlock=group.force_unlock,
+                deployments=[f"{d.store}/{d.deployment}" for d in members[name]],
+                counts=counts,
+            )
+        )
+    return result
+
+
+def _lock_view(
+    row: db.Lock, now: datetime, stale_after: float, scope: Scope
+) -> LockView:
     """
     Judge the lock as it was observed: the lease is a snapshot from the last
     reconcile, so comparing it with the time of the request would call every
@@ -336,9 +409,12 @@ def _lock_view(row: db.Lock, now: datetime, stale_after: float) -> LockView:
             state = "stale"
     elif lock.age(seen) > stale_after:
         state = "stale"
+    policy = scope.resolver.policy(row.store, row.deployment)
     return LockView(
         store=row.store,
         deployment=row.deployment,
+        group=policy.name,
+        force_unlock=policy.force_unlock,
         definition=row.definition,
         lock_id=row.lock_id,
         who=row.who,
@@ -360,25 +436,33 @@ def locks(
     state: Optional[str] = None,
 ) -> List[LockView]:
     query = select(db.Lock).where(*scope.where(db.Lock)).order_by(db.Lock.created)
-    views = [_lock_view(row, now, stale_after) for row in session.scalars(query)]
+    views = [_lock_view(row, now, stale_after, scope) for row in session.scalars(query)]
     return [view for view in views if not state or view.state == state]
 
 
-def _plan_expired(row: db.Plan, now: datetime) -> bool:
-    expires_at = row.body.get("expires_at")
-    return (
-        row.status == "pending"
-        and expires_at is not None
-        and now >= datetime.fromisoformat(expires_at)
-    )
+def _plan_expires(row: db.Plan, scope: Scope) -> Optional[datetime]:
+    """The earlier of the manifest's own expiry and its group's plan TTL."""
+    policy = scope.resolver.policy(row.store, row.deployment)
+    expires = []
+    if row.body.get("expires_at"):
+        expires.append(datetime.fromisoformat(row.body["expires_at"]))
+    if policy.plan_ttl is not None:
+        expires.append(row.created_at + timedelta(seconds=policy.plan_ttl))
+    return min(expires, default=None)
 
 
-def _plan_view(row: db.Plan, now: datetime) -> PlanView:
+def _plan_expired(row: db.Plan, now: datetime, scope: Scope) -> bool:
+    expires_at = _plan_expires(row, scope)
+    return row.status == "pending" and expires_at is not None and now >= expires_at
+
+
+def _plan_view(row: db.Plan, now: datetime, scope: Scope) -> PlanView:
     body = row.body
     changes = body.get("changes") or {}
     return PlanView(
         store=row.store,
         deployment=row.deployment,
+        group=scope.group(row.store, row.deployment),
         definition=row.definition,
         plan_id=row.plan_id,
         run_id=body["run_id"],
@@ -386,8 +470,8 @@ def _plan_view(row: db.Plan, now: datetime) -> PlanView:
         storage=body.get("storage", "backend"),
         destroy=body.get("destroy", False),
         created_at=row.created_at,
-        expires_at=body.get("expires_at"),
-        expired=_plan_expired(row, now),
+        expires_at=_plan_expires(row, scope),
+        expired=_plan_expired(row, now, scope),
         add=changes.get("add", 0),
         change=changes.get("change", 0),
         destroy_count=changes.get("destroy", 0),
@@ -408,14 +492,15 @@ def plans(
     if definition:
         query = query.where(db.Plan.definition == definition)
     query = query.order_by(db.Plan.created_at.desc()).limit(limit)
-    return [_plan_view(row, now) for row in session.scalars(query)]
+    return [_plan_view(row, now, scope) for row in session.scalars(query)]
 
 
-def _run_view(row: db.Run) -> RunView:
+def _run_view(row: db.Run, scope: Scope) -> RunView:
     body = row.body
     return RunView(
         store=row.store,
         deployment=row.deployment,
+        group=scope.group(row.store, row.deployment),
         record_id=row.record_id,
         run_id=row.run_id,
         status=row.status,
@@ -446,7 +531,7 @@ def runs(
             ),
         ).where(db.RunDefinition.definition == definition)
     query = query.order_by(db.Run.started_at.desc(), db.Run.record_id.desc())
-    return [_run_view(row) for row in session.scalars(query.limit(limit))]
+    return [_run_view(row, scope) for row in session.scalars(query.limit(limit))]
 
 
 def run(session: Session, store: str, record_id: str) -> Optional[dict]:
@@ -467,7 +552,7 @@ def definition(
     if not healths:
         return None
     plan_rows = [
-        _plan_view(row, now)
+        _plan_view(row, now, scope)
         for row in session.scalars(
             select(db.Plan)
             .where(db.Plan.definition == name, *scope.where(db.Plan))
@@ -476,7 +561,7 @@ def definition(
         )
     ]
     lock_rows = {
-        (row.store, row.deployment): _lock_view(row, now, stale_after)
+        (row.store, row.deployment): _lock_view(row, now, stale_after, scope)
         for row in session.scalars(
             select(db.Lock).where(db.Lock.definition == name, *scope.where(db.Lock))
         )
@@ -499,7 +584,7 @@ def definition(
     ):
         key = (part.store, part.deployment)
         if len(recent_runs[key]) < recent:
-            recent_runs[key].append(_run_view(row))
+            recent_runs[key].append(_run_view(row, scope))
         if key not in sources and part.module_sources:
             sources[key] = part.module_sources
     deployments_ = []

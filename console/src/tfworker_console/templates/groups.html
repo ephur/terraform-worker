@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Groups · tfworker console{% endblock %}
+{% block content %}
+<h1>Groups</h1>
+<table>
+  <tr><th>Group</th><th>Deployments</th><th>Failing</th><th>Drifted</th><th>Pending</th><th>Locked</th><th>Ok</th><th>Plan TTL</th><th>Force unlock</th></tr>
+  {% for g in group_views %}
+  <tr>
+    <td><a href="/?group={{ g.name | urlencode }}">{{ g.name }}</a></td>
+    <td>{% for d in g.deployments %}<code>{{ d }}</code> {% else %}<span class="muted">none</span>{% endfor %}</td>
+    <td class="h-failing">{{ g.counts.failing or '' }}</td><td class="h-drifted">{{ g.counts.drifted or '' }}</td>
+    <td class="h-pending">{{ g.counts.pending or '' }}</td><td class="h-locked">{{ g.counts.locked or '' }}</td>
+    <td class="h-ok">{{ g.counts.ok or '' }}</td>
+    <td>{{ format_duration(g.plan_ttl) if g.plan_ttl is not none else '-' }}</td><td>{{ g.force_unlock }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

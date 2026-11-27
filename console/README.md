@@ -88,3 +88,40 @@ the schedule and returns each store's summary. Until roles arrive (#237) the
 console has no access control, so serve it only where everyone who can reach
 it may see every store.
 
+## Deployment groups
+
+Groups such as Production, Non-prod and Sandbox are defined in a YAML file
+named by `TFWORKER_CONSOLE_GROUPS_FILE`. It lives beside the stores file
+rather than in the database, so a rebuild of the projection keeps it.
+
+```yaml
+groups:                 # listed in fleet sort order
+  - name: Production
+    plan_ttl: 1d        # pending plans older than this show as expired
+    force_unlock: admins
+  - name: Sandbox
+    force_unlock: operators
+rules:                  # first match wins
+  - match: "prod-*"     # a case-sensitive glob on the deployment
+    group: Production
+  - store: dev          # optionally only in one store
+    match: "*"
+    group: Sandbox
+deployments:            # by hand; wins over every rule
+  prod/legacy-app: Production
+```
+
+Each deployment belongs to exactly one group. A deployment that no
+assignment or rule names goes into **Unassigned**, which sorts last and gets
+the default policy: no plan TTL, and only admins may force-unlock.
+
+Groups affect the console in these ways:
+- Every view can be scoped with `group`, and the screens have a group picker.
+- Within each health level, the fleet sorts by group order.
+- `GET /api/v1/groups` and `/groups` list each group's policy, members and
+  health counts.
+- A group's plan TTL marks older pending plans as expired, so they no longer
+  count as pending.
+- Each lock shows who may force-unlock it. Roles (#237) enforce that, and
+  role mappings can be scoped to groups.
+

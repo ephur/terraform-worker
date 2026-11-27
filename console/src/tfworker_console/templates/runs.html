@@ -3,11 +3,11 @@
 {% block content %}
 <h1>Runs</h1>
 <table>
-  <tr><th>Started</th><th>Deployment</th><th>Status</th><th>Actions</th><th>Intent</th><th>Definitions</th><th>Run</th></tr>
+  <tr><th>Started</th><th>Deployment</th><th>Group</th><th>Status</th><th>Actions</th><th>Intent</th><th>Definitions</th><th>Run</th></tr>
   {% for r in runs %}
-  <tr><td>{{ r.started_at.strftime('%Y-%m-%d %H:%M') }}</td><td>{{ r.deployment }}</td><td>{{ r.status }}</td>
+  <tr><td>{{ r.started_at.strftime('%Y-%m-%d %H:%M') }}</td><td>{{ r.deployment }}</td><td>{{ r.group }}</td><td>{{ r.status }}</td>
       <td>{{ r.actions|join(', ') }}</td><td>{{ r.intent or '' }}</td><td>{{ r.definitions|join(', ') }}</td>
       <td><a href="/api/v1/runs/{{ r.store | urlencode }}/{{ r.record_id | urlencode }}"><code>{{ r.run_id }}</code></a></td></tr>
-  {% else %}<tr><td colspan="7" class="muted">No runs.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="8" class="muted">No runs.</td></tr>{% endfor %}
 </table>
 {% endblock %}

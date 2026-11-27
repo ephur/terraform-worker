@@ -28,9 +28,13 @@
 <body>
 <header>
   <strong>tfworker console</strong>
-  <a href="/{% if scope_query %}?{{ scope_query }}{% endif %}">Fleet</a><a href="/deployments{% if scope_query %}?{{ scope_query }}{% endif %}">Deployments</a><a href="/plans{% if scope_query %}?{{ scope_query }}{% endif %}">Plans</a>
+  <a href="/{% if scope_query %}?{{ scope_query }}{% endif %}">Fleet</a><a href="/groups{% if scope_query %}?{{ scope_query }}{% endif %}">Groups</a><a href="/deployments{% if scope_query %}?{{ scope_query }}{% endif %}">Deployments</a><a href="/plans{% if scope_query %}?{{ scope_query }}{% endif %}">Plans</a>
   <a href="/locks{% if scope_query %}?{{ scope_query }}{% endif %}">Locks</a><a href="/runs{% if scope_query %}?{{ scope_query }}{% endif %}">Runs</a><a href="/tracking/local-modules{% if scope_query %}?{{ scope_query }}{% endif %}">Local modules</a>
   <form class="picker" hx-get="{{ request.url.path }}" hx-target="main" hx-push-url="true" hx-trigger="change">
+    <select name="group" aria-label="Group">
+      <option value="">All groups</option>
+      {% for name in groups %}<option {% if name in scope.groups %}selected{% endif %}>{{ name }}</option>{% endfor %}
+    </select>
     <select name="store" aria-label="Store">
       <option value="">All stores</option>
       {% for store in stores %}<option {% if store in scope.stores %}selected{% endif %}>{{ store }}</option>{% endfor %}
