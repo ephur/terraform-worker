@@ -32,7 +32,7 @@ def get_scope(
         deployments=[name for name in deployment if name],
         groups=[name for name in group if name],
         resolver=request.app.state.groups,
-    ).resolve(session)
+    )
 
 
 def get_now(request: Request) -> datetime:

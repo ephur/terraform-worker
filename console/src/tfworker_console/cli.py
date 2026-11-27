@@ -6,6 +6,7 @@ import uvicorn
 
 from . import version
 from .db import engine_for, session_factory
+from .groups import load_groups
 from .migrate import upgrade
 from .reconcile import Reconciler
 from .settings import ConsoleSettings
@@ -65,7 +66,9 @@ def reconcile(stores, rebuild) -> None:
     if unknown:
         raise click.UsageError(f"unknown store: {', '.join(unknown)}")
     reconciler = Reconciler(
-        configured, session_factory(engine_for(_database_url(settings)))
+        configured,
+        session_factory(engine_for(_database_url(settings))),
+        groups=load_groups(settings.groups_file),
     )
     if rebuild:
         if stores:

@@ -34,6 +34,7 @@
     <select name="group" aria-label="Group">
       <option value="">All groups</option>
       {% for name in groups %}<option {% if name in scope.groups %}selected{% endif %}>{{ name }}</option>{% endfor %}
+      {% for name in scope.groups if name not in groups %}<option selected>{{ name }}</option>{% endfor %}
     </select>
     <select name="store" aria-label="Store">
       <option value="">All stores</option>

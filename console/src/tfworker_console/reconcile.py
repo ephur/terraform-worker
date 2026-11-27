@@ -35,6 +35,7 @@ from tfworker.report import DefinitionStatus, PlanManifest, RunRecord
 from tfworker.report.models import LOCAL_MODULE_TAG
 
 from . import db
+from .groups import Groups
 from .stores import StoreConfig, list_keys, list_segments
 
 log = logging.getLogger(__name__)
@@ -106,8 +107,10 @@ class Reconciler:
         stores: List[StoreConfig],
         sessions: sessionmaker,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        groups: Optional[Groups] = None,
     ):
         self.stores = {store.name: store for store in stores}
+        self.groups = groups or Groups()
         self.sessions = sessions
         self.now = now
 
@@ -252,6 +255,7 @@ class Reconciler:
             session.flush()
         row.prefix = prefix
         row.last_seen = now
+        row.group_name = self.groups.of(store.name, segment)
         summary.deployments += 1
 
         self._reports(session, client, store, segment, listing, summary)

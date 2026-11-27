@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel
-from sqlalchemy import and_, false, select, tuple_
+from sqlalchemy import and_, select, tuple_
 from sqlalchemy.orm import Session
 from tfworker.backends.lock import LockInfo, WorkerLease
 
@@ -34,23 +34,15 @@ class Scope:
     """
     Narrows every view to some stores, deployments and groups; empty means all.
 
-    ``members`` holds the (store, deployment) pairs in the chosen groups, as
-    resolved by `resolve`; ``resolver`` places deployments in groups.
+    Groups filter in SQL on each deployment's stored group, so a scope works
+    the same however many deployments a group holds. ``resolver`` places
+    deployments in groups for display and policy.
     """
 
     stores: List[str] = field(default_factory=list)
     deployments: List[str] = field(default_factory=list)
     groups: List[str] = field(default_factory=list)
     resolver: Groups = field(default_factory=Groups)
-    members: Optional[List[Tuple[str, str]]] = None
-
-    def resolve(self, session: Session) -> "Scope":
-        if self.groups:
-            known = session.execute(select(db.Deployment.store, db.Deployment.name))
-            self.members = self.resolver.members(
-                self.groups, [tuple(row) for row in known]
-            )
-        return self
 
     def where(self, model, deployment=None):
         deployment = deployment if deployment is not None else model.deployment
@@ -59,12 +51,14 @@ class Scope:
             clauses.append(model.store.in_(self.stores))
         if self.deployments:
             clauses.append(deployment.in_(self.deployments))
-        if self.members is not None:
-            clauses.append(
-                tuple_(model.store, deployment).in_(self.members)
-                if self.members
-                else false()
-            )
+        if self.groups:
+            if model is db.Deployment:
+                clauses.append(db.Deployment.group_name.in_(self.groups))
+            else:
+                members = select(db.Deployment.store, db.Deployment.name).where(
+                    db.Deployment.group_name.in_(self.groups)
+                )
+                clauses.append(tuple_(model.store, deployment).in_(members))
         return clauses
 
     def group(self, store: str, deployment: str) -> str:
@@ -152,8 +146,12 @@ class PlanView(BaseModel):
     destroy: bool
     created_at: datetime
     expires_at: Optional[datetime] = None
-    # pending, but past its own expiry or its group's plan TTL
+    # pending past the manifest's expiry; the worker will refuse to apply it
     expired: bool = False
+    # when the plan passes its group's plan TTL, and whether it has; the
+    # worker still applies it, so it stays pending and is flagged for cleanup
+    ttl_expires_at: Optional[datetime] = None
+    over_ttl: bool = False
     add: int = 0
     change: int = 0
     destroy_count: int = 0
@@ -272,7 +270,7 @@ def _pending_keys(session: Session, scope: Scope, now: datetime) -> set:
     return {
         (row.store, row.deployment, row.definition)
         for row in session.scalars(query)
-        if row.body.get("storage") != "preview" and not _plan_expired(row, now, scope)
+        if row.body.get("storage") != "preview" and not _plan_expired(row, now)
     }
 
 
@@ -368,8 +366,10 @@ def deployments(
 
 def groups(session: Session, scope: Scope, now: datetime) -> List[GroupView]:
     """Every group in sort order with its policy, members and health counts."""
+    # every group is listed, so a group scope does not narrow this view
+    unscoped = Scope(scope.stores, scope.deployments, resolver=scope.resolver)
     members: Dict[str, List[DeploymentSummary]] = defaultdict(list)
-    for summary in deployments(session, scope, now):
+    for summary in deployments(session, unscoped, now):
         members[summary.group].append(summary)
     result = []
     for name in scope.resolver.names:
@@ -440,25 +440,28 @@ def locks(
     return [view for view in views if not state or view.state == state]
 
 
-def _plan_expires(row: db.Plan, scope: Scope) -> Optional[datetime]:
-    """The earlier of the manifest's own expiry and its group's plan TTL."""
+def _plan_expired(row: db.Plan, now: datetime) -> bool:
+    """Pending past the manifest's own expiry, so the worker will refuse it."""
+    expires_at = row.body.get("expires_at")
+    return (
+        row.status == "pending"
+        and expires_at is not None
+        and now >= datetime.fromisoformat(expires_at)
+    )
+
+
+def _ttl_expires(row: db.Plan, scope: Scope) -> Optional[datetime]:
+    """When a saved plan passes its group's plan TTL; previews have none."""
     policy = scope.resolver.policy(row.store, row.deployment)
-    expires = []
-    if row.body.get("expires_at"):
-        expires.append(datetime.fromisoformat(row.body["expires_at"]))
-    if policy.plan_ttl is not None:
-        expires.append(row.created_at + timedelta(seconds=policy.plan_ttl))
-    return min(expires, default=None)
-
-
-def _plan_expired(row: db.Plan, now: datetime, scope: Scope) -> bool:
-    expires_at = _plan_expires(row, scope)
-    return row.status == "pending" and expires_at is not None and now >= expires_at
+    if policy.plan_ttl is None or row.body.get("storage") == "preview":
+        return None
+    return row.created_at + timedelta(seconds=policy.plan_ttl)
 
 
 def _plan_view(row: db.Plan, now: datetime, scope: Scope) -> PlanView:
     body = row.body
     changes = body.get("changes") or {}
+    ttl_expires_at = _ttl_expires(row, scope)
     return PlanView(
         store=row.store,
         deployment=row.deployment,
@@ -470,8 +473,12 @@ def _plan_view(row: db.Plan, now: datetime, scope: Scope) -> PlanView:
         storage=body.get("storage", "backend"),
         destroy=body.get("destroy", False),
         created_at=row.created_at,
-        expires_at=_plan_expires(row, scope),
-        expired=_plan_expired(row, now, scope),
+        expires_at=body.get("expires_at"),
+        expired=_plan_expired(row, now),
+        ttl_expires_at=ttl_expires_at,
+        over_ttl=row.status == "pending"
+        and ttl_expires_at is not None
+        and now >= ttl_expires_at,
         add=changes.get("add", 0),
         change=changes.get("change", 0),
         destroy_count=changes.get("destroy", 0),

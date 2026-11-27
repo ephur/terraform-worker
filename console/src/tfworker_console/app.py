@@ -1,7 +1,9 @@
+import logging
 from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI
+from sqlalchemy.exc import SQLAlchemyError
 from tfworker.report import PLAN_SCHEMA, RUN_SCHEMA, STATUS_SCHEMA
 
 from . import api, version, web
@@ -11,6 +13,17 @@ from .reconcile import Reconciler
 from .scheduler import ReconcileScheduler
 from .settings import ConsoleSettings
 from .stores import load_stores
+
+log = logging.getLogger(__name__)
+
+
+def _assign_groups(sessions, groups) -> None:
+    """Bring every deployment's stored group in line with the groups file."""
+    try:
+        with sessions() as session:
+            groups.assign(session)
+    except SQLAlchemyError as e:
+        log.warning(f"unable to assign deployment groups (run db upgrade?): {e}")
 
 
 def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
@@ -33,8 +46,16 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
     app.state.groups = load_groups(settings.groups_file)
     if settings.database_url:
         app.state.sessions = session_factory(engine_for(settings.database_url))
+        stores = load_stores(settings.stores_file)
+        unknown = app.state.groups.unknown_stores(store.name for store in stores)
+        if unknown:
+            log.warning(
+                f"the groups file names stores that are not configured: "
+                f"{', '.join(unknown)}"
+            )
+        _assign_groups(app.state.sessions, app.state.groups)
         app.state.reconciler = Reconciler(
-            load_stores(settings.stores_file), app.state.sessions
+            stores, app.state.sessions, groups=app.state.groups
         )
         if settings.reconcile_interval > 0 and app.state.reconciler.stores:
             app_state["scheduler"] = ReconcileScheduler(

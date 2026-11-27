@@ -97,12 +97,12 @@ rather than in the database, so a rebuild of the projection keeps it.
 ```yaml
 groups:                 # listed in fleet sort order
   - name: Production
-    plan_ttl: 1d        # pending plans older than this show as expired
+    plan_ttl: 1d        # pending saved plans older than this are flagged
     force_unlock: admins
   - name: Sandbox
     force_unlock: operators
 rules:                  # first match wins
-  - match: "prod-*"     # a case-sensitive glob on the deployment
+  - match: "prod-*"     # a case-sensitive glob: *, ? and [...]
     group: Production
   - store: dev          # optionally only in one store
     match: "*"
@@ -111,7 +111,9 @@ deployments:            # by hand; wins over every rule
   prod/legacy-app: Production
 ```
 
-Each deployment belongs to exactly one group. A deployment that no
+Group names are compared without regard to case. Each deployment belongs to exactly one group, and its group is stored
+with it at startup and on every reconcile, so scoping by group filters in the
+database. A deployment that no
 assignment or rule names goes into **Unassigned**, which sorts last and gets
 the default policy: no plan TTL, and only admins may force-unlock.
 
@@ -120,8 +122,10 @@ Groups affect the console in these ways:
 - Within each health level, the fleet sorts by group order.
 - `GET /api/v1/groups` and `/groups` list each group's policy, members and
   health counts.
-- A group's plan TTL marks older pending plans as expired, so they no longer
-  count as pending.
+- A group's plan TTL flags older pending saved plans as `over_ttl`, with their
+  `ttl_expires_at`, for cleanup. The worker still applies them, so they still
+  count as pending. A plan's own `expires_at` and `expired` are the
+  manifest's. Previews have no TTL.
 - Each lock shows who may force-unlock it. Roles (#237) enforce that, and
   role mappings can be scoped to groups.
 
