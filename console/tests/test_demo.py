@@ -55,7 +55,7 @@ class TestDemo:
         assert fleet["counts"] == {
             "failing": 1,
             "drifted": 1,
-            "pending": 1,
+            "pending": 2,
             "locked": 2,
             "ok": 8,
         }
@@ -67,7 +67,7 @@ class TestDemo:
         over = [
             p["plan_id"] for p in client.get("/api/v1/plans").json() if p["over_ttl"]
         ]
-        assert over == ["payments-database-8"]
+        assert over == ["edge-cdn-10"]
         weeks = client.get("/api/v1/tracking/local-modules").json()
         assert any(week["local"] for week in weeks)
 
@@ -101,6 +101,34 @@ class TestDemo:
             with pytest.raises(demo.DemoRefused, match="empty database"):
                 demo.seed(session, datetime.now(timezone.utc))
 
+    def test_a_store_alone_is_data(self, engine):  # noqa: F811
+        # a real store whose first reconcile found nothing yet
+        with db.session_factory(engine)() as session:
+            session.add(
+                db.Store(
+                    name="demo-prod",
+                    region="us-east-1",
+                    bucket="b",
+                    prefix="p/{deployment}",
+                    credentials="ambient",
+                )
+            )
+            session.commit()
+            with pytest.raises(demo.DemoRefused):
+                demo.seed(session, datetime.now(timezone.utc))
+
+    def test_a_racing_replica(self, tmp_path, mocker):
+        TestClient(create_app(standalone(tmp_path)))
+        # the other replica's seed won: this one finds the demo already there
+        mocker.patch.object(demo, "is_seeded", side_effect=[False, True])
+        TestClient(create_app(standalone(tmp_path)))
+
+    def test_dropping_the_flag_removes_the_demo(self, tmp_path, caplog):
+        TestClient(create_app(standalone(tmp_path)))
+        plain = TestClient(create_app(standalone(tmp_path, demo=False)))
+        assert not any(plain.get("/api/v1/fleet").json()["counts"].values())
+        assert "removed the demo data" in caplog.text
+
     def test_it_seeds_once(self, engine):  # noqa: F811
         now = datetime.now(timezone.utc)
         with db.session_factory(engine)() as session:
@@ -133,6 +161,12 @@ def test_without_auto_migrate_the_schema_is_left_alone(tmp_path):
     settings = standalone(tmp_path, demo=False, auto_migrate=False)
     create_app(settings)
     assert inspect(db.engine_for(settings.database_url)).get_table_names() == []
+
+
+def test_the_demo_migrates_by_itself(tmp_path):
+    settings = standalone(tmp_path, auto_migrate=False)
+    fleet = TestClient(create_app(settings)).get("/api/v1/fleet").json()
+    assert fleet["counts"]["failing"] == 1
 
 
 def test_serve_demo(monkeypatch):

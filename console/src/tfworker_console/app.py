@@ -8,7 +8,7 @@ from urllib.parse import urlencode, urlsplit
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.middleware.sessions import SessionMiddleware
 from tfworker.report import PLAN_SCHEMA, RUN_SCHEMA, STATUS_SCHEMA
 
@@ -33,6 +33,28 @@ def _assign_groups(sessions, groups) -> None:
             groups.assign(session)
     except SQLAlchemyError as e:
         log.warning(f"unable to assign deployment groups (run db upgrade?): {e}")
+
+
+def _seed_demo(sessions) -> None:
+    with sessions() as session:
+        try:
+            if demo.seed(session, datetime.now(timezone.utc)):
+                log.info("seeded the demo data")
+        except IntegrityError:
+            # another replica seeded it first
+            session.rollback()
+            demo.is_seeded(session)
+
+
+def _forget_demo(sessions) -> None:
+    """A demo left behind would pass for real data once the flag is off."""
+    try:
+        with sessions() as session:
+            gone = demo.forget(session)
+    except SQLAlchemyError:
+        return  # no schema yet; nothing to forget
+    if gone:
+        log.warning(f"removed the demo data left in the database: {', '.join(gone)}")
 
 
 CSP = (
@@ -140,13 +162,14 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
             app.state.groups = demo.GROUPS
     if settings.database_url:
         engine = engine_for(settings.database_url)
-        if settings.auto_migrate:
+        # the demo starts from nothing, so it always brings the schema up
+        if settings.auto_migrate or settings.demo:
             upgrade(engine)
         app.state.sessions = session_factory(engine)
         if settings.demo:
-            with app.state.sessions() as session:
-                if demo.seed(session, datetime.now(timezone.utc)):
-                    log.info("seeded the demo data")
+            _seed_demo(app.state.sessions)
+        else:
+            _forget_demo(app.state.sessions)
         stores = load_stores(settings.stores_file)
         unknown = app.state.groups.unknown_stores(store.name for store in stores)
         if unknown and not settings.demo:

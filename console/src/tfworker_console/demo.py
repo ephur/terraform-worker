@@ -5,10 +5,11 @@ state to use. Records are projected the same way the reconciler projects a
 store, so what you see is what real data would look like.
 """
 
+import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from tfworker.report import (
     BackendLocation,
@@ -25,11 +26,11 @@ from tfworker.report.status import merge_status
 
 from . import db
 from .groups import Group, Groups, GroupsFile, Rule
-from .reconcile import Reconciler
+from .reconcile import PROJECTED, Reconciler
 
-# demo stores are named with this prefix, so a seeded database can be told
-# apart from a real one
-PREFIX = "demo-"
+# demo stores carry this in place of a credentials kind, which no real store
+# can have, so a seeded database can be told apart from a real one
+MARKER = "demo"
 STORES = {"demo-prod": "us-east-1", "demo-dev": "us-west-2"}
 MODULES = "git::https://example.com/terraform-modules.git"
 
@@ -51,17 +52,42 @@ class DemoRefused(Exception):
     """The database already holds data that is not the demo's."""
 
 
+def _stores_in(session: Session) -> set:
+    """Every store any projected row belongs to."""
+    stores = set(session.scalars(select(db.Store.name)))
+    for model in PROJECTED + (db.Deployment,):
+        stores |= set(session.scalars(select(model.store).distinct()))
+    return stores
+
+
+def _demo_stores(session: Session) -> set:
+    return set(
+        session.scalars(select(db.Store.name).where(db.Store.credentials == MARKER))
+    )
+
+
 def is_seeded(session: Session) -> bool:
     """Whether the database holds the demo, and nothing else."""
-    stores = set(session.scalars(select(db.Deployment.store).distinct()))
+    stores = _stores_in(session)
     if not stores:
         return False
-    if all(store.startswith(PREFIX) for store in stores):
+    if stores <= _demo_stores(session):
         return True
     raise DemoRefused(
         "the database already holds projected data; the demo only seeds an "
         "empty database"
     )
+
+
+def forget(session: Session) -> List[str]:
+    """Remove a demo left in the database, returning the stores removed."""
+    gone = sorted(_demo_stores(session))
+    for name in gone:
+        for model in PROJECTED + (db.Deployment,):
+            session.execute(delete(model).where(model.store == name))
+        session.execute(delete(db.Store).where(db.Store.name == name))
+    session.commit()
+    return gone
 
 
 def _phase(action: str, status: str, at: datetime, reason=None) -> PhaseResult:
@@ -96,7 +122,7 @@ def _result(
                 source="../modules/" + definition if local else MODULES,
                 kind="local" if local else "git",
                 ref=None if local else ref,
-                sha=None if local else (ref.replace(".", "") * 10)[:40],
+                sha=None if local else hashlib.sha1(ref.encode()).hexdigest(),
             )
         ],
         tags=[LOCAL_MODULE_TAG] if local else [],
@@ -225,6 +251,30 @@ def _runs(now: datetime) -> List[Tuple[str, RunRecord]]:
             ),
         )
     )
+    # edge/cdn was planned and saved more than a day ago and nobody has
+    # approved it: pending, and over Production's one-day TTL (see _plans)
+    at = now - 30 * hour
+    runs.append(
+        (
+            "demo-prod",
+            _record(
+                "edge",
+                10,
+                at,
+                [
+                    _result(
+                        "edge",
+                        "cdn",
+                        [
+                            _phase("plan", "succeeded", at),
+                            _phase("apply", "skipped", at, "saved for approval"),
+                        ],
+                        changes=small,
+                    )
+                ],
+            ),
+        )
+    )
     # sandboxes: one on a newer module, one applied from a local checkout
     for deployment, offset, local, ref in (
         ("sandbox-ana", 26, False, "v1.6.0-rc1"),
@@ -338,7 +388,7 @@ def seed(session: Session, now: datetime) -> bool:
                 region=region,
                 bucket=f"{name}-terraform-state",
                 prefix="terraform/state/{deployment}",
-                credentials="ambient",
+                credentials=MARKER,
                 reconciled_at=now,
             )
         )
@@ -394,7 +444,7 @@ def seed(session: Session, now: datetime) -> bool:
         [
             # awaiting approval, and over Production's one-day TTL
             _plan("demo-prod", "edge", "network", 9, now - 3 * hour),
-            _plan("demo-prod", "payments", "database", 8, now - 30 * hour),
+            _plan("demo-prod", "edge", "cdn", 10, now - 30 * hour),
             # a preview and plans that have moved on
             _plan("demo-prod", "search", "service", 9, now - 5 * hour, "preview"),
             _plan("demo-prod", "edge", "network", 7, now - 50 * hour, status="applied"),
