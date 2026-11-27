@@ -1,0 +1,54 @@
+name: Docker
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - pyproject.toml
+      - uv.lock
+      - tfworker/**
+      - .github/workflows/docker.yml
+  push:
+    branches:
+      - master
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/docker.yml
+
+jobs:
+  build:
+    name: Build image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Work out the package version
+        id: version
+        run: |
+          # only an exact release tag is a valid PEP 440 version; otherwise use the fallback
+          version="$(git describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null | sed 's/^v//' || true)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: terraform-worker:ci
+          build-args: |
+            TFWORKER_VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: |
+          docker run --rm terraform-worker:ci -c 'worker --version && worker --help >/dev/null && terraform version'
