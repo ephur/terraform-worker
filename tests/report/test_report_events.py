@@ -55,6 +55,10 @@ class TestEnvelope:
         assert event["time"].endswith("+00:00")
 
 
+def test_source_is_a_uri_reference():
+    assert events.source("my dep/é") == "urn:tfworker:deployment:my%20dep%2F%C3%A9"
+
+
 class TestPublish:
     def test_every_sink_gets_the_event(self):
         first, second = Sink(), Sink()

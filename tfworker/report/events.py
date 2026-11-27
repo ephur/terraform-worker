@@ -11,6 +11,7 @@ event reconciles from it.
 import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Protocol, Union
+from urllib.parse import quote
 
 from pydantic import BaseModel
 
@@ -57,7 +58,7 @@ def reset() -> None:
 
 
 def source(deployment: str) -> str:
-    return f"urn:tfworker:deployment:{deployment}"
+    return f"urn:tfworker:deployment:{quote(deployment, safe='')}"
 
 
 def cloudevent(

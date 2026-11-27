@@ -179,9 +179,15 @@ class TestSQSHandlerExecute:
 
 
 class TestSQSConfigFormats:
-    def test_legacy_needs_queues(self):
-        with pytest.raises(ValueError, match="queues are required"):
-            SQSConfig()
+    def test_legacy_allows_empty_queues(self):
+        assert SQSConfig(queues=[]).queues == []
+        assert SQSConfig(queues={}).queues == {}
+
+    def test_empty_types_are_rejected(self):
+        with pytest.raises(ValueError):
+            SQSConfig(format="cloudevents", event_bus="bus", types=[])
+        with pytest.raises(ValueError):
+            QueueRule(types=[])
 
     def test_legacy_rejects_cloudevents_options(self):
         with pytest.raises(ValueError, match="format: cloudevents"):
@@ -346,3 +352,45 @@ class TestSQSHandlerCloudEvents:
         handler._app_state = MagicMock(authenticators={})
         with pytest.raises(ValueError, match="AWS authenticator"):
             _ = handler.events_client
+
+
+class TestCloudEventsDelivery:
+    def test_content_type_and_timeouts(self, aws_events):
+        sqs, _ = aws_events
+        url = sqs.create_queue(QueueName="typed")["QueueUrl"]
+        handler = SQSHandler(SQSConfig(format="cloudevents", queues=[url]))
+        handler.send(_event())
+        found = sqs.receive_message(QueueUrl=url, MessageAttributeNames=["All"])
+        attributes = found["Messages"][0]["MessageAttributes"]
+        assert attributes["content-type"]["StringValue"] == (
+            "application/cloudevents+json"
+        )
+        config = handler.sqs_client.meta.config
+        assert config.connect_timeout == 5
+        assert config.retries["total_max_attempts"] == 2
+
+    def test_legacy_clients_keep_boto_defaults(self):
+        handler = SQSHandler.__new__(SQSHandler)
+        handler.config = SQSConfig(queues=["q"])
+        assert handler._client_config() is None
+
+    def test_a_failing_queue_does_not_stop_the_others(self, aws_events):
+        sqs, bridge = aws_events
+        bridge.create_event_bus(Name="tfworker")
+        gone = sqs.create_queue(QueueName="gone2")["QueueUrl"]
+        kept = sqs.create_queue(QueueName="kept")["QueueUrl"]
+        handler = SQSHandler(
+            SQSConfig(format="cloudevents", queues=[gone, kept], event_bus="tfworker")
+        )
+        sqs.delete_queue(QueueUrl=gone)
+        with (
+            patch.object(
+                handler.events_client,
+                "put_events",
+                wraps=handler.events_client.put_events,
+            ) as put,
+            patch("tfworker.handlers.sqs.log.error"),
+        ):
+            handler.send(_event())
+        assert len(_messages(sqs, kept)) == 1
+        put.assert_called_once()
