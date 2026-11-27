@@ -24,10 +24,11 @@ router = APIRouter(include_in_schema=False)
 
 
 def _render(request: Request, name: str, session: Session, scope: Scope, **context):
+    visible = Scope(resolver=scope.resolver, allowed=scope.allowed)
     deployments = session.execute(
-        select(db.Deployment.store, db.Deployment.name).order_by(
-            db.Deployment.store, db.Deployment.name
-        )
+        select(db.Deployment.store, db.Deployment.name)
+        .where(*visible.where(db.Deployment, db.Deployment.name))
+        .order_by(db.Deployment.store, db.Deployment.name)
     ).all()
     # htmx swaps only the content when the picker or a filter changes, but a
     # history restore needs the whole page back
@@ -40,9 +41,15 @@ def _render(request: Request, name: str, session: Session, scope: Scope, **conte
         name,
         {
             "partial": partial,
+            "principal": getattr(request.state, "principal", None),
+            "dev_mode": request.app.state.settings.auth == "none",
             "scope": scope,
             "stores": sorted({store for store, _ in deployments}),
-            "groups": scope.resolver.names,
+            "groups": [
+                name
+                for name in scope.resolver.names
+                if scope.allowed is None or name in scope.allowed
+            ],
             "all_deployments": sorted({name for _, name in deployments}),
             # appended to links so the scope follows navigation
             "scope_query": urlencode(

@@ -6,10 +6,13 @@ terraform. It lives in the terraform-worker repository as its own package, so
 installing `terraform-worker` never pulls in web dependencies. It ships on its
 own `console-v*` tags, but depends on the worker from the same commit.
 
-Develop from the repository root:
+Develop from the repository root, without an identity provider:
 
     uv sync --all-packages
-    uv run --package tfworker-console tfworker-console serve --reload
+    TFWORKER_CONSOLE_AUTH=none uv run --package tfworker-console tfworker-console serve --reload
+
+`TFWORKER_CONSOLE_AUTH=none` is development mode: everyone is an admin and
+every screen shows a banner saying so. See [Sign-in and roles](#sign-in-and-roles).
 
 Settings come from `TFWORKER_CONSOLE_*` environment variables, for example
 `TFWORKER_CONSOLE_PORT=8080`.
@@ -84,9 +87,8 @@ state is judged as of the reconcile that saw it, and each lock shows how long
 ago that was. Times are stored and returned in UTC on every database.
 
 `POST /api/v1/reconcile[?store=NAME]` reconciles now instead of waiting for
-the schedule and returns each store's summary. Until roles arrive (#237) the
-console has no access control, so serve it only where everyone who can reach
-it may see every store.
+the schedule and returns each store's summary. It needs the admin role on
+every group.
 
 ## Deployment groups
 
@@ -126,6 +128,104 @@ Groups affect the console in these ways:
   `ttl_expires_at`, for cleanup. The worker still applies them, so they still
   count as pending. A plan's own `expires_at` and `expired` are the
   manifest's. Previews have no TTL.
-- Each lock shows who may force-unlock it. Roles (#237) enforce that, and
-  role mappings can be scoped to groups.
+- Each lock shows who may force-unlock it, and roles can be granted on
+  only some groups (see below).
 
+
+## Sign-in and roles
+
+There are three roles. Viewers read everything they can see, operators also
+act on plans, and admins also manage locks, the projection, accounts and
+tokens. A role is granted on every group or only on named groups, so a person
+can be an operator in Sandbox and a viewer everywhere else; they see only the
+groups some grant names. `GET /api/v1/me` shows the caller and their grants.
+
+`TFWORKER_CONSOLE_AUTH` picks how people sign in:
+
+| Mode | Who signs in |
+|---|---|
+| `local` (default) | accounts in the console's database, with a password and an optional one-time code |
+| `oidc` | single sign-on through an OpenID Connect provider such as Okta, Entra ID, Keycloak or Dex; local accounts still work unless SSO is enforced |
+| `none` | nobody: everyone is an admin. For development only |
+
+Every mode but `none` needs `TFWORKER_CONSOLE_SECRET_KEY`, a long random
+string that signs the session cookie. Sessions last
+`TFWORKER_CONSOLE_SESSION_MAX_AGE` seconds (8 hours). The cookie is sent only
+over HTTPS unless `TFWORKER_CONSOLE_SECURE_COOKIES=false`, which plain-HTTP
+testing needs.
+
+### Development mode
+
+With `TFWORKER_CONSOLE_AUTH=none` the console refuses to start unless it
+listens on loopback (`127.0.0.1`, `::1` or `localhost`). In a container that
+must listen on `0.0.0.0`, set `TFWORKER_CONSOLE_AUTH_ALLOW_REMOTE_NONE=true`
+and publish the port on loopback only, such as `-p 127.0.0.1:8000:8000`.
+
+### Local accounts
+
+Create the first admin from the command line, then sign in at `/login`:
+
+    tfworker-console users create alice --role admin           # prompts for a password
+    tfworker-console users create bob --role operator --group Sandbox --totp
+    tfworker-console users grant bob --role viewer             # add a grant
+    tfworker-console users grant bob --role admin --replace    # replace every grant
+    tfworker-console users set-password bob
+    tfworker-console users disable bob
+    tfworker-console users list
+
+Passwords are hashed with argon2id. `--totp` prints a secret and an
+`otpauth://` URI for an authenticator app, and sign-in then needs the code.
+Role changes and disabled accounts take effect on the account's next request.
+
+### Single sign-on
+
+Register the console with the provider as a web application using the
+authorization code flow, with the redirect URI `<public URL>/auth/callback`,
+and have it put the user's groups in the ID token. Then:
+
+    TFWORKER_CONSOLE_AUTH=oidc
+    TFWORKER_CONSOLE_PUBLIC_URL=https://console.example.com
+    TFWORKER_CONSOLE_OIDC_ISSUER=https://example.okta.com/oauth2/default
+    TFWORKER_CONSOLE_OIDC_CLIENT_ID=...
+    TFWORKER_CONSOLE_OIDC_CLIENT_SECRET=...     # leave out for a public client
+    TFWORKER_CONSOLE_ROLES_FILE=/etc/tfworker-console/roles.yaml
+
+The console uses PKCE, and checks the ID token's signature against the
+provider's published keys, its issuer, audience, expiry and nonce. The name
+comes from `TFWORKER_CONSOLE_OIDC_USERNAME_CLAIM` (`preferred_username`,
+falling back to `sub`) and the groups from `TFWORKER_CONSOLE_OIDC_GROUPS_CLAIM`
+(`groups`). The scopes requested are `TFWORKER_CONSOLE_OIDC_SCOPES`
+(`openid profile email groups`).
+
+The roles file maps values of the groups claim to roles:
+
+```yaml
+role_mappings:
+  - claim: tf-admins
+    role: admin
+  - claim: tf-sandbox
+    role: operator
+    groups: [Sandbox]   # only these deployment groups; leave out for every group
+  - claim: engineering
+    role: viewer
+```
+
+Someone whose groups map to no role cannot sign in. Roles are read from the
+groups claim at each sign-in. An SSO sign-in cannot take the name of a local
+account.
+
+With `TFWORKER_CONSOLE_SSO_ENFORCED=true`, local passwords work only for
+accounts created with `--break-glass`, for when the provider is down. Give
+those accounts a one-time code too.
+
+### API tokens
+
+Integrations send `Authorization: Bearer <token>` to `/api/v1`:
+
+    tfworker-console tokens create backstage --role viewer --expires-in 90d
+    tfworker-console tokens create ci --role operator --group Sandbox
+    tfworker-console tokens list
+    tfworker-console tokens revoke backstage
+
+The token is printed once; the console keeps only its SHA-256 hash.
+Rebuilding the projection keeps accounts and tokens.

@@ -8,10 +8,10 @@ models, which the JSON API serves as they are and the screens render.
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Set, Tuple
 
 from pydantic import BaseModel
-from sqlalchemy import and_, select, tuple_
+from sqlalchemy import and_, false, select, tuple_
 from sqlalchemy.orm import Session
 from tfworker.backends.lock import LockInfo, WorkerLease
 
@@ -43,6 +43,19 @@ class Scope:
     deployments: List[str] = field(default_factory=list)
     groups: List[str] = field(default_factory=list)
     resolver: Groups = field(default_factory=Groups)
+    # the groups the caller may see; None means every group
+    allowed: Optional[Set[str]] = None
+
+    @property
+    def wanted(self) -> Optional[List[str]]:
+        """The groups to filter to, None for no group filter."""
+        if self.allowed is None:
+            return self.groups or None
+        return [
+            name
+            for name in (self.groups or sorted(self.allowed))
+            if name in self.allowed
+        ]
 
     def where(self, model, deployment=None):
         deployment = deployment if deployment is not None else model.deployment
@@ -51,12 +64,15 @@ class Scope:
             clauses.append(model.store.in_(self.stores))
         if self.deployments:
             clauses.append(deployment.in_(self.deployments))
-        if self.groups:
-            if model is db.Deployment:
-                clauses.append(db.Deployment.group_name.in_(self.groups))
+        wanted = self.wanted
+        if wanted is not None:
+            if not wanted:
+                clauses.append(false())
+            elif model is db.Deployment:
+                clauses.append(db.Deployment.group_name.in_(wanted))
             else:
                 members = select(db.Deployment.store, db.Deployment.name).where(
-                    db.Deployment.group_name.in_(self.groups)
+                    db.Deployment.group_name.in_(wanted)
                 )
                 clauses.append(tuple_(model.store, deployment).in_(members))
         return clauses
@@ -367,13 +383,20 @@ def deployments(
 def groups(session: Session, scope: Scope, now: datetime) -> List[GroupView]:
     """Every group in sort order with its policy, members and health counts."""
     # a group scope picks which groups are listed; each lists all its members
-    unscoped = Scope(scope.stores, scope.deployments, resolver=scope.resolver)
+    unscoped = Scope(
+        scope.stores,
+        scope.deployments,
+        resolver=scope.resolver,
+        allowed=scope.allowed,
+    )
     members: Dict[str, List[DeploymentSummary]] = defaultdict(list)
     for summary in deployments(session, unscoped, now):
         members[summary.group].append(summary)
     result = []
     for name in scope.resolver.names:
         if scope.groups and name not in scope.groups:
+            continue
+        if scope.allowed is not None and name not in scope.allowed:
             continue
         group = scope.resolver.group(name)
         counts = {health: 0 for health in HEALTH_ORDER}
