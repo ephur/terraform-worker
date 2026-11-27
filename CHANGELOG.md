@@ -8,7 +8,12 @@
   - `google-cloud-storage` is no longer a dependency.
 - `terraform_vars` are now written to `worker_generated.auto.tfvars.json` instead of `worker_generated.auto.tfvars` (#186). Values keep their YAML types and are no longer interpolated by terraform, so quotes, backslashes, `${` and `%{` are passed through as-is. Booleans and numbers inside lists and maps are now real values instead of strings, and a YAML null now leaves the variable unset instead of passing `"None"`. Hooks that parse `TF_VAR_*` lists or maps as JSON will see the same change.
 
-## Bug fixes
+## Features
+- Apply and destroy failure policy (#195). `--apply-failures/--no-apply-failures` (`WORKER_APPLY_FAILURES`) and `--fail-on-apply-error/--no-fail-on-apply-error` (`WORKER_FAIL_ON_APPLY_ERROR`) work like the init and plan options. Both default to true, which keeps today's behavior: the first failed apply or destroy stops the phase and the run exits non-zero. With `--no-apply-failures`, a failed definition is recorded, its ERROR stage is dispatched, the remaining definitions are still applied, and every failure is reported at the end of the phase.
+  - A failing PRE or POST apply/destroy hook, and a failing `always_apply` apply during the plan phase, count as that definition's apply failure and follow the same options.
+  - Definitions carry `apply_failed` (attempted and failed) and `apply_skipped` (had a plan, but a halt stopped the phase before it). A definition with nothing to apply has neither.
+  - A failed apply or destroy hook now exits with code 1, like every other phase failure, instead of 2.
+
 - Without `--working-dir`, terraform init/plan/apply, plan JSON output and provider mirroring now run in the resolved temporary working directory instead of `<cwd>/None/...`. The temporary directory is created with `mkdtemp`, so it exists for the whole run, and it is removed at exit (#181).
 - A `.tf` and `.tf.j2` file with the same name now raises the intended "already exists" error instead of `UnboundLocalError` (#182).
 - A failing handler setup or teardown no longer stops the other handlers. Every handler is torn down, a teardown error no longer replaces the run's original failure, and a terminating `HandlerError` in setup or teardown exits with code 1 instead of a traceback. An unexpected (non-`HandlerError`) exception in setup is now logged and the run continues (#188).

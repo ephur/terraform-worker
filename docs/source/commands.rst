@@ -236,6 +236,34 @@ The **\\-\\-no-destroy** flag will prevent each terraform definition from execut
 flag will cause ``terraform destroy`` to be executed. ``destroy`` will only be called when ``--destroy`` is passed, so
 ``--no-destroy`` has no effect.
 
+\\-\\-apply-failures / \\-\\-no-apply-failures
+++++++++++++++++++++++++++++++++++++++++++++++
+
+.. index::
+   triple: terraform; options; --no-apply-failures
+.. index::
+   triple: terraform; options; --apply-failures
+
+The **\\-\\-apply-failures** flag stops the apply or destroy phase at the first definition that fails,
+and the definitions after it are not attempted. With **\\-\\-no-apply-failures** every definition with a
+plan is attempted, and all failures are reported together when the phase ends. A failing apply or destroy
+hook counts as a failure of its definition.
+
+By default, the **\\-\\-apply-failures** option is active.
+
+\\-\\-fail-on-apply-error / \\-\\-no-fail-on-apply-error
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+.. index::
+   triple: terraform; options; --no-fail-on-apply-error
+.. index::
+   triple: terraform; options; --fail-on-apply-error
+
+The **\\-\\-fail-on-apply-error** flag makes the worker exit non-zero when any definition failed to apply
+or destroy. **\\-\\-no-fail-on-apply-error** reports the failures and lets the run finish successfully.
+
+By default, the **\\-\\-fail-on-apply-error** option is active.
+
 \\-\\-show-output / \\-\\-no-show-output
 ++++++++++++++++++++++++++++++++++++++++
 
