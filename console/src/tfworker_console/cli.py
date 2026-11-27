@@ -270,9 +270,15 @@ def tokens_create(name, role, groups, expires_in, created_by) -> None:
     settings = ConsoleSettings()
     groups = _groups(settings, groups)
     now = _now()
-    expires = (
-        now + timedelta(seconds=parse_duration(expires_in)) if expires_in else None
-    )
+    expires = None
+    if expires_in is not None:
+        try:
+            seconds = parse_duration(expires_in)
+        except ValueError as e:
+            raise click.UsageError(f"--expires-in: {e}")
+        if seconds <= 0:
+            raise click.UsageError("--expires-in must be longer than zero")
+        expires = now + timedelta(seconds=seconds)
     token = new_token()
     with _sessions(settings)() as session:
         if session.get(db.ApiToken, name) is not None:
