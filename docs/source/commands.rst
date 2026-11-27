@@ -1,7 +1,7 @@
 Commands
 ========
 
-This section provides an explanation of the **version**, **terraform**, and **clean** commands
+This section provides an explanation of the **version**, **terraform**, **clean** and **plans** commands
 to **terraform-worker**.
 
 .. contents:: On this page
@@ -418,3 +418,73 @@ deployment
 
 The **deployment** argument specifies the name of the deployment to be used for the current operation. This value is used
 in as a part of the :ref:`backend-prefix` bucket key. A valid deployment value is no more than 16 characters.
+
+plans
+-----
+
+.. index::
+   pair: commands; plans
+
+The **plans** command group works on the saved plans of a deployment through their manifests (see
+"Saved plans and the apply gate" under :doc:`reporting`). It needs the ``s3`` backend. Each subcommand
+takes the **deployment** argument.
+
+plans list
+++++++++++
+
+.. index::
+   triple: plans commands; options; list
+
+Lists every saved plan record, oldest first: its id, definition, status, change counts, when it was
+made and expires, and the run that made it. ``--status`` (repeatable) and ``--definition`` narrow the
+list. ``--json`` prints the ``tfworker.plan/v1`` manifests instead.
+
+.. code-block:: bash
+
+   % worker --config-file ./worker.yaml plans list prod --status pending --json
+
+plans discard
++++++++++++++
+
+.. index::
+   triple: plans commands; options; discard
+
+Marks one or more pending plans ``discarded`` and removes their plan files, so no run can apply them,
+even a run that has already downloaded one. ``--reason`` is required and is kept in each plan's
+history. Only a pending plan can be discarded; the command exits non-zero if any plan was not found or
+was not pending.
+
+.. code-block:: bash
+
+   % worker --config-file ./worker.yaml plans discard prod 01JD3Z... --reason "superseded by a hotfix"
+
+plans gc
+++++++++
+
+.. index::
+   triple: plans commands; options; gc
+
+Retires the pending plans that can no longer be applied. It is meant to run as a scheduled job. Each
+pending plan is checked in turn:
+
+- **Orphaned.** The definition is no longer in the configuration, or the plan was made against a state
+  that no longer exists. The plan is marked ``discarded``.
+- **Expired.** The plan is past ``expires_at``. It is marked ``expired``.
+- **Stale.** The state moved since the plan was made. When the bucket is versioned and the state's
+  version id still matches the one recorded at plan time, nothing more is read; otherwise the state's
+  lineage and serial are compared. A stale plan is marked ``stale``, and the reason names the recorded
+  run that last applied the definition, or says the state changed outside a recorded run.
+
+``--applying-timeout`` (for example ``6h``) also marks plans that have been ``applying`` for longer
+than that ``failed``, which recovers plans left behind by a worker that was killed mid apply. This
+pass reads every plan record that has not changed for that long, so it costs more than the others.
+
+Every change is appended to the plan's history, and the plan file is removed. ``--dry-run`` reports
+what would be retired and changes nothing. ``--json`` prints a list of objects with ``plan_id``,
+``definition``, ``plan_key``, ``record_key``, ``check`` (``orphaned``, ``expired``, ``stale`` or
+``applying``), ``status``, ``reason`` and ``done``. ``done`` is false when another run changed the
+plan first.
+
+.. code-block:: bash
+
+   % worker --config-file ./worker.yaml plans gc prod --applying-timeout 6h

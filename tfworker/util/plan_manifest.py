@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterable, Optional, Set, Tuple
+from typing import Iterable, List, Optional, Set, Tuple
 from zipfile import BadZipFile, ZipFile
 
 import botocore.exceptions
@@ -134,8 +134,9 @@ class ManifestStore(ABC):
     ) -> None:
         """Write a manifest; raise ReportConflictError when a condition fails."""
 
-    def keys_for(self, definition: str) -> Iterable[str]:
-        """The manifest keys of a definition's pending backend plans."""
+    def keys_for(self, definition: Optional[str], prune: bool = True) -> Iterable[str]:
+        """The manifest keys of a definition's pending backend plans, or of all
+        pending backend plans when `definition` is None."""
         return []
 
     def retire(self, key: str, manifest: PlanManifest) -> None:
@@ -269,29 +270,21 @@ class S3ManifestStore(ManifestStore):
             raise BackendError(f"unable to write plan manifest {key}: {e}") from e
         self._update_index(key, manifest)
 
-    def keys_for(self, definition):
+    def keys_for(self, definition, prune=True):
         """
         Entries whose manifest is gone, no longer pending, or now describes
         another plan are pruned as they are found. An entry that can't be read
-        is skipped, so one bad entry never hides the others.
+        is skipped, so one bad entry never hides the others. With `prune` off,
+        nothing is deleted.
         """
-        index = f"{self._prefix}/{PENDING_DIR}/{definition}/"
+        index = f"{self._prefix}/{PENDING_DIR}/"
+        if definition is not None:
+            index += f"{definition}/"
         keys = []
-        try:
-            paginator = self._client.get_paginator("list_objects_v2")
-            entries = [
-                item["Key"]
-                for page in paginator.paginate(Bucket=self._bucket, Prefix=index)
-                for item in page.get("Contents", [])
-            ]
-        except (
-            botocore.exceptions.ClientError,
-            botocore.exceptions.BotoCoreError,
-        ) as e:
-            raise BackendError(f"unable to list pending plans: {e}") from e
+        entries = [key for key, _ in self._list(index, "pending plans")]
         for entry in entries:
             try:
-                key = self._entry_key(entry)
+                key = self._entry_key(entry, prune)
             except (
                 BackendError,
                 botocore.exceptions.ClientError,
@@ -303,7 +296,32 @@ class S3ManifestStore(ManifestStore):
                 keys.append(key)
         return keys
 
-    def _entry_key(self, entry: str) -> Optional[str]:
+    def records(self, definition: Optional[str] = None) -> List[Tuple[str, datetime]]:
+        """The keys of every plan record, with when each was last written."""
+        prefix = f"{self._prefix}/{RECORD_DIR}/"
+        if definition is not None:
+            prefix += f"{definition}/"
+        return [
+            (key, modified)
+            for key, modified in self._list(prefix, "plan records")
+            if key.endswith(".json")
+        ]
+
+    def _list(self, prefix: str, what: str) -> List[Tuple[str, datetime]]:
+        try:
+            paginator = self._client.get_paginator("list_objects_v2")
+            return [
+                (item["Key"], item["LastModified"])
+                for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix)
+                for item in page.get("Contents", [])
+            ]
+        except (
+            botocore.exceptions.ClientError,
+            botocore.exceptions.BotoCoreError,
+        ) as e:
+            raise BackendError(f"unable to list {what}: {e}") from e
+
+    def _entry_key(self, entry: str, prune: bool = True) -> Optional[str]:
         """The manifest an index entry names, pruning the entry if it is stale."""
         try:
             obj = self._client.get_object(Bucket=self._bucket, Key=entry)
@@ -320,7 +338,8 @@ class S3ManifestStore(ManifestStore):
             or manifest.status != "pending"
             or manifest.plan_id != entry.rsplit("/", 1)[-1]
         ):
-            self._client.delete_object(Bucket=self._bucket, Key=entry)
+            if prune:
+                self._client.delete_object(Bucket=self._bucket, Key=entry)
             return None
         return key
 
