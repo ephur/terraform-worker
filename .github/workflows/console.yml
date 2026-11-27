@@ -129,4 +129,6 @@ jobs:
 
       - name: Show the console's log
         if: always()
-        run: docker logs console || true
+        run: |
+          docker logs console || true
+          docker rm -f console || true
