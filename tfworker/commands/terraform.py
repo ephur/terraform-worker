@@ -1,3 +1,4 @@
+import math
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +15,13 @@ import tfworker.util.terraform as tf_util
 from tfworker.commands.base import BaseCommand
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.definitions import Definition
-from tfworker.exceptions import HandlerError, HookError, TFWorkerException
+from tfworker.exceptions import (
+    HandlerError,
+    HookError,
+    LockUnavailableError,
+    TFWorkerException,
+)
+from tfworker.util.duration import parse_duration
 from tfworker.util.system import pipe_exec, pipe_exec_logged
 from tfworker.util.terraform import quote_index_brackets
 
@@ -882,6 +889,8 @@ class TerraformCommand(BaseCommand):
                 definition=definition,
                 working_dir=self.app_state.working_dir,
             )
+        except LockUnavailableError as e:
+            return self._lock_unavailable(name, action, e, exit_on_error)
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
@@ -993,6 +1002,9 @@ class TerraformCommand(BaseCommand):
                 definition=definition,
                 working_dir=self.app_state.working_dir,
             )
+        except LockUnavailableError as e:
+            self._lock_unavailable(name, TerraformAction.PLAN, e, exit_on_error=False)
+            return False
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
@@ -1098,6 +1110,20 @@ class TerraformCommand(BaseCommand):
         log.trace(f"writing json plan file {jsonfile}")
         result.log_file(jsonfile.resolve())
 
+    def _lock_timeout(self, definition: Definition) -> Optional[float]:
+        """
+        Seconds terraform may wait for the state lock, or None for terraform's default.
+
+        The lock handler sets the time left of its wait on the definition;
+        otherwise `--lock-timeout` applies.
+        """
+        if definition.lock_timeout is not None:
+            return definition.lock_timeout
+        option = getattr(self.app_state.terraform_options, "lock_timeout", None)
+        if option is None:
+            return None
+        return parse_duration(option)
+
     def _run(
         self,
         definition_name: str,
@@ -1109,7 +1135,9 @@ class TerraformCommand(BaseCommand):
         definition: Definition = self.app_state.definitions[definition_name]
         stream_output: bool = self.terraform_config.stream_output
         params: str = self.terraform_config.get_params(
-            action, plan_file=definition.plan_file
+            action,
+            plan_file=definition.plan_file,
+            lock_timeout=self._lock_timeout(definition),
         )
 
         working_dir: str = definition.get_target_path(self.app_state.working_dir)
@@ -1226,6 +1254,34 @@ class TerraformCommand(BaseCommand):
             log.error(f"hook execution error on definition {definition.name}: \n{e}")
             return False
         return True
+
+    def _lock_unavailable(
+        self,
+        name: str,
+        action: TerraformAction,
+        error: LockUnavailableError,
+        exit_on_error: bool,
+    ) -> "TerraformResult":
+        """
+        Record that a definition's state lock could not be acquired.
+
+        It counts as a failure of that definition's plan, apply or destroy and
+        follows the phase's failure options, like a failing hook.
+        """
+        definition: Definition = self.app_state.definitions[name]
+        log.error(f"state lock unavailable for definition {name}: {error.message}")
+        result = TerraformResult.synthesized(1, error.message)
+
+        if action == TerraformAction.PLAN:
+            definition.plan_failed = True
+            definition.needs_apply = False
+        else:
+            self._record_apply_failure(name, error.message)
+        self._exec_error_handlers(name, action, result)
+
+        if exit_on_error:
+            self.ctx.exit(1)
+        return result
 
     def _hook_failure(
         self,
@@ -1425,7 +1481,12 @@ class TerraformCommandConfig:
             "destroy": log.info,
         }[command]
 
-    def get_params(self, command: TerraformAction, plan_file: str) -> str:
+    def get_params(
+        self,
+        command: TerraformAction,
+        plan_file: str,
+        lock_timeout: Optional[float] = None,
+    ) -> str:
         """Return the parameters for a given command"""
         color_str = (
             "-no-color" if self._app_state.terraform_options.color is False else ""
@@ -1446,11 +1507,15 @@ class TerraformCommandConfig:
                     for target in self._app_state.terraform_options.target
                 )
 
+        lock_args = ""
+        if lock_timeout is not None:
+            lock_args = f" -lock-timeout={math.ceil(lock_timeout)}s"
+
         return {
             TerraformAction.INIT: f"-input=false {color_str} {read_only} -plugin-dir={self._app_state.terraform_options.provider_cache}",
-            TerraformAction.PLAN: f"-input=false {color_str} {plan_action} -detailed-exitcode -out {plan_file}{target_args}",
-            TerraformAction.APPLY: f"-input=false {color_str} -auto-approve {plan_file}",
-            TerraformAction.DESTROY: f"-input=false {color_str} -auto-approve {plan_file}",
+            TerraformAction.PLAN: f"-input=false {color_str} {plan_action} -detailed-exitcode{lock_args} -out {plan_file}{target_args}",
+            TerraformAction.APPLY: f"-input=false {color_str}{lock_args} -auto-approve {plan_file}",
+            TerraformAction.DESTROY: f"-input=false {color_str}{lock_args} -auto-approve {plan_file}",
         }[command]
 
     def _get_env(self) -> Dict[str, str]:

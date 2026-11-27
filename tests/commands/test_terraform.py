@@ -13,7 +13,12 @@ from tfworker.commands.terraform import (
 )
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.definitions.model import Definition
-from tfworker.exceptions import HandlerError, HookError, TFWorkerException
+from tfworker.exceptions import (
+    HandlerError,
+    HookError,
+    LockUnavailableError,
+    TFWorkerException,
+)
 
 
 class DummyAppState:
@@ -2327,3 +2332,103 @@ class TestSynthesizedResultTiming:
         )
         result.elapsed = 12.5
         assert result.duration == 12.5
+
+
+class TestLockTimeout:
+    @pytest.fixture
+    def config_class(self):
+        # another test reloads the module, so look the class up at run time
+        from tfworker.commands.terraform import TerraformCommandConfig
+
+        TerraformCommandConfig._instance = None
+        yield TerraformCommandConfig
+        TerraformCommandConfig._instance = None
+
+    @pytest.mark.parametrize(
+        "action", [TerraformAction.PLAN, TerraformAction.APPLY, TerraformAction.DESTROY]
+    )
+    def test_get_params_lock_timeout(self, action, config_class):
+        cfg = config_class(DummyAppState())
+        assert "-lock-timeout=91s" in cfg.get_params(action, "plan", 90.2)
+        assert "-lock-timeout" not in cfg.get_params(action, "plan")
+
+    def test_init_never_gets_lock_timeout(self, config_class):
+        cfg = config_class(DummyAppState())
+        assert "-lock-timeout" not in cfg.get_params(TerraformAction.INIT, "", 30)
+
+    def test_definition_value_overrides_option(self, tmp_path):
+        cmd = make_command(tmp_path, lock_timeout="5m")
+        definition = cmd.app_state.definitions["def"]
+        assert cmd._lock_timeout(definition) == 300
+        definition.lock_timeout = 42.0
+        assert cmd._lock_timeout(definition) == 42.0
+
+    def test_no_timeout_by_default(self, tmp_path):
+        cmd = make_command(tmp_path)
+        assert cmd._lock_timeout(cmd.app_state.definitions["def"]) is None
+
+    def test_run_passes_lock_timeout(self, tmp_path, mocker):
+        cmd = make_command(tmp_path, lock_timeout="2m")
+        cmd.app_state.definitions["def"].plan_file = str(tmp_path / "p.tfplan")
+        params = mocker.patch.object(
+            cmd.terraform_config, "get_params", return_value=""
+        )
+        mocker.patch(
+            "tfworker.commands.terraform.pipe_exec_logged", return_value=(0, b"", b"")
+        )
+        cmd._run("def", TerraformAction.APPLY)
+        assert params.call_args.kwargs["lock_timeout"] == 120
+
+
+class TestLockUnavailable:
+    def _error_results(self, cmd):
+        return [
+            c.kwargs["result"]
+            for c in cmd.app_state.handlers.exec_handlers.call_args_list
+            if c.kwargs.get("stage") == TerraformStage.ERROR
+        ]
+
+    def test_pre_plan_lock_fails_definition_plan(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        cmd.app_state.handlers.exec_handlers.side_effect = [
+            LockUnavailableError("still locked"),
+            None,
+        ]
+        hook = mocker.patch.object(cmd, "_exec_hook")
+        assert cmd._exec_terraform_pre_plan("def") is False
+        definition = cmd.app_state.definitions["def"]
+        assert definition.plan_failed is True
+        assert definition.needs_apply is False
+        hook.assert_not_called()
+        cmd.ctx.exit.assert_not_called()
+        (result,) = self._error_results(cmd)
+        assert result.exit_code == 1
+        assert result.stderr == b"still locked"
+        assert result.started_at is not None
+
+    def test_apply_lock_records_failure_and_exits(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        cmd.app_state.handlers.exec_handlers.side_effect = [
+            LockUnavailableError("still locked"),
+            None,
+        ]
+        run = mocker.patch.object(cmd, "_run")
+        with pytest.raises(SystemExit):
+            cmd._exec_terraform_action("def", TerraformAction.APPLY)
+        cmd.ctx.exit.assert_called_once_with(1)
+        run.assert_not_called()
+        assert cmd.apply_errors["def"] == "still locked"
+        assert cmd.app_state.definitions["def"].apply_failed is True
+
+    def test_apply_lock_without_exit(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        cmd.app_state.handlers.exec_handlers.side_effect = [
+            LockUnavailableError("still locked"),
+            None,
+        ]
+        result = cmd._exec_terraform_action(
+            "def", TerraformAction.DESTROY, exit_on_error=False
+        )
+        assert result.exit_code == 1
+        cmd.ctx.exit.assert_not_called()
+        assert len(self._error_results(cmd)) == 1

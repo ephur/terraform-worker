@@ -69,6 +69,9 @@ class Definition(BaseModel):
 
     # Internals, these should not be set by the user
     ready: bool = False
+    # seconds terraform may wait for the state lock on this definition's next
+    # command; set by the lock handler, overrides --lock-timeout
+    lock_timeout: Optional[float] = None
     needs_apply: bool = False
     plan_failed: bool = False
     # preparation (copy/template/terraform get) or terraform init failed

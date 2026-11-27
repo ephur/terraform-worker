@@ -688,3 +688,151 @@ class TestS3BackendEnsureBackendBucket:
         S3Backend(mock_authenticators, "test-deployment")
         buckets = [b["Name"] for b in s3.list_buckets()["Buckets"]]
         assert "test-bucket" in buckets
+
+
+LOCK_JSON = (
+    '{"ID":"0f9c","Operation":"OperationTypeApply","Info":"",'
+    '"Who":"runner@pod-1","Version":"1.13.0",'
+    '"Created":"2026-11-27T10:00:00.123456789Z","Path":"x"}'
+)
+
+
+class TestS3BackendLocks:
+    @mock_aws
+    def test_lock_inspection_supported(self, mock_authenticators):
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        assert backend.lock_inspection is True
+
+    @mock_aws
+    def test_get_lock_lockfile(self, mock_authenticators, mocker):
+        mocker.patch("tfworker.util.terraform.version_at_least", return_value=True)
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        assert backend.get_lock("def1") is None
+        backend._s3_client.put_object(
+            Bucket="test-bucket",
+            Key="prefix/def1/terraform.tfstate.tflock",
+            Body=LOCK_JSON,
+        )
+        lock = backend.get_lock("def1")
+        assert lock.id == "0f9c"
+        assert lock.host == "pod-1"
+
+    @mock_aws
+    def test_get_lock_lockfile_unparseable(self, mock_authenticators, mocker):
+        mocker.patch("tfworker.util.terraform.version_at_least", return_value=True)
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        backend._s3_client.put_object(
+            Bucket="test-bucket",
+            Key="prefix/def1/terraform.tfstate.tflock",
+            Body="not json",
+        )
+        with pytest.raises(BackendError, match="unable to parse s3 lock file"):
+            backend.get_lock("def1")
+
+    @mock_aws
+    def test_get_lock_read_error(self, mock_authenticators, mocker):
+        mocker.patch("tfworker.util.terraform.version_at_least", return_value=True)
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        error = botocore.exceptions.ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "no"}}, "GetObject"
+        )
+        mocker.patch.object(backend._s3_client, "get_object", side_effect=error)
+        with pytest.raises(BackendError, match="unable to read s3 object"):
+            backend.get_lock("def1")
+
+    @mock_aws
+    def test_get_lock_dynamodb(self, mock_authenticators, mocker):
+        mocker.patch("tfworker.util.terraform.version_at_least", return_value=False)
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        assert backend.get_lock("def1") is None
+        backend._ddb_client.put_item(
+            TableName="terraform-test-deployment",
+            Item={
+                "LockID": {"S": "test-bucket/prefix/def1/terraform.tfstate"},
+                "Info": {"S": LOCK_JSON},
+            },
+        )
+        assert backend.get_lock("def1").operation == "OperationTypeApply"
+
+    @mock_aws
+    def test_get_lock_dynamodb_without_info(self, mock_authenticators, mocker):
+        mocker.patch("tfworker.util.terraform.version_at_least", return_value=False)
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        backend._ddb_client.put_item(
+            TableName="terraform-test-deployment",
+            Item={"LockID": {"S": "test-bucket/prefix/def1/terraform.tfstate"}},
+        )
+        assert backend.get_lock("def1") is None
+
+    @mock_aws
+    def test_get_lock_dynamodb_error(self, mock_authenticators, mocker):
+        mocker.patch("tfworker.util.terraform.version_at_least", return_value=False)
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        error = botocore.exceptions.ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "no"}}, "GetItem"
+        )
+        mocker.patch.object(backend._ddb_client, "get_item", side_effect=error)
+        with pytest.raises(BackendError, match="unable to read dynamodb lock"):
+            backend.get_lock("def1")
+
+    @mock_aws
+    def test_lease_round_trip(self, mock_authenticators):
+        from datetime import datetime, timezone
+
+        from tfworker.backends.lock import WorkerLease
+
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        assert backend.get_lease("def1") is None
+        now = datetime(2026, 11, 27, tzinfo=timezone.utc)
+        lease = WorkerLease(
+            definition="def1",
+            action="apply",
+            who="runner@pod-1",
+            host="pod-1",
+            pid=7,
+            started_at=now,
+            heartbeat_at=now,
+            heartbeat_seconds=30,
+        )
+        backend.put_lease(lease)
+        assert backend.get_lease("def1") == lease
+        backend.delete_lease("def1")
+        assert backend.get_lease("def1") is None
+
+    @mock_aws
+    def test_get_lease_unreadable(self, mock_authenticators):
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        backend._s3_client.put_object(
+            Bucket="test-bucket",
+            Key="prefix/def1/terraform.tfstate.tfworker-lease",
+            Body="{}",
+        )
+        assert backend.get_lease("def1") is None
+
+    @mock_aws
+    def test_lease_write_errors(self, mock_authenticators, mocker):
+        from datetime import datetime, timezone
+
+        from tfworker.backends.lock import WorkerLease
+
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        error = botocore.exceptions.ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "no"}}, "PutObject"
+        )
+        mocker.patch.object(backend._s3_client, "put_object", side_effect=error)
+        mocker.patch.object(backend._s3_client, "delete_object", side_effect=error)
+        now = datetime(2026, 11, 27, tzinfo=timezone.utc)
+        lease = WorkerLease(
+            definition="def1",
+            action="plan",
+            who="a@b",
+            host="b",
+            pid=1,
+            started_at=now,
+            heartbeat_at=now,
+            heartbeat_seconds=30,
+        )
+        with pytest.raises(BackendError, match="unable to write worker lease"):
+            backend.put_lease(lease)
+        with pytest.raises(BackendError, match="unable to delete worker lease"):
+            backend.delete_lease("def1")

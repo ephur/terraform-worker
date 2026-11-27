@@ -96,6 +96,18 @@ class HandlerError(TFWorkerException):
         return f"Handler error: {self.message}"
 
 
+class LockUnavailableError(HandlerError):
+    """
+    A definition's state lock could not be acquired: it was held past the
+    wait deadline, or it is stale and the stale policy is to fail.
+
+    The phase treats it as that definition's failure rather than ending the run.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, terminate=False)
+
+
 class DefinitionsSourceError(TFWorkerException):
     """
     A definitions source could not be fetched, run, or applied.

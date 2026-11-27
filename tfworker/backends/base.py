@@ -1,8 +1,10 @@
 from abc import ABCMeta, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from tfworker.custom_types import JSONType
 from tfworker.exceptions import BackendError
+
+from .lock import LockInfo, WorkerLease
 
 if TYPE_CHECKING:
     from tfworker.authenticators import (  # pragma: no cover  # noqa
@@ -18,6 +20,8 @@ class BaseBackend(metaclass=ABCMeta):
 
     Attributes:
         plan_storage (bool): A flag to indicate whether the backend supports plan storage
+        lock_inspection (bool): A flag to indicate whether the backend can read state
+            locks and keep worker leases (get_lock, get_lease, put_lease, delete_lease)
         auth_tag(str): The tag of the authenticator that is required for this backend
         tag (str): A unique identifier for the backend
     """
@@ -25,6 +29,7 @@ class BaseBackend(metaclass=ABCMeta):
     auth_tag: str
     tag: str
     plan_storage: bool = False
+    lock_inspection: bool = False
 
     @abstractmethod
     def __init__(
@@ -103,6 +108,27 @@ class BaseBackend(metaclass=ABCMeta):
             JSONType: The state from the backend
         """
         pass
+
+    def get_lock(self, definition: str) -> Optional[LockInfo]:
+        """
+        Return the lock terraform holds on a definition's state, or None.
+
+        Raises:
+            BackendError: if a lock exists but cannot be read
+        """
+        raise NotImplementedError
+
+    def get_lease(self, definition: str) -> Optional[WorkerLease]:
+        """Return the worker lease beside a definition's state, or None."""
+        raise NotImplementedError
+
+    def put_lease(self, lease: WorkerLease) -> None:
+        """Write or refresh the worker lease for `lease.definition`."""
+        raise NotImplementedError
+
+    def delete_lease(self, definition: str) -> None:
+        """Remove the worker lease beside a definition's state, if any."""
+        raise NotImplementedError
 
 
 def validate_backend_empty(state: JSONType) -> bool:
