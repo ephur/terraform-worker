@@ -149,6 +149,8 @@ def make_command(tmp_path, **opts_overrides):
             self.fail_on_plan_error = True
             self.init_failures = True
             self.fail_on_init_error = True
+            self.apply_failures = True
+            self.fail_on_apply_error = True
             for k, v in opts_overrides.items():
                 setattr(self, k, v)
 
@@ -742,7 +744,9 @@ class TestTerraformCommandMethods:
         plan_file = tmp_path / "plan.tfplan"
         plan_file.touch()
         cmd.app_state.definitions["def"].plan_file = str(plan_file)
-        run = mocker.patch.object(cmd, "_exec_terraform_action")
+        run = mocker.patch.object(
+            cmd, "_exec_terraform_action", return_value=TerraformResult(0, b"", b"")
+        )
         cmd.terraform_apply_or_destroy()
         run.assert_called_once()
 
@@ -1531,9 +1535,9 @@ class TestHookFailures:
         assert defn.plan_failed is True
         assert defn.needs_apply is False
 
-    # --------------------------------------------------------------- apply
-    def test_apply_hook_failure_remains_fatal(self, tmp_path, mocker):
-        """Apply has no continuation options, so a hook failure ends the run."""
+    # ----------------------------------------------------------------- apply
+    def test_apply_hook_failure_exits_when_called_directly(self, tmp_path, mocker):
+        """exit_on_error still ends the run on a hook failure."""
         cmd = make_command(tmp_path, apply=True)
         self._fail_hooks(cmd, mocker, when=(TerraformAction.APPLY, TerraformStage.PRE))
 
@@ -1541,6 +1545,306 @@ class TestHookFailures:
             cmd._exec_terraform_action("def", TerraformAction.APPLY)
 
         cmd.ctx.exit.assert_called_with(2)
+        assert cmd.app_state.definitions["def"].apply_failed is True
+
+
+class TestApplyFailurePolicy:
+    """apply_failures halts the apply phase; fail_on_apply_error sets the exit."""
+
+    NAMES = ("def0", "def1", "def2")
+
+    def _make(self, tmp_path, mocker, fail=(), **opts):
+        cmd = make_command(tmp_path, **opts)
+        cmd.app_state.definitions = {}
+        for name in self.NAMES:
+            definition = Definition(name=name, path=name)
+            definition.needs_apply = True
+            plan_file = tmp_path / f"{name}.tfplan"
+            plan_file.touch()
+            definition.plan_file = str(plan_file)
+            cmd.app_state.definitions[name] = definition
+        mocker.patch.object(cmd, "_exec_hook", return_value=True)
+        self.ran = []
+
+        def run(name, action):
+            self.ran.append(name)
+            return TerraformResult(1 if name in fail else 0, b"", b"boom")
+
+        mocker.patch.object(cmd, "_run", side_effect=run)
+        return cmd
+
+    def _error_dispatches(self, cmd):
+        return [
+            c.kwargs["definition"].name
+            for c in cmd.app_state.handlers.exec_handlers.call_args_list
+            if c.kwargs["stage"] == TerraformStage.ERROR
+        ]
+
+    def test_default_halts_and_exits(self, tmp_path, mocker):
+        cmd = self._make(tmp_path, mocker, fail={"def1"})
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+
+        assert self.ran == ["def0", "def1"]
+        defs = cmd.app_state.definitions
+        assert defs["def1"].apply_failed is True
+        assert defs["def2"].apply_skipped is True
+        assert defs["def2"].apply_failed is False
+        assert defs["def0"].apply_failed is False
+        assert defs["def0"].apply_skipped is False
+        assert cmd.apply_errors == {"def1": "terraform apply exited 1"}
+        assert self._error_dispatches(cmd) == ["def1"]
+        cmd.ctx.exit.assert_called_once_with(1)
+
+    def test_last_definition_failing_skips_nothing(self, tmp_path, mocker):
+        cmd = self._make(tmp_path, mocker, fail={"def2"})
+        warn = mocker.patch("tfworker.util.log.warn")
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+
+        assert self.ran == list(self.NAMES)
+        assert not any(d.apply_skipped for d in cmd.app_state.definitions.values())
+        warn.assert_not_called()
+
+    def test_halt_without_fail_on_apply_error(self, tmp_path, mocker):
+        cmd = self._make(tmp_path, mocker, fail={"def1"}, fail_on_apply_error=False)
+
+        cmd.terraform_apply_or_destroy()
+
+        assert self.ran == ["def0", "def1"]
+        assert cmd.app_state.definitions["def2"].apply_skipped is True
+        cmd.ctx.exit.assert_not_called()
+
+    def test_no_apply_failures_attempts_all_then_exits(self, tmp_path, mocker):
+        cmd = self._make(tmp_path, mocker, fail={"def0", "def1"}, apply_failures=False)
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+
+        assert self.ran == ["def0", "def1", "def2"]
+        defs = cmd.app_state.definitions
+        assert [n for n in self.NAMES if defs[n].apply_failed] == ["def0", "def1"]
+        assert not any(d.apply_skipped for d in defs.values())
+        assert self._error_dispatches(cmd) == ["def0", "def1"]
+        cmd.ctx.exit.assert_called_once_with(1)
+
+    def test_no_apply_failures_reports_every_failure(self, tmp_path, mocker):
+        cmd = self._make(tmp_path, mocker, fail={"def0", "def2"}, apply_failures=False)
+        error = mocker.patch("tfworker.util.log.error")
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+
+        messages = [str(c.args[0]) for c in error.call_args_list]
+        assert "2 definitions failed to apply:" in messages
+        assert "  def0: terraform apply exited 1" in messages
+        assert "  def2: terraform apply exited 1" in messages
+
+    def test_no_apply_failures_no_fail_on_apply_error(self, tmp_path, mocker):
+        cmd = self._make(
+            tmp_path,
+            mocker,
+            fail={"def1"},
+            apply_failures=False,
+            fail_on_apply_error=False,
+        )
+
+        cmd.terraform_apply_or_destroy()
+
+        assert self.ran == ["def0", "def1", "def2"]
+        cmd.ctx.exit.assert_not_called()
+
+    def test_success_does_not_exit(self, tmp_path, mocker):
+        cmd = self._make(tmp_path, mocker)
+
+        cmd.terraform_apply_or_destroy()
+
+        assert self.ran == list(self.NAMES)
+        cmd.ctx.exit.assert_not_called()
+
+    def test_destroy_follows_the_policy(self, tmp_path, mocker):
+        cmd = self._make(tmp_path, mocker, fail={"def0"}, apply=False, destroy=True)
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+
+        assert self.ran == ["def0"]
+        assert cmd.apply_errors == {"def0": "terraform destroy exited 1"}
+        assert cmd.app_state.definitions["def1"].apply_skipped is True
+
+    def test_definitions_without_a_plan_are_neither_failed_nor_skipped(
+        self, tmp_path, mocker
+    ):
+        cmd = self._make(tmp_path, mocker, fail={"def0"})
+        cmd.app_state.definitions["def2"].needs_apply = False
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+
+        defs = cmd.app_state.definitions
+        assert defs["def1"].apply_skipped is True
+        assert defs["def2"].apply_skipped is False
+        assert defs["def2"].apply_failed is False
+
+    def test_pre_apply_hook_failure_is_an_apply_failure(self, tmp_path, mocker):
+        cmd = self._make(tmp_path, mocker, apply_failures=False)
+
+        def exec_hook(definition, action, stage, result=None):
+            return not (definition.name == "def1" and stage == TerraformStage.PRE)
+
+        mocker.patch.object(cmd, "_exec_hook", side_effect=exec_hook)
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+
+        assert self.ran == ["def0", "def2"]
+        assert cmd.apply_errors == {"def1": "pre-apply hook failed"}
+        assert self._error_dispatches(cmd) == ["def1"]
+        cmd.ctx.exit.assert_called_once_with(1)
+
+    def test_post_apply_hook_failure_halts_by_default(self, tmp_path, mocker):
+        cmd = self._make(tmp_path, mocker)
+
+        def exec_hook(definition, action, stage, result=None):
+            return not (definition.name == "def0" and stage == TerraformStage.POST)
+
+        mocker.patch.object(cmd, "_exec_hook", side_effect=exec_hook)
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+
+        assert self.ran == ["def0"]
+        assert cmd.apply_errors == {"def0": "post-apply hook failed"}
+        assert self._error_dispatches(cmd) == ["def0"]
+        # terraform applied, so the plan is consumed
+        assert not Path(cmd.app_state.definitions["def0"].plan_file).exists()
+        assert cmd.app_state.definitions["def1"].apply_skipped is True
+        assert cmd.app_state.definitions["def2"].apply_skipped is True
+
+    def _always_apply_plan(self, cmd, mocker):
+        for definition in cmd.app_state.definitions.values():
+            definition.always_apply = True
+        plan_cls = mocker.patch("tfworker.definitions.plan.DefinitionPlan")
+        plan_cls.return_value.needs_plan.return_value = (True, "reason")
+        mocker.patch.object(cmd, "_exec_terraform_pre_plan", return_value=True)
+        return mocker.patch.object(cmd, "_exec_terraform_plan")
+
+    def test_always_apply_failure_halts_applies_not_planning(self, tmp_path, mocker):
+        cmd = self._make(tmp_path, mocker, fail={"def0"}, plan=True)
+        planned = self._always_apply_plan(cmd, mocker)
+        cmd.app_state.definitions["def1"].always_apply = False
+
+        cmd.terraform_plan()
+
+        assert [c.kwargs["name"] for c in planned.call_args_list] == list(self.NAMES)
+        assert self.ran == ["def0"]
+        assert cmd.app_state.definitions["def2"].apply_skipped is True
+        cmd.ctx.exit.assert_not_called()
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+
+        assert self.ran == ["def0"]
+        defs = cmd.app_state.definitions
+        assert defs["def0"].apply_failed is True
+        assert defs["def1"].apply_skipped is True
+        cmd.ctx.exit.assert_called_once_with(1)
+
+    def test_always_apply_failure_continues_without_apply_failures(
+        self, tmp_path, mocker
+    ):
+        cmd = self._make(
+            tmp_path, mocker, fail={"def0"}, plan=True, apply_failures=False
+        )
+        self._always_apply_plan(cmd, mocker)
+
+        cmd.terraform_plan()
+
+        assert self.ran == ["def0", "def1", "def2"]
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+        assert self.ran == ["def0", "def1", "def2"]
+        cmd.ctx.exit.assert_called_once_with(1)
+
+    def test_always_apply_failure_reported_when_plan_phase_exits(
+        self, tmp_path, mocker
+    ):
+        cmd = self._make(
+            tmp_path,
+            mocker,
+            fail={"def1"},
+            plan=True,
+            plan_failures=False,
+            apply_failures=False,
+            fail_on_apply_error=False,
+        )
+        self._always_apply_plan(cmd, mocker)
+        cmd.app_state.definitions["def0"].plan_failed = True
+        error = mocker.patch("tfworker.util.log.error")
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_plan()
+
+        messages = [str(c.args[0]) for c in error.call_args_list]
+        assert "  def1: terraform apply exited 1" in messages
+        cmd.ctx.exit.assert_called_once_with(1)
+
+    def test_error_handlers_see_apply_failed(self, tmp_path, mocker):
+        cmd = self._make(tmp_path, mocker, fail={"def0"}, apply_failures=False)
+        seen = {}
+
+        def exec_handlers(**kwargs):
+            if kwargs["stage"] == TerraformStage.ERROR:
+                seen[kwargs["definition"].name] = kwargs["definition"].apply_failed
+
+        cmd.app_state.handlers.exec_handlers.side_effect = exec_handlers
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+
+        assert seen == {"def0": True}
+
+    def test_destroy_limit_with_halt_skips_only_limited(self, tmp_path, mocker):
+        cmd = self._make(
+            tmp_path,
+            mocker,
+            fail={"def0"},
+            apply=False,
+            destroy=True,
+            limit=["def0", "def1"],
+        )
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+
+        defs = cmd.app_state.definitions
+        assert self.ran == ["def0"]
+        assert defs["def1"].apply_skipped is True
+        assert defs["def2"].apply_skipped is False
+        assert defs["def2"].apply_failed is False
+
+    def test_uninitialized_definitions_are_not_marked_skipped(self, tmp_path, mocker):
+        cmd = self._make(tmp_path, mocker, fail={"def0"})
+        cmd.app_state.definitions["def2"].init_failed = True
+
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+
+        assert cmd.app_state.definitions["def1"].apply_skipped is True
+        assert cmd.app_state.definitions["def2"].apply_skipped is False
+
+    def test_always_apply_failure_reported_in_plan_only_run(self, tmp_path, mocker):
+        cmd = self._make(tmp_path, mocker, fail={"def0"}, plan=True, apply=False)
+        self._always_apply_plan(cmd, mocker)
+
+        cmd.terraform_plan()
+        with pytest.raises(SystemExit):
+            cmd.terraform_apply_or_destroy()
+
+        assert cmd.apply_errors == {"def0": "terraform apply exited 1"}
+        cmd.ctx.exit.assert_called_once_with(1)
 
 
 class TestGetDefinitionsNeedingInit:
@@ -1697,7 +2001,9 @@ class TestTerraformResult:
         plan_inst.needs_plan.return_value = (True, "reason")
         cmd._exec_terraform_pre_plan = mocker.Mock()
         _ = mocker.patch.object(cmd, "_exec_terraform_plan")
-        act = mocker.patch.object(cmd, "_exec_terraform_action")
+        act = mocker.patch.object(
+            cmd, "_exec_terraform_action", return_value=TerraformResult(0, b"", b"")
+        )
         mocker.patch.object(cmd, "_run", return_value=TerraformResult(0, b"", b""))
         cmd.terraform_plan()
         act.assert_called_once()

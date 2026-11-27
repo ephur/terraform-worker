@@ -75,6 +75,10 @@ class Definition(BaseModel):
     init_failed: bool = False
     # init was never attempted because an earlier failure halted the init phase
     init_skipped: bool = False
+    # terraform apply/destroy or one of its hooks failed
+    apply_failed: bool = False
+    # had a plan to apply, but an earlier failure halted the apply phase
+    apply_skipped: bool = False
     plan_file: Optional[Union[Path, str, None]] = None
 
     @field_serializer("plan_file")

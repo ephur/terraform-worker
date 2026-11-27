@@ -365,6 +365,16 @@ class CLIOptionsTerraform(FreezableBaseModel):
         json_schema_extra={"env": "WORKER_FAIL_ON_INIT_ERROR"},
         description="Exit non-zero at end of init if any definition failed to prepare or init",
     )
+    apply_failures: bool = Field(
+        True,
+        json_schema_extra={"env": "WORKER_APPLY_FAILURES"},
+        description="Stop applying or destroying remaining definitions when an apply or destroy fails",
+    )
+    fail_on_apply_error: bool = Field(
+        True,
+        json_schema_extra={"env": "WORKER_FAIL_ON_APPLY_ERROR"},
+        description="Exit non-zero at end of apply or destroy if any definition failed",
+    )
 
     @model_validator(mode="before")
     @classmethod

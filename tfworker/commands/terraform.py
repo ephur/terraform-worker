@@ -36,6 +36,9 @@ class TerraformCommand(BaseCommand):
     reconsider the strategy for what you're about to add
     """
 
+    # set when an always_apply failure in the plan phase halts applies
+    _apply_halted: bool = False
+
     @property
     def terraform_config(self):
         if hasattr(self, "_terraform_config"):
@@ -50,6 +53,13 @@ class TerraformCommand(BaseCommand):
         if not hasattr(self, "_init_errors"):
             self._init_errors: Dict[str, str] = {}
         return self._init_errors
+
+    @property
+    def apply_errors(self) -> Dict[str, str]:
+        """Failure message per definition whose apply or destroy failed."""
+        if not hasattr(self, "_apply_errors"):
+            self._apply_errors: Dict[str, str] = {}
+        return self._apply_errors
 
     def prep_providers(self) -> None:
         """
@@ -352,15 +362,39 @@ class TerraformCommand(BaseCommand):
             if not self.app_state.definitions[name].plan_failed and getattr(
                 self.app_state.definitions[name], "always_apply", False
             ):
-                log.info(
-                    f"definition {name} has always_apply set; applying immediately after plan"
-                )
-                self._exec_terraform_action(name=name, action=TerraformAction.APPLY)
-                self.app_state.definitions[name].needs_apply = False
+                self._always_apply(name)
 
         if self.app_state.terraform_options.fail_on_plan_error:
             if any(d.plan_failed for d in self.app_state.definitions.values()):
+                if self.apply_errors:
+                    self._report_apply_results(TerraformAction.APPLY)
                 self.ctx.exit(1)
+
+    def _always_apply(self, name: str) -> None:
+        """
+        Apply an always_apply definition right after its plan.
+
+        Once an apply has failed and `apply_failures` is set, later
+        always_apply definitions keep their plan and are marked skipped, and
+        the apply phase skips every remaining definition.
+        """
+        definition = self.app_state.definitions[name]
+        if self._apply_halted:
+            if definition.needs_apply:
+                self._mark_apply_skipped([name], TerraformAction.APPLY)
+            return
+
+        log.info(
+            f"definition {name} has always_apply set; applying immediately after plan"
+        )
+        applied = self._apply_definition(name, TerraformAction.APPLY)
+        definition.needs_apply = False
+        if not applied and self.app_state.terraform_options.apply_failures:
+            log.warn(
+                f"halting applies after the always_apply failure of {name}; "
+                "planning continues"
+            )
+            self._apply_halted = True
 
     def _fetch_saved_plans(self, def_plan: "DefinitionPlan") -> None:
         """
@@ -377,8 +411,7 @@ class TerraformCommand(BaseCommand):
         Failing to fetch one definition's plan is treated as that definition's
         plan failure, so the same two options govern it as govern the plan
         phase: `plan_failures` halts the phase, and `fail_on_plan_error` decides
-        whether the run ends non-zero. Neither applies to the apply phase
-        itself, which has no equivalent failure handling yet.
+        whether the run ends non-zero.
         """
         options = self.app_state.terraform_options
         if not (options.apply or options.destroy):
@@ -429,6 +462,20 @@ class TerraformCommand(BaseCommand):
                 self.ctx.exit(1)
 
     def terraform_apply_or_destroy(self) -> None:
+        """
+        Apply or destroy every definition that has a plan to act on.
+
+        Two options govern the phase, mirroring the init and plan options:
+
+        - `apply_failures`: halt the phase when a definition fails, leaving the
+          remaining definitions unapplied (default)
+        - `fail_on_apply_error`: exit non-zero once the phase completes if any
+          definition failed (default)
+
+        A failure of terraform itself or of a PRE or POST hook counts as the
+        definition's failure. Each failed definition is marked `apply_failed`,
+        and each definition left behind by a halt is marked `apply_skipped`.
+        """
         log.trace("entering terraform apply or destroy")
 
         if self.app_state.terraform_options.destroy:
@@ -442,33 +489,116 @@ class TerraformCommand(BaseCommand):
                 "no apply or destroy requested (--no-apply and --no-destroy); "
                 "no definitions will be applied"
             )
+            # always_apply definitions are applied by the plan phase
+            self._report_apply_results(TerraformAction.APPLY)
             return
 
-        for name in self.app_state.definitions.keys():
-            log.trace(f"running {action} for definition: {name}")
+        candidates = self._apply_candidates(action)
+
+        if self._apply_halted:
+            self._mark_apply_skipped(candidates, action)
+        else:
+            for index, name in enumerate(candidates):
+                log.info(f"running {action} for definition: {name}")
+                if self._apply_definition(name, action):
+                    continue
+                if self.app_state.terraform_options.apply_failures:
+                    self._mark_apply_skipped(candidates[index + 1 :], action)
+                    break
+
+        self._report_apply_results(action)
+
+    def _apply_candidates(self, action: TerraformAction) -> List[str]:
+        """
+        Return the definitions the apply or destroy phase will act on, in order.
+
+        A definition qualifies when it initialized, has a plan to apply whose
+        file exists, and, for a destroy, is inside `--limit` when one is set.
+        """
+        candidates: List[str] = []
+        limit = self.app_state.terraform_options.limit
+        for name, definition in self.app_state.definitions.items():
+            log.trace(f"checking {action} for definition: {name}")
             if self._init_incomplete(name):
                 log.warn(
                     f"skipping {action} for definition: {name}; it was not initialized"
                 )
                 continue
-            if action == TerraformAction.DESTROY:
-                if self.app_state.terraform_options.limit:
-                    if name not in self.app_state.terraform_options.limit:
-                        log.info(f"skipping destroy for definition: {name}")
-                        continue
-            log.trace(
-                f"running {action} for definition: {name} if needs_apply is True, "
-                f"needs_apply value: {self.app_state.definitions[name].needs_apply}"
+            if action == TerraformAction.DESTROY and limit and name not in limit:
+                log.info(f"skipping destroy for definition: {name}")
+                continue
+            log.trace(f"definition {name} needs_apply value: {definition.needs_apply}")
+            if not definition.needs_apply:
+                continue
+            plan_file = definition.plan_file
+            if plan_file is None or not Path(plan_file).exists():
+                log.info(
+                    f"plan file does not exist for definition: {name}; skipping {action}"
+                )
+                continue
+            candidates.append(name)
+        return candidates
+
+    def _apply_definition(self, name: str, action: TerraformAction) -> bool:
+        """
+        Apply or destroy one definition, recording a failure on it.
+
+        Returns:
+            bool: True when terraform and the definition's hooks succeeded
+        """
+        result = self._exec_terraform_action(
+            name=name, action=action, exit_on_error=False
+        )
+        return not result.exit_code
+
+    def _record_apply_failure(self, name: str, message: str) -> None:
+        """
+        Record that a definition failed to apply or destroy.
+
+        Called before the ERROR stage is dispatched, so ERROR handlers see
+        `apply_failed` set.
+        """
+        self.app_state.definitions[name].apply_failed = True
+        self.apply_errors[name] = message
+        log.error(f"error applying definition {name}: {message}")
+
+    def _mark_apply_skipped(self, names: List[str], action: TerraformAction) -> None:
+        """Mark the definitions a halted apply or destroy phase never reached."""
+        if not names:
+            return
+        for name in names:
+            self.app_state.definitions[name].apply_skipped = True
+        log.warn(
+            f"not running {action} for {len(names)} definitions after a failure; "
+            "use --no-apply-failures to attempt every definition"
+        )
+
+    def _report_apply_results(self, action: TerraformAction) -> None:
+        """
+        Report the outcome of the apply or destroy phase, and exit if it is fatal.
+
+        Every failure of the phase is reported together here; the exit code is
+        governed by `fail_on_apply_error`.
+        """
+        definitions = self.app_state.definitions
+        failed = [name for name in definitions.keys() if definitions[name].apply_failed]
+        skipped = [
+            name for name in definitions.keys() if definitions[name].apply_skipped
+        ]
+
+        if not failed:
+            return
+
+        log.error(f"{len(failed)} definitions failed to {action.value}:")
+        for name in failed:
+            log.error(f"  {name}: {self.apply_errors.get(name, 'unknown error')}")
+        if skipped:
+            log.warn(
+                f"{len(skipped)} definitions were not attempted: {', '.join(skipped)}"
             )
-            if self.app_state.definitions[name].needs_apply:
-                plan_file = self._app_state.definitions[name].plan_file
-                if plan_file is None or not Path(plan_file).exists():
-                    log.info(
-                        f"plan file does not exist for definition: {name}; skipping apply"
-                    )
-                    continue
-                log.info(f"running {action} for definition: {name}")
-                self._exec_terraform_action(name=name, action=action)
+
+        if self.app_state.terraform_options.fail_on_apply_error:
+            self.ctx.exit(1)
 
     def _init_incomplete(self, name: str) -> bool:
         """
@@ -718,6 +848,10 @@ class TerraformCommand(BaseCommand):
                     for line in result.stderr.decode().strip().split("\n"):
                         if line.strip():
                             log.error(f"[{name}] stderr: {line}")
+            if action in (TerraformAction.APPLY, TerraformAction.DESTROY):
+                self._record_apply_failure(
+                    name, f"terraform {action.value} exited {result.exit_code}"
+                )
             self._exec_error_handlers(name, action, result)
             if exit_on_error:
                 self.ctx.exit(1)
@@ -739,15 +873,15 @@ class TerraformCommand(BaseCommand):
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
 
+        if action == TerraformAction.APPLY:
+            if definition.plan_file is not None:
+                Path(definition.plan_file).unlink(missing_ok=True)
+
         log.trace(
             f"executing {TerraformStage.POST.value} {action.value} hooks for definition {name}"
         )
         if not self._exec_hook(definition, action, TerraformStage.POST, result):
             return self._hook_failure(name, action, TerraformStage.POST, exit_on_error)
-
-        if action == TerraformAction.APPLY:
-            if definition.plan_file is not None:
-                Path(definition.plan_file).unlink(missing_ok=True)
 
         return result
 
@@ -1037,11 +1171,9 @@ class TerraformCommand(BaseCommand):
         """
         Record a hook failure as a failure of the phase the hook belongs to.
 
-        Init and plan hook failures are recorded against the definition and
-        governed by that phase's options, so a single bad hook does not end a
-        run; the definition itself is finished either way, no later phase acts
-        on it. Apply and destroy have no such options, so a hook failure there
-        remains fatal.
+        The failure is recorded against the definition and governed by that
+        phase's options; the definition itself is finished either way, no
+        later phase acts on it.
 
         Args:
             name: the definition whose hook failed
@@ -1066,6 +1198,7 @@ class TerraformCommand(BaseCommand):
             definition.needs_apply = False
             self._exec_error_handlers(name, action, result)
         else:
+            self._record_apply_failure(name, message)
             self._exec_error_handlers(name, action, result)
 
         if exit_on_error:
