@@ -6,8 +6,13 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from .models import RUN_SCHEMA, STATUS_SCHEMA, DefinitionStatus, RunRecord
+from .plans import PLAN_SCHEMA, PlanManifest
 
-SCHEMAS = {RUN_SCHEMA: RunRecord, STATUS_SCHEMA: DefinitionStatus}
+SCHEMAS = {
+    RUN_SCHEMA: RunRecord,
+    STATUS_SCHEMA: DefinitionStatus,
+    PLAN_SCHEMA: PlanManifest,
+}
 
 
 def json_schemas() -> Dict[str, dict]:

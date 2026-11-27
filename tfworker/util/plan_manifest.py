@@ -1,0 +1,332 @@
+"""Read, write and move plan manifests, beside plans in S3 or on local disk."""
+
+import hashlib
+import json
+import os
+from abc import ABC, abstractmethod
+from contextlib import closing
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Iterable, Optional, Set, Tuple
+from zipfile import BadZipFile, ZipFile
+
+import botocore.exceptions
+
+import tfworker.util.log as log
+from tfworker.exceptions import BackendError, ReportConflictError
+from tfworker.report import ChangeSummary, new_ulid
+from tfworker.report.plans import PlanManifest
+
+MANIFEST_SUFFIX = ".manifest.json"
+PLAN_NAME = "terraform.tfplan"
+PREVIEW_DIR = "_tfworker/previews"
+PENDING_DIR = "_tfworker/pending"
+CONFLICT_CODES = ("PreconditionFailed", "ConditionalRequestConflict", "412", "409")
+
+
+def manifest_key(plan_key: str) -> str:
+    return f"{plan_key}{MANIFEST_SUFFIX}"
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def plan_base(planfile: Path) -> Tuple[Optional[str], Optional[int]]:
+    """The lineage and serial of the state a saved plan was made against."""
+    try:
+        with ZipFile(str(planfile), "r") as archive:
+            with archive.open("tfstate") as handle:
+                state = json.loads(handle.read())
+        return state.get("lineage") or None, state.get("serial")
+    except (OSError, KeyError, ValueError, BadZipFile) as e:
+        log.debug(f"unable to read the base state of {planfile}: {e}")
+        return None, None
+
+
+def plan_changes(planfile: Path) -> Optional[ChangeSummary]:
+    """Summarize the `terraform show -json` file written beside a plan."""
+    jsonfile = Path(planfile).with_suffix(".tfplan.json")
+    try:
+        return ChangeSummary.from_plan_json(json.loads(jsonfile.read_text()))
+    except (OSError, ValueError) as e:
+        log.debug(f"unable to read plan changes from {jsonfile}: {e}")
+        return None
+
+
+def new_manifest(
+    *,
+    run_id: str,
+    deployment: str,
+    definition: str,
+    planfile: Path,
+    plan_key: str,
+    storage: str,
+    now: datetime,
+    ttl_seconds: Optional[float],
+    destroy: bool = False,
+    **fields,
+) -> PlanManifest:
+    """Describe a plan that was just saved; it starts out pending."""
+    lineage, serial = plan_base(planfile)
+    return PlanManifest(
+        plan_id=new_ulid(),
+        run_id=run_id,
+        deployment=deployment,
+        definition=definition,
+        destroy=destroy,
+        storage=storage,
+        plan_key=plan_key,
+        base_lineage=lineage,
+        base_serial=serial,
+        sha256=sha256_file(planfile),
+        size=Path(planfile).stat().st_size,
+        changes=plan_changes(planfile),
+        created_at=now,
+        expires_at=now + timedelta(seconds=ttl_seconds) if ttl_seconds else None,
+        **fields,
+    )
+
+
+def refusal(manifest: PlanManifest, planfile: Path, now: datetime) -> Optional[str]:
+    """
+    Why a plan may not be applied, or None if it may: it must be pending,
+    unexpired, and the file must be the one the manifest describes.
+    """
+    if manifest.status != "pending":
+        return f"the plan is {manifest.status}, not pending"
+    if manifest.is_expired(now):
+        return f"the plan expired at {manifest.expires_at.isoformat()}"
+    if sha256_file(planfile) != manifest.sha256:
+        return "the plan file does not match the sha256 in its manifest"
+    return None
+
+
+class ManifestStore(ABC):
+    @abstractmethod
+    def read(self, key: str) -> Optional[Tuple[Optional[PlanManifest], str]]:
+        """Return the manifest at `key` and its version tag, or None if there is none.
+
+        An unreadable manifest is returned as (None, tag).
+        """
+
+    @abstractmethod
+    def write(
+        self,
+        key: str,
+        manifest: PlanManifest,
+        if_match: Optional[str] = None,
+        create_only: bool = False,
+    ) -> None:
+        """Write a manifest; raise ReportConflictError when a condition fails."""
+
+    def keys_for(self, definition: str) -> Iterable[str]:
+        """The manifest keys of a definition's pending backend plans."""
+        return []
+
+    @staticmethod
+    def _parse(key: str, text: str) -> Optional[PlanManifest]:
+        try:
+            return PlanManifest.model_validate_json(text)
+        except ValueError as e:
+            log.warn(f"ignoring unreadable plan manifest {key}: {e}")
+            return None
+
+
+class S3ManifestStore(ManifestStore):
+    """
+    Manifests beside plans in the state bucket.
+
+    A pending backend plan also gets a small index entry under
+    `<prefix>/_tfworker/pending/<definition>/`, so finding a definition's
+    pending plans lists a few keys rather than the whole prefix.
+    """
+
+    def __init__(self, client, bucket: str, prefix: str):
+        self._client = client
+        self._bucket = bucket
+        self._prefix = prefix
+
+    def _index_key(self, manifest: PlanManifest) -> str:
+        return f"{self._prefix}/{PENDING_DIR}/{manifest.definition}/{manifest.plan_id}"
+
+    def _update_index(self, key: str, manifest: PlanManifest) -> None:
+        index = self._index_key(manifest)
+        try:
+            if manifest.status == "pending" and manifest.storage == "backend":
+                self._client.put_object(
+                    Bucket=self._bucket, Key=index, Body=key.encode()
+                )
+            else:
+                self._client.delete_object(Bucket=self._bucket, Key=index)
+        except (
+            botocore.exceptions.ClientError,
+            botocore.exceptions.BotoCoreError,
+        ) as e:
+            log.warn(f"unable to update the pending plan index {index}: {e}")
+
+    def read(self, key):
+        try:
+            obj = self._client.get_object(Bucket=self._bucket, Key=key)
+            with closing(obj["Body"]) as body:
+                text = body.read().decode()
+        except botocore.exceptions.ClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                return None
+            raise BackendError(f"unable to read plan manifest {key}: {e}") from e
+        except botocore.exceptions.BotoCoreError as e:
+            raise BackendError(f"unable to read plan manifest {key}: {e}") from e
+        return self._parse(key, text), obj["ETag"]
+
+    def write(self, key, manifest, if_match=None, create_only=False):
+        kwargs = {}
+        if if_match is not None:
+            kwargs["IfMatch"] = if_match
+        if create_only:
+            kwargs["IfNoneMatch"] = "*"
+        try:
+            self._client.put_object(
+                Bucket=self._bucket,
+                Key=key,
+                Body=manifest.model_dump_json(by_alias=True).encode(),
+                ContentType="application/json",
+                **kwargs,
+            )
+        except botocore.exceptions.ClientError as e:
+            if e.response.get("Error", {}).get("Code") in CONFLICT_CODES:
+                raise ReportConflictError(f"plan manifest {key} changed") from e
+            raise BackendError(f"unable to write plan manifest {key}: {e}") from e
+        except botocore.exceptions.BotoCoreError as e:
+            raise BackendError(f"unable to write plan manifest {key}: {e}") from e
+        self._update_index(key, manifest)
+
+    def keys_for(self, definition):
+        """
+        Entries whose manifest is gone, no longer pending, or now describes
+        another plan are pruned as they are found.
+        """
+        index = f"{self._prefix}/{PENDING_DIR}/{definition}/"
+        keys = []
+        try:
+            paginator = self._client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=self._bucket, Prefix=index):
+                for item in page.get("Contents", []):
+                    entry = item["Key"]
+                    obj = self._client.get_object(Bucket=self._bucket, Key=entry)
+                    with closing(obj["Body"]) as body:
+                        key = body.read().decode()
+                    found = self.read(key)
+                    manifest = found[0] if found else None
+                    if (
+                        manifest is None
+                        or manifest.status != "pending"
+                        or manifest.plan_id != entry.rsplit("/", 1)[-1]
+                    ):
+                        self._client.delete_object(Bucket=self._bucket, Key=entry)
+                        continue
+                    if key not in keys:
+                        keys.append(key)
+        except (
+            botocore.exceptions.ClientError,
+            botocore.exceptions.BotoCoreError,
+        ) as e:
+            raise BackendError(f"unable to list pending plans: {e}") from e
+        return keys
+
+
+class LocalManifestStore(ManifestStore):
+    """Manifests beside local plan files; the tag is the content's sha256."""
+
+    def read(self, key):
+        path = Path(key)
+        try:
+            text = path.read_text()
+        except FileNotFoundError:
+            return None
+        except OSError as e:
+            raise BackendError(f"unable to read plan manifest {key}: {e}") from e
+        return self._parse(key, text), hashlib.sha256(text.encode()).hexdigest()
+
+    def write(self, key, manifest, if_match=None, create_only=False):
+        path = Path(key)
+        current = self.read(key)
+        if create_only and current is not None:
+            raise ReportConflictError(f"plan manifest {key} already exists")
+        if if_match is not None and (current is None or current[1] != if_match):
+            raise ReportConflictError(f"plan manifest {key} changed")
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        try:
+            tmp.write_text(manifest.model_dump_json(by_alias=True))
+            os.replace(tmp, path)
+        except OSError as e:
+            raise BackendError(f"unable to write plan manifest {key}: {e}") from e
+
+
+def move(
+    store: ManifestStore,
+    key: str,
+    status: str,
+    now: datetime,
+    run_id: Optional[str] = None,
+    reason: Optional[str] = None,
+    expect: Optional[Set[str]] = None,
+    plan_id: Optional[str] = None,
+    retries: int = 3,
+) -> Optional[PlanManifest]:
+    """
+    Move the manifest at `key` to `status` with a conditional write.
+
+    Returns the updated manifest, or None when there is no manifest, it is in
+    a status that cannot make the move (or is not one of `expect`), it now
+    describes a plan other than `plan_id`, or other writers kept winning.
+    """
+    for _ in range(retries):
+        found = store.read(key)
+        if found is None or found[0] is None:
+            return None
+        current, tag = found
+        if plan_id is not None and current.plan_id != plan_id:
+            return None
+        if expect is not None and current.status not in expect:
+            return None
+        if not current.can_move(status):
+            return None
+        updated = current.moved(status, at=now, run_id=run_id, reason=reason)
+        try:
+            store.write(key, updated, if_match=tag)
+            return updated
+        except ReportConflictError:
+            log.debug(f"plan manifest {key} changed while moving to {status}; retrying")
+    log.warn(f"gave up moving plan manifest {key} to {status}")
+    return None
+
+
+def mark_pending_stale(
+    store: ManifestStore,
+    definition: str,
+    now: datetime,
+    run_id: Optional[str],
+    reason: str,
+    keep: Optional[str] = None,
+) -> int:
+    """Mark every other pending plan for a definition stale; return how many moved."""
+    moved = 0
+    try:
+        keys = list(store.keys_for(definition))
+    except BackendError as e:
+        log.warn(f"unable to find saved plans for {definition} to mark stale: {e}")
+        return 0
+    for key in keys:
+        if key == keep:
+            continue
+        try:
+            if move(store, key, "stale", now, run_id, reason, expect={"pending"}):
+                log.info(f"saved plan {key} is now stale: {reason}")
+                moved += 1
+        except BackendError as e:
+            log.warn(f"unable to mark saved plan {key} stale: {e}")
+    return moved

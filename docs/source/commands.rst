@@ -275,6 +275,26 @@ another process holds. It takes seconds or a duration such as ``90s``, ``10m`` o
 ``-lock-timeout`` to plan, apply and destroy. Without it, terraform fails at once on a held lock. When the
 ``lock`` handler is configured, it sets the timeout instead; see :ref:`state-locks`.
 
+\\-\\-plan-ttl
+++++++++++++++
+
+.. index::
+   triple: terraform; options; --plan-ttl
+
+The **\\-\\-plan-ttl** option (``WORKER_PLAN_TTL``, default ``7d``) sets how long a saved plan may be
+applied after it was made, as seconds or a duration such as ``12h`` or ``7d``. An older plan is marked
+``expired`` and refused. See :ref:`saved-plans`.
+
+\\-\\-require-plan-manifest
++++++++++++++++++++++++++++
+
+.. index::
+   triple: terraform; options; --require-plan-manifest
+
+The **\\-\\-require-plan-manifest** flag (``WORKER_REQUIRE_PLAN_MANIFEST``) refuses to apply a saved plan
+that has no manifest, such as one saved by an older worker. Without it, such a plan is applied with a
+warning. See :ref:`saved-plans`.
+
 \\-\\-intent
 ++++++++++++
 
@@ -283,7 +303,8 @@ another process holds. It takes seconds or a duration such as ``90s``, ``10m`` o
 
 The **\\-\\-intent** option (``WORKER_INTENT``) optionally says what the run's plans are for: ``deploy``,
 ``preview`` or ``drift``. The report handler records it, and a ``preview`` or ``drift`` plan never becomes
-a pending plan. See :ref:`reporting`.
+a pending plan. With ``--backend-plans``, ``preview`` plans are saved apart under
+``<prefix>/_tfworker/previews/`` and never applied by a later run. See :ref:`reporting`.
 
 \\-\\-show-output / \\-\\-no-show-output
 ++++++++++++++++++++++++++++++++++++++++

@@ -100,18 +100,34 @@ class ReportConflictError(BackendError):
     """A conditional report write lost to a concurrent writer."""
 
 
-class LockUnavailableError(HandlerError):
+class DefinitionRefusedError(HandlerError):
     """
-    A definition's state lock could not be acquired: it was held past the
-    wait deadline, or it is stale and the stale policy is to fail.
+    A handler refused to let terraform run for one definition.
 
     The phase treats it as that definition's failure rather than ending the
     run, unless `fail_run` is set.
     """
 
+    kind = "refused"
+
     def __init__(self, message: str, fail_run: bool = False) -> None:
         super().__init__(message, terminate=False)
         self.fail_run = fail_run
+
+
+class PlanRefusedError(DefinitionRefusedError):
+    """A saved plan failed the apply gate: not pending, expired, or altered."""
+
+    kind = "saved plan refused"
+
+
+class LockUnavailableError(DefinitionRefusedError):
+    """
+    A definition's state lock could not be acquired: it was held past the
+    wait deadline, or it is stale and the stale policy is to fail.
+    """
+
+    kind = "state lock unavailable"
 
 
 class DefinitionsSourceError(TFWorkerException):

@@ -1,0 +1,511 @@
+{
+  "$defs": {
+    "BackendLocation": {
+      "additionalProperties": true,
+      "description": "Where a definition's state lives. A state is identified by this, not by name.",
+      "properties": {
+        "account_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Account Id"
+        },
+        "backend": {
+          "title": "Backend",
+          "type": "string"
+        },
+        "bucket": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bucket"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region"
+        },
+        "state_key": {
+          "title": "State Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend",
+        "state_key"
+      ],
+      "title": "BackendLocation",
+      "type": "object"
+    },
+    "ChangeSummary": {
+      "additionalProperties": true,
+      "description": "Counts as terraform prints them, plus the address and actions of each change.",
+      "properties": {
+        "add": {
+          "default": 0,
+          "title": "Add",
+          "type": "integer"
+        },
+        "change": {
+          "default": 0,
+          "title": "Change",
+          "type": "integer"
+        },
+        "destroy": {
+          "default": 0,
+          "title": "Destroy",
+          "type": "integer"
+        },
+        "import": {
+          "default": 0,
+          "title": "Import",
+          "type": "integer"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/ResourceChange"
+          },
+          "title": "Resources",
+          "type": "array"
+        }
+      },
+      "title": "ChangeSummary",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": true,
+      "description": "Observable facts about where a run came from, recorded in place of intent.",
+      "properties": {
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Host"
+        },
+        "intent": {
+          "anyOf": [
+            {
+              "enum": [
+                "deploy",
+                "preview",
+                "drift"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Intent"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        },
+        "plan_storage": {
+          "default": "run",
+          "enum": [
+            "backend",
+            "local",
+            "run"
+          ],
+          "title": "Plan Storage",
+          "type": "string"
+        },
+        "repository": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RepositoryState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "terraform_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Terraform Version"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User"
+        },
+        "worker_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Worker Version"
+        }
+      },
+      "title": "Provenance",
+      "type": "object"
+    },
+    "RepositoryState": {
+      "additionalProperties": true,
+      "description": "The git checkout the worker ran from.",
+      "properties": {
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Branch"
+        },
+        "dirty": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dirty"
+        },
+        "on_tracked_ref": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Tracked Ref"
+        },
+        "sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha"
+        },
+        "tracked_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tracked Ref"
+        }
+      },
+      "title": "RepositoryState",
+      "type": "object"
+    },
+    "ResourceChange": {
+      "additionalProperties": true,
+      "properties": {
+        "actions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "address": {
+          "title": "Address",
+          "type": "string"
+        },
+        "importing": {
+          "default": false,
+          "title": "Importing",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "address",
+        "actions"
+      ],
+      "title": "ResourceChange",
+      "type": "object"
+    },
+    "StatusChange": {
+      "additionalProperties": true,
+      "properties": {
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "applying",
+            "applied",
+            "failed",
+            "stale",
+            "superseded",
+            "expired",
+            "discarded"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "at"
+      ],
+      "title": "StatusChange",
+      "type": "object"
+    }
+  },
+  "$id": "tfworker.plan/v1",
+  "additionalProperties": true,
+  "properties": {
+    "base_lineage": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Base Lineage"
+    },
+    "base_serial": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Base Serial"
+    },
+    "base_state_version_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Base State Version Id"
+    },
+    "changes": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChangeSummary"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "definition": {
+      "title": "Definition",
+      "type": "string"
+    },
+    "deployment": {
+      "title": "Deployment",
+      "type": "string"
+    },
+    "destroy": {
+      "default": false,
+      "title": "Destroy",
+      "type": "boolean"
+    },
+    "expires_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expires At"
+    },
+    "history": {
+      "items": {
+        "$ref": "#/$defs/StatusChange"
+      },
+      "title": "History",
+      "type": "array"
+    },
+    "plan_id": {
+      "title": "Plan Id",
+      "type": "string"
+    },
+    "plan_key": {
+      "title": "Plan Key",
+      "type": "string"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema": {
+      "const": "tfworker.plan/v1",
+      "default": "tfworker.plan/v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "sha256": {
+      "title": "Sha256",
+      "type": "string"
+    },
+    "size": {
+      "title": "Size",
+      "type": "integer"
+    },
+    "state": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BackendLocation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "status": {
+      "default": "pending",
+      "enum": [
+        "pending",
+        "applying",
+        "applied",
+        "failed",
+        "stale",
+        "superseded",
+        "expired",
+        "discarded"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "storage": {
+      "default": "backend",
+      "enum": [
+        "backend",
+        "local",
+        "preview"
+      ],
+      "title": "Storage",
+      "type": "string"
+    }
+  },
+  "required": [
+    "plan_id",
+    "run_id",
+    "deployment",
+    "definition",
+    "plan_key",
+    "sha256",
+    "size",
+    "created_at"
+  ],
+  "title": "PlanManifest",
+  "type": "object"
+}

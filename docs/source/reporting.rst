@@ -107,9 +107,67 @@ the same contract. JSON Schema exports are published with these docs:
 Regenerate them with ``python -m tfworker.report.schema docs/source/_static/schemas``; a test fails when
 they are out of date.
 
+.. _saved-plans:
+
+Saved plans and the apply gate
+------------------------------
+
+Every plan the worker saves, in the backend with ``--backend-plans`` or on disk with ``--plan-file-path``,
+gets a ``tfworker.plan/v1`` manifest beside it (``terraform.tfplan.manifest.json`` in the backend,
+``<definition>.tfplan.manifest.json`` on disk). The manifest records the run that made the plan and its
+provenance, the definition, whether it is a destroy plan, the lineage, serial and S3 version id of the
+state it was made against, the plan's sha256 and size, its change counts and addresses, when it was made
+and when it expires (``--plan-ttl``, default ``7d``), and its status with a history of every change.
+
+A plan starts out ``pending``. From there it becomes ``applying`` and then ``applied`` or ``failed``, or it
+is retired as ``stale`` (the state changed), ``superseded`` (a newer plan replaced it), ``expired`` or
+``discarded`` (its file no longer matches the manifest). A plan is only applied when:
+
+1. it is ``pending``
+2. it has not expired
+3. its file matches the manifest's sha256
+4. its lineage and serial still match the state
+5. this run won the conditional write that moves it from ``pending`` to ``applying``
+
+The last step means two runs can never apply the same plan; the one that loses is refused. A refused plan
+counts as that definition's apply failure and follows ``--apply-failures``.
+
+After a successful apply or destroy, every other pending backend plan for that definition is marked
+``stale`` straight away, rather than waiting for a later run to find its lineage out of date. Pending
+backend plans are found through small index entries under ``<prefix>/_tfworker/pending/<definition>/``,
+so this never lists the whole bucket. ``--force-plan`` marks the plan it replaces ``superseded``.
+
+Plans on disk are never pending fleet wide, since only the holder of the file can apply them, but they
+are gated and taken the same way, and applying one still marks the definition's pending backend plans
+stale.
+
+A saved plan with no manifest, made by an older worker, is still applied with a warning.
+``--require-plan-manifest`` (``WORKER_REQUIRE_PLAN_MANIFEST``) refuses it instead.
+
+Previews
+~~~~~~~~
+
+A run with ``--intent preview`` saves its backend plans under ``<prefix>/_tfworker/previews/<run_id>/``.
+They are never offered to a later apply run and do not count as pending. Expire them with a bucket
+lifecycle rule, for example:
+
+.. code-block:: json
+
+    {
+      "Rules": [
+        {
+          "ID": "expire-tfworker-previews",
+          "Filter": {"Prefix": "<prefix>/_tfworker/previews/"},
+          "Status": "Enabled",
+          "Expiration": {"Days": 14}
+        }
+      ]
+    }
+
 IAM
 ---
 
 On top of what terraform needs, the backend credentials need ``s3:GetObject`` and ``s3:PutObject`` on
-``<prefix>/_tfworker/*``, ``s3:GetObject`` on the state (for lineage and serial), and
+``<prefix>/_tfworker/*`` (plus ``s3:DeleteObject`` and ``s3:ListBucket`` there for the pending plan index),
+``s3:GetObject`` and ``s3:PutObject`` on saved plan manifests, ``s3:GetObject`` on the state (for lineage and serial), and
 ``sts:GetCallerIdentity`` for the account id.

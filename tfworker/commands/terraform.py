@@ -16,9 +16,9 @@ from tfworker.commands.base import BaseCommand
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.definitions import Definition
 from tfworker.exceptions import (
+    DefinitionRefusedError,
     HandlerError,
     HookError,
-    LockUnavailableError,
     TFWorkerException,
 )
 from tfworker.util.duration import parse_duration
@@ -893,8 +893,8 @@ class TerraformCommand(BaseCommand):
                 definition=definition,
                 working_dir=self.app_state.working_dir,
             )
-        except LockUnavailableError as e:
-            return self._lock_unavailable(name, action, e, exit_on_error)
+        except DefinitionRefusedError as e:
+            return self._definition_refused(name, action, e, exit_on_error)
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
@@ -1007,8 +1007,8 @@ class TerraformCommand(BaseCommand):
                 definition=definition,
                 working_dir=self.app_state.working_dir,
             )
-        except LockUnavailableError as e:
-            self._lock_unavailable(name, TerraformAction.PLAN, e, exit_on_error=False)
+        except DefinitionRefusedError as e:
+            self._definition_refused(name, TerraformAction.PLAN, e, exit_on_error=False)
             return False
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
@@ -1278,22 +1278,24 @@ class TerraformCommand(BaseCommand):
         )
         return definition.lock_fail_run
 
-    def _lock_unavailable(
+    def _definition_refused(
         self,
         name: str,
         action: TerraformAction,
-        error: LockUnavailableError,
+        error: DefinitionRefusedError,
         exit_on_error: bool,
     ) -> "TerraformResult":
         """
-        Record that a definition's state lock could not be acquired.
+        Record that a handler refused to let terraform run for a definition,
+        such as a state lock that stayed held or a saved plan that failed the
+        apply gate.
 
         It counts as a failure of that definition's plan, apply or destroy and
         follows the phase's failure options, like a failing hook, unless the
-        lock handler asked for the whole run to stop.
+        handler asked for the whole run to stop.
         """
         definition: Definition = self.app_state.definitions[name]
-        log.error(f"state lock unavailable for definition {name}: {error.message}")
+        log.error(f"{error.kind} for definition {name}: {error.message}")
         result = TerraformResult.synthesized(1, error.message)
 
         if action == TerraformAction.PLAN:
