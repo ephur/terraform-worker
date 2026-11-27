@@ -13,6 +13,7 @@
 - Hook remote vars (`TF_REMOTE_*`) are now resolved by the HCL2 path: python-hcl2 wraps references as `${...}`, which the parser rejected, and a call to the nonexistent `log.warning` crashed into the regex fallback. Simple references produce the same values as before; nested references in maps and lists are now resolved (#183).
 - Removed `_check_handlers_ready`, which never removed anything. The handlers collection already filters on `is_ready()` (#184).
 - `--config-var` values containing `=` no longer crash definition preparation or get dropped from config templates (#187).
+- `terraform get` now runs with `--terraform-bin` and the same authenticator environment as init, plan and apply, instead of the `terraform` on `PATH` with no credentials (#185).
 
 # Changes 0.12.0 -> 0.13.0 (2024-06...)
 
