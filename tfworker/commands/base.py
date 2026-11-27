@@ -262,7 +262,9 @@ def _init_handlers(handlers_config: Dict[str, Any]) -> "HandlersCollection":
     handlers = HandlersCollection(parsed_handlers)
     log.debug(f"initialized handlers {[x for x in handlers.keys()]}")
 
-    _check_handlers_ready(handlers)
+    # Readiness is not checked here: HandlersCollection filters on
+    # is_ready() when it orders handlers and in exec_setup/exec_teardown.
+    # Checking early would also trigger network checks at startup.
     return handlers
 
 
@@ -344,18 +346,3 @@ def _add_universal_handlers(parsed_handlers: Dict[str, Any]):
         log.trace(f"initializing universal handler {h}")
         if h not in parsed_handlers.keys():
             parsed_handlers[h] = hr.get_handler(h)()
-
-
-def _check_handlers_ready(handlers: "HandlersCollection"):
-    """
-    Checks if all handlers are ready.
-
-    Args:
-        handlers (HandlersCollection): The handlers collection.
-
-    """
-    for h, v in handlers.items():
-        log.trace(f"checking if handler {h} is ready")
-        if not v.is_ready:
-            log.debug(f"handler {h} is not ready, removing it")
-            handlers.pop(h)

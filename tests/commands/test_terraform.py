@@ -115,7 +115,7 @@ def make_command(tmp_path, **opts_overrides):
     # so a method reading the wrong one fails here as it would in production
     root_overrides = {
         key: opts_overrides.pop(key)
-        for key in ("backend_plans", "run_id")
+        for key in ("backend_plans", "run_id", "working_dir")
         if key in opts_overrides
     }
 
@@ -189,6 +189,38 @@ class TestTerraformCommandMethods:
         cmd.prep_providers()
         assert cmd.app_state.terraform_options.provider_cache.endswith("cache")
         mprov.assert_called_once()
+
+    def test_prep_providers_uses_resolved_working_dir(self, tmp_path, mocker):
+        """Without --working-dir, mirror into app_state.working_dir (#181)."""
+        cmd = make_command(tmp_path, working_dir=None)
+        mprov = mocker.patch("tfworker.util.terraform.mirror_providers")
+        cmd.prep_providers()
+        assert mprov.call_args.args[2] == str(tmp_path)
+
+    def test_run_uses_resolved_working_dir(self, tmp_path, mocker):
+        """Without --working-dir, terraform must run in the real temp dir (#181)."""
+        cmd = make_command(tmp_path, working_dir=None)
+        cmd.app_state.definitions["def"].plan_file = "plan"
+        mocker.patch.object(TerraformCommandConfig, "get_params", return_value="")
+        pe = mocker.patch("tfworker.util.system.pipe_exec", return_value=(0, b"", b""))
+        cmd._run("def", TerraformAction.APPLY)
+        cwd = Path(pe.call_args.kwargs["cwd"])
+        assert "None" not in cwd.parts
+        assert cwd == (tmp_path / "definitions" / "def").resolve()
+
+    def test_generate_plan_output_json_uses_resolved_working_dir(
+        self, tmp_path, mocker
+    ):
+        cmd = make_command(tmp_path, working_dir=None)
+        plan = tmp_path / "plan.tfplan"
+        plan.write_text("orig")
+        cmd.app_state.definitions["def"].plan_file = str(plan)
+        pe = mocker.patch(
+            "tfworker.commands.terraform.pipe_exec", return_value=(0, b"o", b"e")
+        )
+        cmd._generate_plan_output_json("def")
+        cwd = Path(pe.call_args.kwargs["cwd"])
+        assert cwd == (tmp_path / "definitions" / "def").resolve()
 
     def test_generate_plan_output_json(self, tmp_path, mocker):
         cmd = make_command(tmp_path)
