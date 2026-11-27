@@ -201,15 +201,15 @@ give it queues, an EventBridge bus, or both:
 Each event's ``data`` is exactly what was written, and an event is only sent after that write succeeded,
 so the bucket stays the source of truth and a consumer that missed events can reconcile from it. Plan
 events also cover manifests kept on disk with ``--plan-file-path``, which only the run's own machine has.
-Run and status events come from the ``report`` handler, and lock events from the ``lock`` handler, so
-enable those handlers to get them. The event types are:
+Run and status events come from the ``report`` handler, so enable it to get them, and lock events need
+``locking`` configured (see :ref:`state-locks`). The event types are:
 
 - ``io.tfworker.run.v1``: a ``tfworker.run/v1`` record, once per run.
 - ``io.tfworker.status.v1``: a ``tfworker.status/v1`` snapshot, after each update. The ``subject`` is the
   definition.
 - ``io.tfworker.plan.v1``: a ``tfworker.plan/v1`` manifest, each time it is written or changes status.
-- ``io.tfworker.lock.waiting``: the ``lock`` handler started waiting for a held state lock. ``data`` has
-  the deployment, definition, the lock's details and how long the handler will wait.
+- ``io.tfworker.lock.waiting``: the worker started waiting for a held state lock. ``data`` has the
+  deployment, definition, the lock's details and how long the worker will wait.
 
 Every event has ``source`` ``urn:tfworker:deployment:<deployment>`` and a ``tfworkerrunid`` extension
 attribute naming the run that caused it. ``types`` (shell-style patterns) filters which events are sent; the

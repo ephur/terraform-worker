@@ -19,9 +19,12 @@ from tfworker.exceptions import (
     DefinitionRefusedError,
     HandlerError,
     HookError,
+    LockUnavailableError,
     TFWorkerException,
 )
+from tfworker.locking import StateLocker
 from tfworker.util.duration import parse_duration
+from tfworker.util.provenance import current_run_id
 from tfworker.util.system import pipe_exec, pipe_exec_logged
 from tfworker.util.terraform import quote_index_brackets
 
@@ -906,7 +909,10 @@ class TerraformCommand(BaseCommand):
             return self._hook_failure(name, action, TerraformStage.PRE, exit_on_error)
 
         log.trace(f"running terraform {action.value} for definition {name}")
-        result = self._run(name, action)
+        try:
+            result = self._run_locked(name, action)
+        except LockUnavailableError as e:
+            return self._definition_refused(name, action, e, exit_on_error)
         if result.exit_code:
             log.error(f"error running terraform {action.value} for {name}")
             # If stream_output was disabled, show the captured output at error level
@@ -1039,7 +1045,11 @@ class TerraformCommand(BaseCommand):
                 f"targeting resources: {', '.join(self._app_state.terraform_options.target)}"
             )
 
-        result = self._run(name, TerraformAction.PLAN)
+        try:
+            result = self._run_locked(name, TerraformAction.PLAN)
+        except LockUnavailableError as e:
+            self._definition_refused(name, TerraformAction.PLAN, e, exit_on_error=False)
+            return
 
         if result.exit_code == 0:
             if definition.always_apply:
@@ -1118,15 +1128,56 @@ class TerraformCommand(BaseCommand):
         log.trace(f"writing json plan file {jsonfile}")
         result.log_file(jsonfile.resolve())
 
-    def _lock_timeout(self, definition: Definition) -> Optional[float]:
+    @property
+    def state_locker(self) -> Optional[StateLocker]:
+        """The state locker when `locking` is configured, else None."""
+        if not hasattr(self, "_state_locker"):
+            options = getattr(self.app_state.loaded_config, "locking", None)
+            self._state_locker = None
+            if options is not None:
+                self._state_locker = StateLocker(
+                    options,
+                    self.app_state.backend,
+                    self.app_state.terraform_options.terraform_bin,
+                    env=lambda: terraform_env(self.app_state),
+                    run_id=current_run_id(self.app_state)[0],
+                    deployment=self.app_state.deployment,
+                )
+        return self._state_locker
+
+    def _run_locked(self, name: str, action: TerraformAction) -> "TerraformResult":
+        """
+        Run terraform once the definition's state lock is free, keeping the
+        worker lease while it runs.
+
+        Raises:
+            LockUnavailableError: the state lock could not be acquired
+        """
+        locker = self.state_locker
+        if locker is None or not locker.covers(action):
+            return self._run(name, action)
+        definition: Definition = self.app_state.definitions[name]
+        started = time.monotonic()
+        try:
+            deadline = locker.acquire(
+                action, name, definition.get_target_path(self.app_state.working_dir)
+            )
+        finally:
+            definition.lock_wait_seconds = time.monotonic() - started
+        try:
+            return self._run(name, action, lock_deadline=deadline)
+        finally:
+            locker.release(name)
+
+    def _lock_timeout(self, lock_deadline: Optional[float]) -> Optional[float]:
         """
         Seconds terraform may wait for the state lock, or None for terraform's default.
 
-        The lock handler sets a deadline on the definition, so time spent in
-        PRE hooks counts against its wait; otherwise `--lock-timeout` applies.
+        With locking configured, whatever is left of its wait applies;
+        otherwise `--lock-timeout` does.
         """
-        if definition.lock_deadline is not None:
-            return max(definition.lock_deadline - time.monotonic(), 0.0)
+        if lock_deadline is not None:
+            return max(lock_deadline - time.monotonic(), 0.0)
         option = getattr(self.app_state.terraform_options, "lock_timeout", None)
         if option is None:
             return None
@@ -1136,6 +1187,7 @@ class TerraformCommand(BaseCommand):
         self,
         definition_name: str,
         action: TerraformAction,
+        lock_deadline: Optional[float] = None,
     ) -> "TerraformResult":
         """
         run terraform
@@ -1145,7 +1197,7 @@ class TerraformCommand(BaseCommand):
         params: str = self.terraform_config.get_params(
             action,
             plan_file=definition.plan_file,
-            lock_timeout=self._lock_timeout(definition),
+            lock_timeout=self._lock_timeout(lock_deadline),
         )
 
         working_dir: str = definition.get_target_path(self.app_state.working_dir)
@@ -1271,12 +1323,11 @@ class TerraformCommand(BaseCommand):
         output = (result.stderr or b"") + (result.stdout or b"")
         if LOCK_ERROR_MARKER not in output:
             return False
-        definition: Definition = self.app_state.definitions[name]
         log.error(
             f"state lock unavailable for definition {name}: terraform could not "
             "acquire the lock before -lock-timeout ran out"
         )
-        return definition.lock_fail_run
+        return self.state_locker is not None and self.state_locker.fail_run
 
     def _definition_refused(
         self,
@@ -1286,13 +1337,13 @@ class TerraformCommand(BaseCommand):
         exit_on_error: bool,
     ) -> "TerraformResult":
         """
-        Record that a handler refused to let terraform run for a definition,
-        such as a state lock that stayed held or a saved plan that failed the
-        apply gate.
+        Record that terraform could not run for a definition: its state lock
+        stayed held, or a handler refused it, such as a saved plan that failed
+        the apply gate.
 
         It counts as a failure of that definition's plan, apply or destroy and
         follows the phase's failure options, like a failing hook, unless the
-        handler asked for the whole run to stop.
+        error asks for the whole run to stop.
         """
         definition: Definition = self.app_state.definitions[name]
         log.error(f"{error.kind} for definition {name}: {error.message}")
