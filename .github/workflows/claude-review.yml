@@ -53,6 +53,8 @@ jobs:
           anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
           anthropic_service_account_id: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
           anthropic_workspace_id: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+          # Set the CLAUDE_REVIEW_DEBUG repository variable to "true" to log Claude's full output; the logs are public.
+          show_full_output: ${{ vars.CLAUDE_REVIEW_DEBUG == 'true' }}
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
