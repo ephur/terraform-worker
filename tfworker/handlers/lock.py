@@ -2,12 +2,14 @@
 
 Before terraform plans, applies or destroys a definition, the handler reads
 the definition's state lock. A live lock is waited out, polling until it is
-released or the wait runs out. A stale lock, one older than ``stale_after``
-with no fresh worker lease beside it, follows ``on_stale``.
+released or the wait runs out. A stale lock follows ``on_stale``.
 
 While terraform runs, the handler keeps a worker lease beside the state and
 refreshes it every ``heartbeat``. Another worker that finds the lock can then
-tell a long-running command from one whose process died with the lock held.
+tell a long-running command from one whose process died with the lock held:
+a lock whose lease is fresh is live at any age, a lock whose lease stopped
+being refreshed is stale at once, and a lock with no lease (taken outside the
+worker, or with the heartbeat off) is stale once older than ``stale_after``.
 
 Example configuration::
 
@@ -15,13 +17,15 @@ Example configuration::
       lock:
         wait: 10m             # how long to wait for a live lock
         poll_interval: 15s
-        stale_after: 2h       # a lock older than this, with no fresh lease, is stale
+        stale_after: 2h       # a lock older than this, with no lease, is stale
         on_stale: fail        # fail | wait | force_unlock
-        heartbeat: 30s
+        heartbeat: 30s        # 0 turns the lease off
+        on_timeout: fail_definition   # or fail_run
         actions: [plan, apply, destroy]
 
 A lock still held when the wait runs out fails that definition, and the phase's
-failure options decide whether the run continues. Whatever is left of the wait
+failure options decide whether the run continues; ``on_timeout: fail_run``
+stops the run instead. Whatever is left of the wait
 is passed to terraform as ``-lock-timeout``, which covers the gap between the
 check and terraform taking the lock.
 """
@@ -62,6 +66,11 @@ class OnStale(str, Enum):
     FORCE_UNLOCK = "force_unlock"
 
 
+class OnTimeout(str, Enum):
+    FAIL_DEFINITION = "fail_definition"
+    FAIL_RUN = "fail_run"
+
+
 class LockConfig(BaseModel):
     """Configuration for the lock handler. Durations accept seconds or 1h30m."""
 
@@ -72,6 +81,7 @@ class LockConfig(BaseModel):
     stale_after: float = 7200.0
     on_stale: OnStale = OnStale.FAIL
     heartbeat: float = 30.0
+    on_timeout: OnTimeout = OnTimeout.FAIL_DEFINITION
     actions: List[TerraformAction] = Field(default_factory=lambda: list(LOCKED_ACTIONS))
 
     @field_validator("wait", "poll_interval", "stale_after", "heartbeat", mode="before")
@@ -79,7 +89,7 @@ class LockConfig(BaseModel):
     def _duration(cls, value):
         return parse_duration(value)
 
-    @field_validator("poll_interval", "heartbeat")
+    @field_validator("poll_interval")
     @classmethod
     def _positive(cls, value: float) -> float:
         if value <= 0:
@@ -220,19 +230,20 @@ class LockHandler(BaseHandler):
             if remaining <= 0:
                 raise LockUnavailableError(
                     f"{definition.name} state is still locked after waiting "
-                    f"{format_duration(self.config.wait)}: {self._describe(lock, now)}"
+                    f"{format_duration(self.config.wait)}: {self._describe(lock, now)}",
+                    fail_run=self.config.on_timeout == OnTimeout.FAIL_RUN,
                 )
-            if attempt == 0:
-                log.info(
-                    f"{definition.name} state is locked {self._describe(lock, now)}; "
-                    f"waiting up to {format_duration(self.config.wait)}"
-                )
+            log.info(
+                f"{definition.name} state is locked {self._describe(lock, now)}; "
+                f"waiting up to {format_duration(remaining)} more"
+            )
             delay = min(self._poll_delay(attempt), remaining)
             attempt += 1
             self._sleep(delay)
 
         definition.lock_timeout = max(deadline - self._monotonic(), 0.0)
-        self._start_heartbeat(action, definition)
+        if self.config.heartbeat > 0:
+            self._start_heartbeat(action, definition)
 
     def _read_lock(self, name: str) -> Optional[LockInfo]:
         try:
@@ -244,14 +255,18 @@ class LockHandler(BaseHandler):
             return None
 
     def _is_stale(self, name: str, lock: LockInfo, now: datetime) -> bool:
-        if lock.age(now) <= self.config.stale_after:
-            return False
+        """
+        A lock held by a worker is stale once its lease stops being refreshed,
+        whatever its age. Any other lock is stale once older than stale_after.
+        """
         try:
             lease = self.backend.get_lease(name)
         except BackendError as e:
             log.warn(f"unable to read the worker lease for {name}: {e}")
             return False
-        return not (lease and lease.holds(lock) and lease.is_fresh(now))
+        if lease is not None and lease.holds(lock):
+            return not lease.is_fresh(now)
+        return lock.age(now) > self.config.stale_after
 
     def _poll_delay(self, attempt: int) -> float:
         base = self.config.poll_interval * min(2**attempt, 4)

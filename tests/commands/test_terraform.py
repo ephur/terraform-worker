@@ -2420,6 +2420,16 @@ class TestLockUnavailable:
         assert cmd.apply_errors["def"] == "still locked"
         assert cmd.app_state.definitions["def"].apply_failed is True
 
+    def test_fail_run_exits_from_plan(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        cmd.app_state.handlers.exec_handlers.side_effect = [
+            LockUnavailableError("still locked", fail_run=True),
+            None,
+        ]
+        with pytest.raises(SystemExit):
+            cmd._exec_terraform_pre_plan("def")
+        cmd.ctx.exit.assert_called_once_with(1)
+
     def test_apply_lock_without_exit(self, tmp_path, mocker):
         cmd = make_command(tmp_path)
         cmd.app_state.handlers.exec_handlers.side_effect = [

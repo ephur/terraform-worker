@@ -111,7 +111,8 @@ class TestLockConfig:
         "field,value",
         [
             ("poll_interval", 0),
-            ("heartbeat", "0s"),
+            ("poll_interval", "0s"),
+            ("on_timeout", "ignore"),
             ("wait", "soon"),
             ("on_stale", "ignore"),
             ("actions", ["init"]),
@@ -177,6 +178,19 @@ class TestAcquire:
         assert sum(clock.sleeps) == pytest.approx(60)
         assert definition.lock_timeout is None
 
+    def test_on_timeout_fail_run(self, backend, definition):
+        backend.get_lock.return_value = _lock()
+        handler = make_handler(backend, wait=0, on_timeout="fail_run")
+        with pytest.raises(LockUnavailableError) as error:
+            pre(handler, definition)
+        assert error.value.fail_run is True
+
+    def test_timeout_fails_definition_by_default(self, backend, definition):
+        backend.get_lock.return_value = _lock()
+        with pytest.raises(LockUnavailableError) as error:
+            pre(make_handler(backend, wait=0), definition)
+        assert error.value.fail_run is False
+
     def test_zero_wait_fails_at_once(self, backend, definition):
         backend.get_lock.return_value = _lock()
         clock = Clock()
@@ -224,6 +238,19 @@ class TestStaleLocks:
         backend.get_lease.return_value = lease
         with pytest.raises(LockUnavailableError, match="stale"):
             pre(make_handler(backend), definition)
+
+    def test_young_lock_with_dead_lease_is_stale(self, backend, definition):
+        backend.get_lock.return_value = _lock(age=300)
+        backend.get_lease.return_value = _lease(heartbeat_age=200)
+        with pytest.raises(LockUnavailableError, match="stale"):
+            pre(make_handler(backend), definition)
+
+    def test_lease_left_before_the_lock_is_ignored(self, backend, definition):
+        backend.get_lock.side_effect = [_lock(age=60), None]
+        backend.get_lease.return_value = _lease(heartbeat_age=3600)
+        started = []
+        pre(make_handler(backend, started=started), definition)
+        assert started
 
     def test_unreadable_lease_is_treated_as_live(self, backend, definition):
         backend.get_lock.side_effect = [_lock(age=3 * 3600), None]
@@ -287,6 +314,14 @@ class TestHeartbeat:
         backend.delete_lease.assert_called_once_with("def1")
         assert definition.lock_timeout is None
         assert handler._heartbeats == {}
+
+    def test_heartbeat_zero_keeps_no_lease(self, backend, definition):
+        handler = make_handler(backend, heartbeat=0, wait=30)
+        pre(handler, definition)
+        backend.put_lease.assert_not_called()
+        assert definition.lock_timeout == 30
+        handler.execute(PLAN, TerraformStage.POST, "dep", definition, "/work")
+        backend.delete_lease.assert_not_called()
 
     def test_released_on_error_skip_and_teardown(self, backend, definition):
         handler = make_handler(backend)

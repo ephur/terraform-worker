@@ -72,3 +72,11 @@ class TestWorkerLease:
         assert _lease().holds(_lock())
         assert not _lease(host="pod-9").holds(_lock())
         assert not _lease(host="").holds(_lock(Who=""))
+
+    def test_lease_from_before_the_lock_does_not_hold_it(self):
+        # the lock was taken at 11:00; this lease last beat at 10:00
+        lease = _lease(heartbeat_at=NOW - timedelta(hours=2))
+        assert not lease.holds(_lock())
+        # a lease written just before terraform took the lock holds it
+        lease = _lease(heartbeat_at=NOW - timedelta(hours=1, seconds=5))
+        assert lease.holds(_lock())

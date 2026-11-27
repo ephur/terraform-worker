@@ -90,5 +90,12 @@ class WorkerLease(BaseModel):
         return age <= 2 * self.heartbeat_seconds
 
     def holds(self, lock: LockInfo) -> bool:
-        """True when this lease belongs to the process holding the lock."""
-        return bool(lock.host) and lock.host == self.host
+        """
+        True when this lease belongs to the process holding the lock: the
+        same host, and refreshed since about when the lock was taken. A lease
+        left behind by an earlier process on that host does not count.
+        """
+        if not lock.host or lock.host != self.host:
+            return False
+        last_beat = (lock.created - self.heartbeat_at).total_seconds()
+        return last_beat <= self.heartbeat_seconds

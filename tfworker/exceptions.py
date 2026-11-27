@@ -101,11 +101,13 @@ class LockUnavailableError(HandlerError):
     A definition's state lock could not be acquired: it was held past the
     wait deadline, or it is stale and the stale policy is to fail.
 
-    The phase treats it as that definition's failure rather than ending the run.
+    The phase treats it as that definition's failure rather than ending the
+    run, unless `fail_run` is set.
     """
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, fail_run: bool = False) -> None:
         super().__init__(message, terminate=False)
+        self.fail_run = fail_run
 
 
 class DefinitionsSourceError(TFWorkerException):

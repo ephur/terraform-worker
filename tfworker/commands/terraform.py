@@ -1266,7 +1266,8 @@ class TerraformCommand(BaseCommand):
         Record that a definition's state lock could not be acquired.
 
         It counts as a failure of that definition's plan, apply or destroy and
-        follows the phase's failure options, like a failing hook.
+        follows the phase's failure options, like a failing hook, unless the
+        lock handler asked for the whole run to stop.
         """
         definition: Definition = self.app_state.definitions[name]
         log.error(f"state lock unavailable for definition {name}: {error.message}")
@@ -1279,7 +1280,7 @@ class TerraformCommand(BaseCommand):
             self._record_apply_failure(name, error.message)
         self._exec_error_handlers(name, action, result)
 
-        if exit_on_error:
+        if exit_on_error or error.fail_run:
             self.ctx.exit(1)
         return result
 
