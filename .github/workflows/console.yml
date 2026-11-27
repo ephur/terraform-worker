@@ -1,0 +1,61 @@
+name: Console
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "console/**"
+      - "tfworker/report/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/console.yml"
+
+jobs:
+  console:
+    name: Console lint and test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked --package tfworker-console
+
+      - name: Check formatting (black)
+        run: uv run --package tfworker-console black --check src tests
+
+      - name: Check import order (isort)
+        run: uv run --package tfworker-console isort --check src tests
+
+      - name: Lint (flake8)
+        run: uv run --package tfworker-console flake8 --ignore E203,E501,W503 src tests
+
+      - name: Run tests
+        run: uv run --package tfworker-console pytest -p no:warnings
+
+      - name: Check coverage
+        run: uv run --package tfworker-console coverage report
+
+  image:
+    name: Console image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the console image
+        run: docker build -f console/Dockerfile -t tfworker-console:ci .

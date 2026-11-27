@@ -65,8 +65,9 @@ WORKDIR /src
 
 # dependencies first, so they stay cached when only the source changes
 COPY pyproject.toml uv.lock ./
+COPY console/pyproject.toml console/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-default-groups --no-install-project
+    uv sync --locked --no-default-groups --no-install-workspace
 
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \

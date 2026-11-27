@@ -67,6 +67,9 @@ dev = [
 [tool.uv]
 default-groups = ["dev"]
 
+[tool.uv.workspace]
+members = ["console"]
+
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
@@ -93,6 +96,7 @@ packages = ["tfworker"]
 include = ["tfworker", "tests", "docs", "README.md", "LICENSE", "CHANGELOG.md"]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 addopts = "--capture=sys --cov=tfworker --cov-report= -m 'not performance'"
 markers = [
     "performance: mark a test as a performance test"
