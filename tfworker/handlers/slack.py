@@ -18,10 +18,10 @@ Example configuration::
           - text: "Argo workflow"
             url: "https://argo.example/workflows/ops/{{ env.WORKFLOW_NAME }}"
           - text: "logs"
-            url: "https://app.datadoghq.com/logs?query=service%3Aneptune-executor"
+            url: "https://app.datadoghq.com/logs?query=service%3Aterraform-worker"
         # per-definition deep link used on failure cards; {definition} is
         # replaced with the definition name
-        definition_log_url_template: "https://app.datadoghq.com/logs?query=service%3Aneptune-executor%20%40definition%3A{definition}"
+        definition_log_url_template: "https://app.datadoghq.com/logs?query=service%3Aterraform-worker%20%40definition%3A{definition}"
         update_interval: 4.0       # min seconds between Slack updates
         timezone: "America/Chicago"  # for timestamp fallback text; live
                                      # timestamps render in the viewer's tz

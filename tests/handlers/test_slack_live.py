@@ -4,11 +4,10 @@ These exercise every payload shape the handler produces against the real
 Slack API (post, update, delete) — ``blocks.validate`` is known to accept
 payloads the message APIs reject, so only real calls prove the layout.
 
-Skipped unless SLACK_LIVE_TEST=1 and SLACK_BOT_TOKEN are set. Messages are
-posted to SLACK_TEST_CHANNEL (default #neptune_testing) and deleted after
-each test. Run with::
+Skipped unless SLACK_LIVE_TEST=1, SLACK_BOT_TOKEN and SLACK_TEST_CHANNEL are
+set. Messages are posted to SLACK_TEST_CHANNEL and deleted after each test. Run with::
 
-    SLACK_LIVE_TEST=1 SLACK_BOT_TOKEN=xoxb-... poetry run pytest \
+    SLACK_LIVE_TEST=1 SLACK_BOT_TOKEN=xoxb-... SLACK_TEST_CHANNEL=C... poetry run pytest \
         tests/handlers/test_slack_live.py -v
 """
 
@@ -21,13 +20,16 @@ from tfworker.commands.terraform import TerraformResult
 from tfworker.custom_types.terraform import TerraformAction
 from tfworker.handlers.slack import SlackConfig, SlackStatusBoard
 
-LIVE = os.environ.get("SLACK_LIVE_TEST") == "1" and bool(
-    os.environ.get("SLACK_BOT_TOKEN")
+LIVE = (
+    os.environ.get("SLACK_LIVE_TEST") == "1"
+    and bool(os.environ.get("SLACK_BOT_TOKEN"))
+    and bool(os.environ.get("SLACK_TEST_CHANNEL"))
 )
-CHANNEL = os.environ.get("SLACK_TEST_CHANNEL", "C0BLQQNMN49")  # #neptune_testing
+CHANNEL = os.environ.get("SLACK_TEST_CHANNEL", "")
 
 pytestmark = pytest.mark.skipif(
-    not LIVE, reason="live Slack test; set SLACK_LIVE_TEST=1 and SLACK_BOT_TOKEN"
+    not LIVE,
+    reason="live Slack test; set SLACK_LIVE_TEST=1, SLACK_BOT_TOKEN and SLACK_TEST_CHANNEL",
 )
 
 APPLY_OK = b"Apply complete! Resources: 3 added, 1 changed, 0 destroyed."
@@ -35,7 +37,7 @@ PLAN_CHANGES = b"Plan: 3 to add, 1 to change, 0 to destroy."
 PLAN_CLEAN = b"No changes. Infrastructure is up-to-date."
 APPLY_ERROR = (
     b"Error: creating EventBus: AccessDenied - not authorized to perform "
-    b"sts:AssumeRole on NeptuneExecutor"
+    b"sts:AssumeRole on TerraformExecutor"
 )
 
 
@@ -62,13 +64,13 @@ def make_board(run_id: str, **cfg) -> SlackStatusBoard:
             {"text": "Argo workflow", "url": "https://argo.example/workflows/ops/wf-1"},
             {
                 "text": "logs",
-                "url": "https://app.datadoghq.com/logs?query=service%3Aneptune-executor",
+                "url": "https://app.datadoghq.com/logs?query=service%3Aterraform-worker",
             },
         ],
     )
     cfg.setdefault(
         "definition_log_url_template",
-        "https://app.datadoghq.com/logs?query=service%3Aneptune-executor%20%40definition%3A{definition}",
+        "https://app.datadoghq.com/logs?query=service%3Aterraform-worker%20%40definition%3A{definition}",
     )
     config = SlackConfig(channel=CHANNEL, token=os.environ["SLACK_BOT_TOKEN"], **cfg)
     return SlackStatusBoard(config=config, run_id=run_id, backend_plans=True)
