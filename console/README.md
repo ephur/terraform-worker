@@ -45,8 +45,16 @@ every row can be rebuilt from the stores.
 
 While serving, the console reconciles every `TFWORKER_CONSOLE_RECONCILE_INTERVAL`
 seconds (300 by default, 0 turns it off). Deployments are found by listing the
-segment where `{deployment}` sits; a deployment is named by its run records
-when it has any. Objects whose ETag has not changed are skipped.
+segment where `{deployment}` sits, and that segment is the deployment's
+identity; the name its newest run record gives is shown beside it. Objects
+whose ETag has not changed are skipped. A deployment whose prefix is gone or
+holds nothing the worker wrote, a state that was deleted, and a store removed
+from the stores file all leave the projection on the next reconcile.
+
+Each store reconciles in one transaction that holds its row locked, so the
+schedule, the CLI and other replicas take turns. An object or deployment that
+cannot be read or stored is reported in the store's `last_error` and the rest
+still land.
 
 The reconciler never reads state files. It needs `s3:ListBucket` on the
 prefix, and `s3:GetObject` on `<prefix>/_tfworker/*`, `*.tflock` and

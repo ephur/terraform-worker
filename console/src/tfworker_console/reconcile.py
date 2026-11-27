@@ -11,8 +11,15 @@ template, lists each deployment's prefix once, and:
 - reads every ``.tflock`` object, and its holder's worker lease, so the
   lock table shows what is held now
 
-State bodies are never read. The deployment's name comes from its run
-records when it has any, and otherwise from the prefix segment.
+State bodies are never read. A deployment is identified by its prefix
+segment, which never changes; the name its newest run record gives is kept
+beside it as ``record_name``. Deployments whose prefix is gone or empty,
+definitions whose state object is gone, and stores no longer configured leave
+the projection.
+
+Each store reconciles in one transaction. Each deployment and each object is
+projected in a savepoint, so one that cannot be read or stored is reported
+and the rest still land.
 """
 
 import logging
@@ -21,7 +28,6 @@ from datetime import datetime, timezone
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote
 
-from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 from tfworker.backends.lock import LockInfo, WorkerLease
@@ -37,6 +43,8 @@ LOCK_SUFFIX = ".tflock"
 LEASE_SUFFIX = ".tfworker-lease."
 REPORT_DIR = "_tfworker/"
 KINDS = {"runs": "run", "status": "status", "plans": "plan"}
+# every table keyed by store and deployment, children before parents
+PROJECTED = (db.Definition, db.Lock, db.Run, db.Status, db.Plan, db.SeenObject)
 
 
 @dataclass
@@ -95,26 +103,48 @@ class Reconciler:
         self.now = now
 
     def reconcile_all(self) -> List[StoreSummary]:
-        return [self.reconcile(name) for name in self.stores]
+        self._forget_unconfigured()
+        summaries = []
+        for name in self.stores:
+            try:
+                summaries.append(self.reconcile(name))
+            except Exception as e:  # the next store still reconciles
+                log.error(f"unable to record the reconcile of store {name}: {e}")
+                summaries.append(StoreSummary(store=name, errors=[str(e)]))
+        return summaries
 
     def reconcile(self, name: str) -> StoreSummary:
+        """
+        Reconcile one store in one transaction.
+
+        The store's row is locked for the transaction, so two reconcilers of
+        the same store (the schedule and the CLI, or two replicas) take turns.
+        """
         store = self.stores[name]
         summary = StoreSummary(store=name)
         with self.sessions() as session:
-            row = self._store_row(session, store)
+            session.merge(self._store_row(store))
+            session.commit()
+            row = session.execute(
+                select(db.Store)
+                .where(db.Store.name == name)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            ).scalar_one()
             try:
-                client = store.session().client("s3")
-                for segment in sorted(
-                    set(list_segments(client, store.bucket, store.listing_prefix))
-                ):
-                    self._deployment(session, client, store, segment, summary)
+                self._store(session, store, summary)
                 row.last_error = "; ".join(summary.errors)[:2048] or None
+                row.reconciled_at = self.now()
+                session.commit()
             except Exception as e:  # the next store still reconciles
                 log.error(f"unable to reconcile store {name}: {e}")
-                row.last_error = str(e)[:2048]
-                summary.errors.append(str(e))
-            row.reconciled_at = self.now()
-            session.commit()
+                session.rollback()
+                error = f"{e.__class__.__name__}: {e}"
+                summary.errors.append(error)
+                row = session.get(db.Store, name)
+                row.last_error = error[:2048]
+                row.reconciled_at = self.now()
+                session.commit()
         return summary
 
     def rebuild(self) -> List[StoreSummary]:
@@ -125,14 +155,63 @@ class Reconciler:
             session.commit()
         return self.reconcile_all()
 
-    def _store_row(self, session: Session, store: StoreConfig) -> db.Store:
-        return session.merge(
-            db.Store(
-                name=store.name,
-                region=store.region,
-                bucket=store.bucket,
-                prefix=store.prefix,
-                credentials=store.credentials.kind,
+    @staticmethod
+    def _store_row(store: StoreConfig) -> db.Store:
+        return db.Store(
+            name=store.name,
+            region=store.region,
+            bucket=store.bucket,
+            prefix=store.prefix,
+            credentials=store.credentials.kind,
+        )
+
+    def _forget_unconfigured(self) -> None:
+        """Drop every row of a store that is no longer in the stores file."""
+        with self.sessions() as session:
+            gone = session.scalars(
+                select(db.Store.name).where(db.Store.name.not_in(list(self.stores)))
+            ).all()
+            for name in gone:
+                log.info(f"store {name} is no longer configured, forgetting it")
+                for model in PROJECTED + (db.Deployment,):
+                    session.execute(delete(model).where(model.store == name))
+                session.execute(delete(db.Store).where(db.Store.name == name))
+            session.commit()
+
+    def _store(self, session: Session, store: StoreConfig, summary) -> None:
+        client = store.session().client("s3")
+        segments = sorted(
+            set(list_segments(client, store.bucket, store.listing_prefix))
+        )
+        kept = set()
+        for segment in segments:
+            try:
+                with session.begin_nested():
+                    if self._deployment(session, client, store, segment, summary):
+                        kept.add(segment)
+            except Exception as e:  # keep what the last reconcile projected
+                kept.add(segment)
+                summary.errors.append(
+                    f"{store.render(segment)}: {e.__class__.__name__}"
+                )
+                log.warning(f"unable to reconcile {store.render(segment)}: {e}")
+        for name in session.scalars(
+            select(db.Deployment.name).where(
+                db.Deployment.store == store.name, db.Deployment.name.not_in(kept)
+            )
+        ).all():
+            log.info(f"deployment {name} in store {store.name} is gone")
+            self._forget_deployment(session, store.name, name)
+
+    @staticmethod
+    def _forget_deployment(session: Session, store: str, name: str) -> None:
+        for model in PROJECTED:
+            session.execute(
+                delete(model).where(model.store == store, model.deployment == name)
+            )
+        session.execute(
+            delete(db.Deployment).where(
+                db.Deployment.store == store, db.Deployment.name == name
             )
         )
 
@@ -143,62 +222,55 @@ class Reconciler:
         store: StoreConfig,
         segment: str,
         summary: StoreSummary,
-    ) -> None:
+    ) -> bool:
+        """Project one deployment, and say whether it still has anything in it."""
         prefix = store.render(segment)
         listing = classify(prefix, list_keys(client, store.bucket, prefix + "/"))
         if not (listing.reports or listing.states or listing.locks):
-            return
+            return False
         now = self.now()
-        name, source = self._deployment_name(session, client, store, listing, segment)
-        existing = session.get(db.Deployment, (store.name, name))
-        session.merge(
-            db.Deployment(
+        row = session.get(db.Deployment, (store.name, segment))
+        if row is None:
+            row = db.Deployment(
                 store=store.name,
-                name=name,
+                name=segment,
                 prefix=prefix,
-                discovered_from=source,
-                first_seen=existing.first_seen if existing else now,
+                discovered_from="template",
+                first_seen=now,
                 last_seen=now,
             )
-        )
-        session.flush()
+            session.add(row)
+            session.flush()
+        row.prefix = prefix
+        row.last_seen = now
         summary.deployments += 1
 
-        self._reports(session, client, store, name, prefix, listing, summary)
-        for definition, key in listing.states.items():
-            self._definition(session, store.name, name, definition, key, now)
-        self._locks(session, client, store, name, listing, summary)
+        self._reports(session, client, store, segment, listing, summary)
+        self._states(session, store.name, segment, listing, now)
+        self._locks(session, client, store, segment, listing, summary)
+        row.record_name = self._record_name(session, store.name, segment)
+        row.discovered_from = "record" if row.record_name else "template"
+        return True
 
-    def _deployment_name(
-        self, session, client, store, listing: _Listing, segment: str
-    ) -> Tuple[str, str]:
-        """The deployment named by its run records, else the prefix segment."""
-        runs = sorted(
-            key for key, (kind, _) in listing.reports.items() if kind == "run"
+    @staticmethod
+    def _record_name(session: Session, store: str, segment: str) -> Optional[str]:
+        """The name the newest run record gives, when it is not the segment."""
+        body = session.scalar(
+            select(db.Run.body)
+            .where(db.Run.store == store, db.Run.deployment == segment)
+            .order_by(db.Run.started_at.desc(), db.Run.record_id.desc())
+            .limit(1)
         )
-        if runs:
-            seen = session.get(db.SeenObject, (store.name, runs[-1]))
-            if seen is not None:
-                return seen.deployment, (
-                    "record" if seen.deployment != segment else "template"
-                )
-            try:
-                record = RunRecord.model_validate_json(
-                    _get(client, store.bucket, runs[-1])
-                )
-                if record.deployment != segment:
-                    return record.deployment, "record"
-            except Exception as e:
-                log.warning(f"unable to read {runs[-1]} for its deployment: {e}")
-        return segment, "template"
+        name = body.get("deployment") if body else None
+        return name if name and name != segment else None
 
-    def _reports(self, session, client, store, deployment, prefix, listing, summary):
+    def _reports(self, session, client, store, deployment, listing, summary):
         seen = {
             row.key: row
             for row in session.scalars(
                 select(db.SeenObject).where(
                     db.SeenObject.store == store.name,
-                    db.SeenObject.key.startswith(prefix + "/" + REPORT_DIR),
+                    db.SeenObject.deployment == deployment,
                 )
             )
         }
@@ -208,32 +280,41 @@ class Reconciler:
                 summary.skipped += 1
                 continue
             try:
-                ref = self._project(
-                    session,
-                    store.name,
-                    deployment,
-                    kind,
-                    _get(client, store.bucket, key),
-                )
-            except (ValidationError, ValueError) as e:
+                text = _get(client, store.bucket, key)
+                with session.begin_nested():
+                    ref = self._project(session, store.name, deployment, kind, text)
+                    session.merge(
+                        db.SeenObject(
+                            store=store.name,
+                            key=key,
+                            etag=etag,
+                            kind=kind,
+                            deployment=deployment,
+                            ref=ref,
+                        )
+                    )
+            except Exception as e:  # one bad object never stops the rest
                 summary.errors.append(f"{key}: {e.__class__.__name__}")
                 log.warning(f"unable to project {key}: {e}")
                 continue
-            session.merge(
-                db.SeenObject(
-                    store=store.name,
-                    key=key,
-                    etag=etag,
-                    kind=kind,
-                    deployment=deployment,
-                    ref=ref,
-                )
-            )
             summary.fetched += 1
         for key, row in seen.items():
             if key not in listing.reports:
                 self._remove(session, row)
                 summary.removed += 1
+
+    def _states(self, session, store, deployment, listing, now) -> None:
+        for definition, key in listing.states.items():
+            self._definition(session, store, deployment, definition, key, now)
+        for row in session.scalars(
+            select(db.Definition).where(
+                db.Definition.store == store,
+                db.Definition.deployment == deployment,
+                db.Definition.state_key.is_not(None),
+            )
+        ):
+            if row.name not in listing.states:
+                row.state_key = None
 
     def _project(
         self, session, store: str, deployment: str, kind: str, text: str

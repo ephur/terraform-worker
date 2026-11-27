@@ -359,12 +359,83 @@ class TestDiscovery:
         reconciler.reconcile("s")
         with sessions() as session:
             (row,) = session.scalars(select(db.Deployment))
-            assert (row.name, row.prefix, row.discovered_from) == (
-                "production",
+            assert (row.name, row.prefix, row.record_name, row.discovered_from) == (
+                "prod-us",
                 "env/prod-us",
+                "production",
                 "record",
             )
-            assert session.get(db.Status, ("s", "production", "net")) is not None
+            assert session.get(db.Status, ("s", "prod-us", "net")) is not None
+
+    def test_a_renamed_deployment_keeps_one_identity(self, aws, sessions):
+        s3 = bucket("state")
+        seed(s3, "state", "env/prod-us", "production")
+        store = StoreConfig(
+            name="s", region="us-east-1", bucket="state", prefix="env/{deployment}"
+        )
+        reconciler = Reconciler([store], sessions)
+        reconciler.reconcile("s")
+        newer = record("prod", "env/prod-us", record_id="R2").model_copy(
+            update={"started_at": NOW + timedelta(hours=1)}
+        )
+        put(s3, "state", "env/prod-us/_tfworker/runs/2026/11/27/R2.json", newer)
+        reconciler.reconcile("s")
+        with sessions() as session:
+            (row,) = session.scalars(select(db.Deployment))
+            assert (row.name, row.record_name) == ("prod-us", "prod")
+            assert set(session.scalars(select(db.Run.deployment))) == {"prod-us"}
+            assert set(session.scalars(select(db.Definition.deployment))) == {"prod-us"}
+
+    def test_two_prefixes_naming_one_deployment_stay_apart(self, aws, sessions):
+        s3 = bucket("state")
+        put(s3, "state", "env/east/net/terraform.tfstate", "{}")
+        put(s3, "state", "env/west/net/terraform.tfstate", "{}")
+        for segment, record_id in (("east", "R1"), ("west", "R2")):
+            put(
+                s3,
+                "state",
+                f"env/{segment}/_tfworker/runs/2026/11/27/{record_id}.json",
+                record("shared", f"env/{segment}", record_id=record_id),
+            )
+        store = StoreConfig(
+            name="s", region="us-east-1", bucket="state", prefix="env/{deployment}"
+        )
+        assert Reconciler([store], sessions).reconcile("s").deployments == 2
+        with sessions() as session:
+            rows = session.execute(
+                select(db.Deployment.name, db.Deployment.record_name)
+            ).all()
+            assert sorted(rows) == [("east", "shared"), ("west", "shared")]
+            keys = session.scalars(select(db.Definition.state_key)).all()
+            assert sorted(keys) == [
+                "env/east/net/terraform.tfstate",
+                "env/west/net/terraform.tfstate",
+            ]
+
+    def test_sibling_prefixes_with_like_wildcards(self, aws, sessions):
+        s3 = bucket("state")
+        put(
+            s3,
+            "state",
+            "env/my-app/_tfworker/runs/2026/11/27/R1.json",
+            record("my-app", "env/my-app"),
+        )
+        put(
+            s3,
+            "state",
+            "env/my_app/_tfworker/runs/2026/11/27/R2.json",
+            record("my_app", "env/my_app", record_id="R2"),
+        )
+        store = StoreConfig(
+            name="s", region="us-east-1", bucket="state", prefix="env/{deployment}"
+        )
+        reconciler = Reconciler([store], sessions)
+        assert reconciler.reconcile("s").fetched == 2
+        again = reconciler.reconcile("s")
+        assert (again.fetched, again.skipped, again.removed) == (0, 2, 0)
+        with sessions() as session:
+            assert session.get(db.Run, ("s", "R1")).deployment == "my-app"
+            assert session.get(db.Run, ("s", "R2")).deployment == "my_app"
 
     def test_unreadable_record_falls_back_to_segment(self, aws, sessions):
         s3 = bucket("state")
@@ -452,7 +523,177 @@ class TestLocks:
             assert session.get(db.Lock, ("s", "alpha", "dns")).lease is None
 
 
+class TestRemoval:
+    def test_a_deleted_deployment_leaves_the_projection(self, two_stores, sessions):
+        s3 = boto3.client("s3", region_name="us-east-1")
+        put(
+            s3,
+            "prod-state",
+            "terraform/state/alpha/net/terraform.tfstate.tflock",
+            lock_body(),
+        )
+        reconciler = Reconciler(two_stores, sessions)
+        reconciler.reconcile("prod")
+        listed = s3.list_objects_v2(
+            Bucket="prod-state", Prefix="terraform/state/alpha/"
+        )
+        for item in listed["Contents"]:
+            s3.delete_object(Bucket="prod-state", Key=item["Key"])
+        assert reconciler.reconcile("prod").deployments == 1
+        with sessions() as session:
+            assert session.get(db.Deployment, ("prod", "alpha")) is None
+            for model in (db.Definition, db.Lock, db.Status, db.SeenObject):
+                assert not session.scalars(
+                    select(model).where(model.deployment == "alpha")
+                ).all()
+            assert session.get(db.Deployment, ("prod", "beta")) is not None
+            assert session.get(db.Status, ("prod", "beta", "net")) is not None
+
+    def test_a_prefix_left_with_unknown_objects_is_forgotten(self, aws, sessions):
+        s3 = bucket("state")
+        put(s3, "state", "env/gamma/vpc/terraform.tfstate", "{}")
+        store = StoreConfig(
+            name="s", region="us-east-1", bucket="state", prefix="env/{deployment}"
+        )
+        reconciler = Reconciler([store], sessions)
+        reconciler.reconcile("s")
+        s3.delete_object(Bucket="state", Key="env/gamma/vpc/terraform.tfstate")
+        put(s3, "state", "env/gamma/readme.txt", "x")
+        reconciler.reconcile("s")
+        assert count(sessions, db.Deployment) == 0
+        assert count(sessions, db.Definition) == 0
+
+    def test_a_deleted_state_clears_its_key(self, two_stores, sessions):
+        reconciler = Reconciler(two_stores, sessions)
+        reconciler.reconcile("dev")
+        boto3.client("s3", region_name="us-west-2").delete_object(
+            Bucket="dev-state", Key="tf/sandbox/dns/terraform.tfstate"
+        )
+        reconciler.reconcile("dev")
+        with sessions() as session:
+            assert (
+                session.get(db.Definition, ("dev", "sandbox", "dns")).state_key is None
+            )
+            assert session.get(db.Definition, ("dev", "sandbox", "net")).state_key
+
+    def test_an_unconfigured_store_is_forgotten(self, two_stores, sessions):
+        Reconciler(two_stores, sessions).reconcile_all()
+        Reconciler(two_stores[:1], sessions).reconcile_all()
+        with sessions() as session:
+            assert session.get(db.Store, "dev") is None
+            for model in (
+                db.Deployment,
+                db.Definition,
+                db.Run,
+                db.Plan,
+                db.Status,
+                db.SeenObject,
+            ):
+                assert not session.scalars(
+                    select(model).where(model.store == "dev")
+                ).all()
+            assert session.get(db.Store, "prod") is not None
+            assert session.get(db.Run, ("prod", "R1")) is not None
+
+
+def _poison(session, store):
+    """Add a row the database refuses, so the next flush fails."""
+    session.add(
+        db.Run(
+            store=store,
+            record_id="bad",
+            run_id="bad",
+            deployment="bad",
+            status=None,
+            started_at=NOW,
+            body={},
+        )
+    )
+    session.flush()
+
+
 class TestFailures:
+    def test_a_failing_object_read_does_not_stop_the_rest(
+        self, two_stores, sessions, mocker
+    ):
+        from botocore.exceptions import ClientError
+
+        from tfworker_console import reconcile
+
+        real_get = reconcile._get
+
+        def get(client, bucket_name, key):
+            if key.endswith("status/net.json"):
+                raise ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
+            return real_get(client, bucket_name, key)
+
+        mocker.patch.object(reconcile, "_get", side_effect=get)
+        summary = Reconciler(two_stores, sessions).reconcile("dev")
+        assert summary.fetched == 2
+        assert summary.errors == ["tf/sandbox/_tfworker/status/net.json: ClientError"]
+        with sessions() as session:
+            assert session.get(db.Plan, ("dev", "P1")) is not None
+            assert session.get(db.Status, ("dev", "sandbox", "net")) is None
+
+    def test_a_database_error_in_one_deployment_keeps_the_others(
+        self, two_stores, sessions, mocker
+    ):
+        reconciler = Reconciler(two_stores, sessions)
+        reconciler.reconcile("prod")
+        real_locks = Reconciler._locks
+
+        def locks(self, session, client, store, deployment, listing, summary):
+            if deployment == "alpha":
+                _poison(session, store.name)
+            return real_locks(
+                self, session, client, store, deployment, listing, summary
+            )
+
+        mocker.patch.object(Reconciler, "_locks", locks)
+        summary = reconciler.reconcile("prod")
+        assert summary.errors == ["terraform/state/alpha: IntegrityError"]
+        with sessions() as session:
+            assert session.get(db.Deployment, ("prod", "alpha")) is not None
+            assert session.get(db.Deployment, ("prod", "beta")) is not None
+            assert session.get(db.Run, ("prod", "bad")) is None
+
+    def test_a_database_error_rolls_back_and_is_recorded(
+        self, two_stores, sessions, mocker
+    ):
+        mocker.patch.object(
+            Reconciler,
+            "_forget_deployment",
+            side_effect=lambda session, store, name: _poison(session, store),
+        )
+        reconciler = Reconciler(two_stores, sessions, now=lambda: NOW)
+        reconciler.reconcile("dev")
+        s3 = boto3.client("s3", region_name="us-west-2")
+        for item in s3.list_objects_v2(Bucket="dev-state")["Contents"]:
+            s3.delete_object(Bucket="dev-state", Key=item["Key"])
+        summary = reconciler.reconcile("dev")
+        assert summary.errors and "IntegrityError" in summary.errors[-1]
+        with sessions() as session:
+            row = session.get(db.Store, "dev")
+            assert "IntegrityError" in row.last_error
+            assert row.reconciled_at is not None
+            assert session.get(db.Deployment, ("dev", "sandbox")) is not None
+            assert session.get(db.Run, ("dev", "bad")) is None
+
+    def test_reconcile_all_survives_a_store_that_cannot_be_recorded(
+        self, two_stores, sessions, mocker
+    ):
+        real = Reconciler.reconcile
+
+        def reconcile(self, name):
+            if name == "prod":
+                raise RuntimeError("database went away")
+            return real(self, name)
+
+        mocker.patch.object(Reconciler, "reconcile", reconcile)
+        summaries = Reconciler(two_stores, sessions).reconcile_all()
+        assert summaries[0].errors == ["database went away"]
+        assert summaries[1].fetched == 3
+
     def test_a_failing_store_does_not_stop_the_others(self, two_stores, sessions):
         broken = StoreConfig(
             name="broken", region="us-east-1", bucket="missing", prefix="x/{deployment}"

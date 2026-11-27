@@ -2,13 +2,21 @@
 The console's projection of what the worker writes beside each run's state.
 
 Every row can be rebuilt from the stores, so the projection can be dropped at
-any time. A state's identity is store + deployment + definition.
+any time. A state's identity is store + deployment + definition, where the
+deployment is the prefix segment its state lives under.
 """
 
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, DateTime, ForeignKeyConstraint, String, create_engine
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKeyConstraint,
+    String,
+    create_engine,
+    event,
+)
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -33,9 +41,12 @@ class Deployment(Base):
     __tablename__ = "deployments"
 
     store: Mapped[str] = mapped_column(String(128), primary_key=True)
+    # the prefix segment, which stays stable whatever the records call it
     name: Mapped[str] = mapped_column(String(255), primary_key=True)
     prefix: Mapped[str] = mapped_column(String(1024))
-    # "template" when found by listing the prefix, "record" when a run record named it
+    # the name the newest run record gives, when it differs from the prefix segment
+    record_name: Mapped[Optional[str]] = mapped_column(String(255))
+    # "record" when run records name the deployment differently, else "template"
     discovered_from: Mapped[str] = mapped_column(String(16))
     first_seen: Mapped[datetime]
     last_seen: Mapped[datetime]
@@ -62,7 +73,7 @@ class Run(Base):
     __tablename__ = "runs"
 
     store: Mapped[str] = mapped_column(String(128), primary_key=True)
-    record_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    record_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     run_id: Mapped[str] = mapped_column(String(255), index=True)
     deployment: Mapped[str] = mapped_column(String(255), index=True)
     status: Mapped[str] = mapped_column(String(16))
@@ -85,7 +96,7 @@ class Plan(Base):
     __tablename__ = "plans"
 
     store: Mapped[str] = mapped_column(String(128), primary_key=True)
-    plan_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    plan_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     deployment: Mapped[str] = mapped_column(String(255), index=True)
     definition: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(16), index=True)
@@ -102,7 +113,7 @@ class Lock(Base):
     deployment: Mapped[str] = mapped_column(String(255), primary_key=True)
     definition: Mapped[str] = mapped_column(String(255), primary_key=True)
     lock_id: Mapped[str] = mapped_column(String(255))
-    who: Mapped[str] = mapped_column(String(512))
+    who: Mapped[str] = mapped_column(String(1024))
     operation: Mapped[str] = mapped_column(String(64))
     created: Mapped[datetime]
     lease: Mapped[Optional[dict]]
@@ -124,7 +135,22 @@ class SeenObject(Base):
 
 
 def engine_for(url: str) -> Engine:
-    return create_engine(url, future=True)
+    engine = create_engine(url, future=True)
+    if engine.dialect.name == "sqlite":
+        _sqlite_savepoints(engine)
+    return engine
+
+
+def _sqlite_savepoints(engine: Engine) -> None:
+    """Let pysqlite run SAVEPOINTs, which the reconciler uses per object."""
+
+    @event.listens_for(engine, "connect")
+    def _connect(connection, _record):
+        connection.isolation_level = None
+
+    @event.listens_for(engine, "begin")
+    def _begin(connection):
+        connection.exec_driver_sql("BEGIN")
 
 
 def session_factory(engine: Engine) -> sessionmaker:
