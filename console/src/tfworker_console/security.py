@@ -43,28 +43,39 @@ def identify(request: Request) -> Optional[Principal]:
     data = request.session.get("principal")
     if not data:
         return None
-    if data["kind"] == "user" and data.get("source") == "local":
-        # local roles are read on every request, so a change or a disabled
-        # account takes effect at once
-        with _sessions(request)() as session:
-            user = session.get(db.User, data["name"])
-            if user is None or user.disabled:
-                request.session.clear()
-                return None
+    # only people sign in with a session; the account is read on every
+    # request, so disabling it or signing it out ends its sessions at once,
+    # and a local account's roles are read here too
+    with _sessions(request)() as session:
+        user = session.get(db.User, data["name"])
+        if user is None or user.disabled or user.session_version != data.get("version"):
+            request.session.clear()
+            return None
+        if user.source == "local":
             grants = user_grants(session, user.username)
-    else:
-        grants = [Grant.from_dict(grant) for grant in data["grants"]]
+        else:
+            grants = [Grant.from_dict(grant) for grant in data["grants"]]
     return Principal(data["name"], data["kind"], grants)
 
 
-def remember(request: Request, principal: Principal, source: str) -> None:
+def remember(
+    request: Request, principal: Principal, source: str, version: int = 0
+) -> None:
     request.session.clear()
     request.session["principal"] = {
         "name": principal.name,
         "kind": principal.kind,
         "source": source,
+        "version": version,
         "grants": [grant.as_dict() for grant in principal.grants],
     }
+
+
+def sign_out_everywhere(session, username: str) -> None:
+    """End every session of an account; the caller commits."""
+    user = session.get(db.User, username)
+    if user is not None:
+        user.session_version += 1
 
 
 def require(role: str) -> Callable[..., Principal]:

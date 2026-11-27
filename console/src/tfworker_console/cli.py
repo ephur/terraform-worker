@@ -1,6 +1,7 @@
 import json
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import click
 import pyotp
@@ -14,6 +15,7 @@ from .db import engine_for, session_factory
 from .groups import load_groups
 from .migrate import upgrade
 from .reconcile import Reconciler
+from .security import sign_out_everywhere
 from .settings import ConsoleSettings
 from .stores import load_stores
 
@@ -97,6 +99,17 @@ def _now() -> datetime:
 ROLE = click.Choice(sorted(RANKS, key=RANKS.__getitem__))
 
 
+def _groups(settings: ConsoleSettings, groups) -> Optional[list]:
+    """Grant groups by their configured names, or None for every group."""
+    if not groups:
+        return None
+    known = load_groups(settings.groups_file)
+    try:
+        return [known.canonical(group) for group in groups]
+    except ValueError as e:
+        raise click.UsageError(str(e))
+
+
 @main.group()
 def users() -> None:
     """Manage local accounts. The first admin is created here."""
@@ -120,7 +133,9 @@ def users() -> None:
 @click.password_option(prompt="Password", help="Prompted when not given")
 def users_create(username, role, groups, break_glass, totp, password) -> None:
     """Create a local account."""
-    with _sessions(ConsoleSettings())() as session:
+    settings = ConsoleSettings()
+    groups = _groups(settings, groups)
+    with _sessions(settings)() as session:
         if session.get(db.User, username) is not None:
             raise click.UsageError(f"{username} already exists")
         secret = new_totp_secret() if totp else None
@@ -136,9 +151,7 @@ def users_create(username, role, groups, break_glass, totp, password) -> None:
             )
         )
         session.flush()
-        session.add(
-            db.UserGrant(username=username, role=role, groups=list(groups) or None)
-        )
+        session.add(db.UserGrant(username=username, role=role, groups=groups))
         session.commit()
     click.echo(f"created {username} ({role})")
     if secret:
@@ -155,7 +168,9 @@ def users_create(username, role, groups, break_glass, totp, password) -> None:
 @click.option("--replace", is_flag=True, help="Drop the account's other roles first")
 def users_grant(username, role, groups, replace) -> None:
     """Give a local account a role, on every group or only some."""
-    with _sessions(ConsoleSettings())() as session:
+    settings = ConsoleSettings()
+    groups = _groups(settings, groups)
+    with _sessions(settings)() as session:
         if session.get(db.User, username) is None:
             raise click.UsageError(f"no user named {username}")
         if replace:
@@ -163,9 +178,7 @@ def users_grant(username, role, groups, replace) -> None:
                 select(db.UserGrant).where(db.UserGrant.username == username)
             ):
                 session.delete(row)
-        session.add(
-            db.UserGrant(username=username, role=role, groups=list(groups) or None)
-        )
+        session.add(db.UserGrant(username=username, role=role, groups=groups))
         session.commit()
     click.echo(f"granted {role} to {username}")
 
@@ -174,11 +187,15 @@ def users_grant(username, role, groups, replace) -> None:
 @click.argument("username")
 @click.password_option(prompt="New password")
 def users_set_password(username, password) -> None:
+    """Set a password; this also lifts a lockout and ends open sessions."""
     with _sessions(ConsoleSettings())() as session:
         user = session.get(db.User, username)
         if user is None or user.source != "local":
             raise click.UsageError(f"no local user named {username}")
         user.password_hash = hash_password(password)
+        user.failed_logins = 0
+        user.locked_until = None
+        sign_out_everywhere(session, username)
         session.commit()
     click.echo(f"password changed for {username}")
 
@@ -196,6 +213,21 @@ def users_disable(username) -> None:
     click.echo(f"disabled {username}")
 
 
+@users.command("sign-out")
+@click.argument("username")
+def users_sign_out(username) -> None:
+    """
+    End an account's open sessions. An SSO user's roles are read at sign-in,
+    so do this after changing their groups at the identity provider.
+    """
+    with _sessions(ConsoleSettings())() as session:
+        if session.get(db.User, username) is None:
+            raise click.UsageError(f"no user named {username}")
+        sign_out_everywhere(session, username)
+        session.commit()
+    click.echo(f"signed out {username}")
+
+
 @users.command("list")
 def users_list() -> None:
     with _sessions(ConsoleSettings())() as session:
@@ -210,6 +242,8 @@ def users_list() -> None:
             flags += ["break-glass"] if user.break_glass else []
             flags += ["totp"] if user.totp_secret else []
             flags += ["disabled"] if user.disabled else []
+            locked = user.locked_until is not None and _now() < user.locked_until
+            flags += ["locked"] if locked else []
             click.echo(f"{user.username}\t{grants or '-'}\t{' '.join(flags)}")
 
 
@@ -226,12 +260,14 @@ def tokens() -> None:
 @click.option("--created-by", default="cli")
 def tokens_create(name, role, groups, expires_in, created_by) -> None:
     """Create a token; it is shown once."""
+    settings = ConsoleSettings()
+    groups = _groups(settings, groups)
     now = _now()
     expires = (
         now + timedelta(seconds=parse_duration(expires_in)) if expires_in else None
     )
     token = new_token()
-    with _sessions(ConsoleSettings())() as session:
+    with _sessions(settings)() as session:
         if session.get(db.ApiToken, name) is not None:
             raise click.UsageError(f"a token named {name} already exists")
         session.add(
@@ -239,7 +275,7 @@ def tokens_create(name, role, groups, expires_in, created_by) -> None:
                 name=name,
                 token_hash=token_hash(token),
                 role=role,
-                groups=list(groups) or None,
+                groups=groups,
                 created_by=created_by,
                 created_at=now,
                 expires_at=expires,

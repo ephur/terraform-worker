@@ -154,6 +154,12 @@ string that signs the session cookie. Sessions last
 over HTTPS unless `TFWORKER_CONSOLE_SECURE_COOKIES=false`, which plain-HTTP
 testing needs.
 
+Every request checks the account behind its session, so disabling an account
+ends its sessions at once. Signing out, `users set-password` and
+`users sign-out` end every session of that account, on every browser. Forms
+and API calls that change something are refused when a browser sends them
+from another site; requests with a bearer token are not affected.
+
 ### Development mode
 
 With `TFWORKER_CONSOLE_AUTH=none` the console refuses to start unless it
@@ -169,18 +175,23 @@ Create the first admin from the command line, then sign in at `/login`:
     tfworker-console users create bob --role operator --group Sandbox --totp
     tfworker-console users grant bob --role viewer             # add a grant
     tfworker-console users grant bob --role admin --replace    # replace every grant
-    tfworker-console users set-password bob
+    tfworker-console users set-password bob     # also lifts a lockout
+    tfworker-console users sign-out bob         # end bob's open sessions
     tfworker-console users disable bob
     tfworker-console users list
 
 Passwords are hashed with argon2id. `--totp` prints a secret and an
-`otpauth://` URI for an authenticator app, and sign-in then needs the code.
-Role changes and disabled accounts take effect on the account's next request.
+`otpauth://` URI for an authenticator app, and sign-in then needs the code;
+each code is accepted once. A wrong password and a wrong code give the same
+message, and five failures in a row lock the account for 15 minutes.
+`--group` takes the names in the groups file, in any case. Role changes take
+effect on the account's next request.
 
 ### Single sign-on
 
 Register the console with the provider as a web application using the
-authorization code flow, with the redirect URI `<public URL>/auth/callback`,
+authorization code flow, with the redirect URI `<public URL>/auth/callback`
+(`TFWORKER_CONSOLE_PUBLIC_URL` is required),
 and have it put the user's groups in the ID token. Then:
 
     TFWORKER_CONSOLE_AUTH=oidc
@@ -211,8 +222,12 @@ role_mappings:
 ```
 
 Someone whose groups map to no role cannot sign in. Roles are read from the
-groups claim at each sign-in. An SSO sign-in cannot take the name of a local
-account.
+groups claim at each sign-in, so after changing someone's groups at the
+provider, run `users sign-out` to apply it now. A person's account belongs to
+the provider's subject (`iss` and `sub`) and keeps the name it was first
+recorded under, even if the username claim changes later. An SSO sign-in
+cannot take a name another account already has. Group names in the roles
+file must be groups from the groups file.
 
 With `TFWORKER_CONSOLE_SSO_ENFORCED=true`, local passwords work only for
 accounts created with `--break-glass`, for when the provider is down. Give

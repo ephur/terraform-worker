@@ -24,7 +24,13 @@ def upgrade() -> None:
         sa.Column("disabled", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("last_login", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("subject", sa.String(length=1024), nullable=True),
+        sa.Column("session_version", sa.Integer(), nullable=False),
+        sa.Column("failed_logins", sa.Integer(), nullable=False),
+        sa.Column("locked_until", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("totp_last_step", sa.BigInteger(), nullable=True),
         sa.PrimaryKeyConstraint("username"),
+        sa.UniqueConstraint("subject"),
     )
     op.create_table(
         "user_grants",

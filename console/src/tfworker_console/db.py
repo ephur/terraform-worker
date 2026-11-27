@@ -11,6 +11,7 @@ from typing import Optional
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -211,6 +212,14 @@ class User(Base):
     disabled: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime]
     last_login: Mapped[Optional[datetime]]
+    # SSO users: "<issuer>#<sub>", the identity the row belongs to
+    subject: Mapped[Optional[str]] = mapped_column(String(1024), unique=True)
+    # sessions carry this; bumping it signs the account out everywhere
+    session_version: Mapped[int] = mapped_column(default=0)
+    failed_logins: Mapped[int] = mapped_column(default=0)
+    locked_until: Mapped[Optional[datetime]]
+    # the newest one-time code step accepted, so a code works only once
+    totp_last_step: Mapped[Optional[int]] = mapped_column(BigInteger)
 
 
 class UserGrant(Base):

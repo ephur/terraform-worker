@@ -3,9 +3,9 @@ import logging
 import secrets
 from contextlib import asynccontextmanager
 from typing import Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.sessions import SessionMiddleware
@@ -63,12 +63,37 @@ def _check_auth(settings: ConsoleSettings) -> None:
     if not settings.secret_key:
         raise ValueError("set TFWORKER_CONSOLE_SECRET_KEY to sign session cookies")
     if settings.auth == "oidc" and not (
-        settings.oidc_issuer and settings.oidc_client_id
+        settings.oidc_issuer and settings.oidc_client_id and settings.public_url
     ):
         raise ValueError(
-            "TFWORKER_CONSOLE_AUTH=oidc needs TFWORKER_CONSOLE_OIDC_ISSUER and "
-            "TFWORKER_CONSOLE_OIDC_CLIENT_ID"
+            "TFWORKER_CONSOLE_AUTH=oidc needs TFWORKER_CONSOLE_OIDC_ISSUER, "
+            "TFWORKER_CONSOLE_OIDC_CLIENT_ID and TFWORKER_CONSOLE_PUBLIC_URL"
         )
+
+
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _cross_origin(request: Request, public_url: Optional[str]) -> bool:
+    """
+    Whether a browser sent this request from another site. Requests that
+    carry a bearer token are not cookie-authenticated and pass; so do
+    clients that send neither header.
+    """
+    if request.headers.get("Authorization", "").lower().startswith("bearer "):
+        return False
+    if request.headers.get("Sec-Fetch-Site", "same-origin") not in (
+        "same-origin",
+        "none",
+    ):
+        return True
+    origin = request.headers.get("Origin")
+    if origin is None:
+        return False
+    hosts = {request.headers.get("Host", "")}
+    if public_url:
+        hosts.add(urlsplit(public_url).netloc)
+    return urlsplit(origin).netloc not in hosts
 
 
 def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
@@ -113,6 +138,9 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
             )
 
     app.state.roles = load_roles(settings.roles_file)
+    for mapping in app.state.roles.role_mappings:
+        if mapping.groups is not None:
+            mapping.groups = [app.state.groups.canonical(g) for g in mapping.groups]
     app.state.oidc = (
         OIDCClient(
             settings.oidc_issuer,
@@ -134,7 +162,16 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
-        response = await call_next(request)
+        # login CSRF and cross-site actions: SameSite alone does not cover a
+        # sign-in form, which needs no cookie, or sibling subdomains
+        if request.method not in SAFE_METHODS and _cross_origin(
+            request, settings.public_url
+        ):
+            response = PlainTextResponse(
+                "cross-origin requests are refused", status_code=403
+            )
+        else:
+            response = await call_next(request)
         response.headers.setdefault("Content-Security-Policy", CSP)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "same-origin")
@@ -147,6 +184,18 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
                 {"detail": "sign in or send a bearer token"},
                 status_code=401,
                 headers={"WWW-Authenticate": "Bearer"},
+            )
+        if request.headers.get("HX-Request"):
+            # htmx would swap the sign-in page into the content; send the
+            # whole browser there, back to the page itself rather than the
+            # fragment that was asked for
+            current = request.headers.get("HX-Current-URL", "")
+            parts = urlsplit(current)
+            target = parts.path or "/"
+            if parts.query:
+                target += "?" + parts.query
+            return Response(
+                headers={"HX-Redirect": f"/login?{urlencode({'next': target})}"}
             )
         target = request.url.path
         if request.url.query:

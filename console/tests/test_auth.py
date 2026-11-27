@@ -1,7 +1,7 @@
 import base64
 import hashlib
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -12,11 +12,12 @@ import yaml
 from click.testing import CliRunner
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 from test_api import engine  # noqa: F401
 from test_api import sessions  # noqa: F401
 from test_api import NOW, seed  # noqa: F401
 
-from tfworker_console import db
+from tfworker_console import auth, db
 from tfworker_console.app import create_app
 from tfworker_console.auth import (
     AuthError,
@@ -55,7 +56,7 @@ def files(tmp_path):
             {
                 "role_mappings": [
                     {"claim": "tf-admins", "role": "admin"},
-                    {"claim": "sandbox-ops", "role": "operator", "groups": ["Sandbox"]},
+                    {"claim": "sandbox-ops", "role": "operator", "groups": ["sandbox"]},
                 ]
             }
         )
@@ -130,6 +131,15 @@ class TestSettings:
             create_app(ConsoleSettings(auth="local"))
         with pytest.raises(ValueError, match="OIDC_ISSUER"):
             create_app(ConsoleSettings(auth="oidc", secret_key="x"))
+        with pytest.raises(ValueError, match="PUBLIC_URL"):
+            create_app(
+                ConsoleSettings(
+                    auth="oidc",
+                    secret_key="x",
+                    oidc_issuer=ISSUER,
+                    oidc_client_id=CLIENT_ID,
+                )
+            )
 
     def test_dev_mode_banner_and_headers(self, engine, sessions, files):  # noqa: F811
         client = TestClient(app_for(engine, sessions, files, auth="none"))
@@ -202,7 +212,102 @@ class TestSignIn:
         add_user(sessions, "ana", totp_secret=secret)
         assert sign_in(client, "ana").status_code == 401
         assert sign_in(client, "ana", totp="000000").status_code == 401
-        assert sign_in(client, "ana", totp=pyotp.TOTP(secret).now()).status_code == 303
+        code = pyotp.TOTP(secret).at(NOW)
+        assert sign_in(client, "ana", totp=code).status_code == 303
+        # a code works once, and an older one is refused after it
+        assert sign_in(client, "ana", totp=code).status_code == 401
+        older = pyotp.TOTP(secret).at(NOW - timedelta(seconds=30))
+        assert sign_in(client, "ana", totp=older).status_code == 401
+        newer = pyotp.TOTP(secret).at(NOW + timedelta(seconds=30))
+        assert sign_in(client, "ana", totp=newer).status_code == 303
+
+    def test_a_right_password_with_a_wrong_code_looks_like_any_failure(
+        self, client, sessions  # noqa: F811
+    ):
+        add_user(sessions, "ana", totp_secret=pyotp.random_base32())
+        right = sign_in(client, "ana", totp="000000")
+        wrong = sign_in(client, "ana", password="nope", totp="000000")
+        assert right.status_code == wrong.status_code == 401
+        assert (
+            "wrong one-time code" in right.text and "wrong one-time code" in wrong.text
+        )
+
+    def test_repeated_failures_lock_the_account(self, client, sessions):  # noqa: F811
+        add_user(sessions, "ana")
+        for _ in range(auth.MAX_FAILED_LOGINS):
+            assert sign_in(client, "ana", "wrong").status_code == 401
+        # locked: even the right password is refused, with the same message
+        locked = sign_in(client, "ana")
+        assert locked.status_code == 401 and "wrong password" in locked.text
+        with sessions() as session:
+            assert session.get(db.User, "ana").locked_until == NOW + auth.LOCKOUT
+        client.app.state.clock = lambda: NOW + auth.LOCKOUT
+        assert sign_in(client, "ana").status_code == 303
+        with sessions() as session:
+            user = session.get(db.User, "ana")
+            assert (user.failed_logins, user.locked_until) == (0, None)
+
+    def test_a_failed_sign_in_keeps_next(self, client, sessions):  # noqa: F811
+        add_user(sessions, "ana")
+        page = sign_in(client, "ana", "wrong", next="/plans?group=Sandbox")
+        assert 'name="next" value="/plans?group=Sandbox"' in page.text
+
+    def test_signing_out_ends_every_session(
+        self, engine, sessions, files  # noqa: F811
+    ):
+        add_user(sessions, "ana")
+        laptop = TestClient(app_for(engine, sessions, files))
+        desktop = TestClient(app_for(engine, sessions, files))
+        sign_in(laptop, "ana")
+        sign_in(desktop, "ana")
+        stolen = dict(laptop.cookies)
+        laptop.post("/logout")
+        assert desktop.get("/api/v1/me").status_code == 401
+        replay = TestClient(app_for(engine, sessions, files), cookies=stolen)
+        assert replay.get("/api/v1/me").status_code == 401
+
+    def test_cross_origin_posts_are_refused(self, client, sessions):  # noqa: F811
+        add_user(sessions, "ana")
+        form = {"username": "ana", "password": "pw", "totp": "", "next": "/"}
+        for headers in (
+            {"Origin": "https://evil.example.com"},
+            {"Sec-Fetch-Site": "cross-site"},
+            {"Sec-Fetch-Site": "same-site"},
+        ):
+            response = client.post("/login", data=form, headers=headers)
+            assert response.status_code == 403
+        same = client.post(
+            "/login",
+            data=form,
+            headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"},
+            follow_redirects=False,
+        )
+        assert same.status_code == 303
+        # a bearer token is not a cookie, so the browser checks do not apply
+        assert (
+            client.post(
+                "/api/v1/reconcile",
+                headers={
+                    "Origin": "https://evil.example.com",
+                    "Authorization": "Bearer tfw_unknown",
+                },
+            ).status_code
+            == 401
+        )
+
+    def test_htmx_is_sent_to_sign_in_as_a_whole_page(self, client):
+        response = client.get(
+            "/plans",
+            headers={
+                "HX-Request": "true",
+                "HX-Current-URL": "http://testserver/plans?store=prod",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 200
+        assert response.headers["HX-Redirect"] == "/login?next=%2Fplans%3Fstore%3Dprod"
+        bare = client.get("/plans", headers={"HX-Request": "true"})
+        assert bare.headers["HX-Redirect"] == "/login?next=%2F"
 
     @pytest.mark.parametrize(
         "target", ["//evil.example.com/", "https://evil.example.com", "/\\evil", ""]
@@ -523,10 +628,15 @@ class TestSSO:
         start = sso.get("/login/sso", follow_redirects=False)
         code, _ = provider.authorize(start.headers["location"])
         assert sso.get(f"/auth/callback?code={code}&state=forged").status_code == 400
-        # the provider reports an error
-        sso.get("/login/sso", follow_redirects=False)
-        refused = sso.get("/auth/callback?error=access_denied")
+        # the provider reports an error for the sign-in this browser started
+        start = sso.get("/login/sso", follow_redirects=False)
+        _, state = provider.authorize(start.headers["location"])
+        refused = sso.get(f"/auth/callback?error=access_denied&state={state}")
         assert refused.status_code == 401 and "access_denied" in refused.text
+        # a state with no code
+        start = sso.get("/login/sso", follow_redirects=False)
+        _, state = provider.authorize(start.headers["location"])
+        assert sso.get(f"/auth/callback?state={state}").status_code == 400
         # the token endpoint refuses the code
         provider.token_status = 500
         assert sso_sign_in(sso, provider).status_code == 401
@@ -534,7 +644,109 @@ class TestSSO:
         # a local account with the same name cannot be taken over by SSO
         add_user(sessions, "rita")
         taken = sso_sign_in(sso, provider)
-        assert taken.status_code == 403 and "may not sign in with SSO" in taken.text
+        assert taken.status_code == 403 and "belongs to another account" in taken.text
+
+    def test_a_forged_error_neither_shows_nor_cancels(self, sso, provider):
+        start = sso.get("/login/sso", follow_redirects=False)
+        code, state = provider.authorize(start.headers["location"])
+        forged = sso.get("/auth/callback?error=call+0800+now")
+        assert forged.status_code == 400 and "0800" not in forged.text
+        done = sso.get(
+            f"/auth/callback?code={code}&state={state}", follow_redirects=False
+        )
+        assert done.status_code == 303
+
+    def test_identity_follows_the_subject(self, sso, provider, sessions):  # noqa: F811
+        sso_sign_in(sso, provider)
+        # the public URL is this console's origin, even behind a proxy
+        out = sso.post(
+            "/logout",
+            headers={"Origin": "https://console.example.com"},
+            follow_redirects=False,
+        )
+        assert out.status_code == 303
+        # the provider renames the person: they keep their console name
+        provider.claims = {"preferred_username": "rita.renamed"}
+        sso_sign_in(sso, provider)
+        assert sso.get("/api/v1/me").json()["name"] == "rita"
+        sso.post("/logout")
+        # someone else whose username is rita does not get rita's row
+        provider.claims = {"sub": "00u2"}
+        other = sso_sign_in(sso, provider)
+        assert other.status_code == 403 and "belongs to another account" in other.text
+        provider.claims = {"sub": "00u3", "preferred_username": "x" * 256}
+        assert sso_sign_in(sso, provider).status_code == 403
+        with sessions() as session:
+            assert session.get(db.User, "rita").subject == f"{ISSUER}#00u1"
+
+    def test_a_racing_first_sign_in(
+        self, sso, provider, sessions, mocker  # noqa: F811
+    ):
+        add_user(sessions, "rita", source="oidc", subject="someone#else")
+        real_get = Session.get
+
+        def blind(self, entity, ident, **kwargs):
+            if entity is db.User:
+                return None  # as if the other sign-in had not committed yet
+            return real_get(self, entity, ident, **kwargs)  # pragma: no cover
+
+        mocker.patch.object(Session, "get", blind)
+        collided = sso_sign_in(sso, provider)
+        assert collided.status_code == 409 and "try again" in collided.text
+
+    def test_disabling_an_sso_user_ends_their_session(
+        self, sso, provider, sessions  # noqa: F811
+    ):
+        sso_sign_in(sso, provider)
+        assert sso.get("/api/v1/me").status_code == 200
+        with sessions() as session:
+            session.get(db.User, "rita").disabled = True
+            session.commit()
+        assert sso.get("/api/v1/me").status_code == 401
+        with sessions() as session:
+            session.get(db.User, "rita").disabled = False
+            session.commit()
+        sso.cookies.clear()
+        assert sso_sign_in(sso, provider).status_code == 303
+        with sessions() as session:
+            session.get(db.User, "rita").disabled = True
+            session.commit()
+        sso.cookies.clear()
+        refused = sso_sign_in(sso, provider)
+        assert refused.status_code == 403 and "may not sign in" in refused.text
+
+    def test_an_unreachable_provider(self, sso, provider):
+        down = {"discovery": True, "token": False}
+
+        def handler(request):
+            if down["discovery"] or (down["token"] and request.url.path == "/token"):
+                raise httpx.ConnectError("connection refused")
+            return provider.handler(request)
+
+        sso.app.state.oidc._http = lambda: httpx.Client(
+            transport=httpx.MockTransport(handler)
+        )
+        page = sso.get("/login/sso")
+        assert page.status_code == 502 and "could not reach" in page.text
+        down.update(discovery=False, token=True)
+        failed = sso_sign_in(sso, provider)
+        assert failed.status_code == 401 and "could not reach" in failed.text
+
+    def test_a_token_response_that_is_not_json(self, provider):
+        def handler(request):
+            if request.url.path == "/token":
+                return httpx.Response(200, text="<html>")
+            return provider.handler(request)
+
+        client = OIDCClient(
+            ISSUER,
+            CLIENT_ID,
+            None,
+            "openid",
+            http=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+        with pytest.raises(AuthError, match="could not reach"):
+            client.exchange("c", "v", "r", "n")
 
     def test_rotated_keys_are_fetched_again(self, sso, provider):
         sso_sign_in(sso, provider)
@@ -598,6 +810,7 @@ class TestSSO:
             auth="oidc",
             oidc_issuer=ISSUER,
             oidc_client_id=CLIENT_ID,
+            public_url="https://console.example.com",
             sso_enforced=True,
         )
         client = TestClient(app)
@@ -612,33 +825,16 @@ class TestSSO:
         assert client.get("/login/sso").status_code == 404
         assert client.get("/auth/callback?code=x&state=y").status_code == 404
 
-    def test_redirect_uri_without_a_public_url(
-        self,
-        engine,  # noqa: F811
-        sessions,  # noqa: F811
-        files,
-        provider,
-    ):
-        app = app_for(
-            engine,
-            sessions,
-            files,
-            auth="oidc",
-            oidc_issuer=ISSUER,
-            oidc_client_id=CLIENT_ID,
+
+def test_roles_file_groups_must_exist(engine, sessions, files, tmp_path):  # noqa: F811
+    roles = tmp_path / "bad-roles.yaml"
+    roles.write_text(
+        yaml.safe_dump(
+            {"role_mappings": [{"claim": "a", "role": "viewer", "groups": ["Nope"]}]}
         )
-        app.state.oidc = OIDCClient(
-            ISSUER,
-            CLIENT_ID,
-            None,
-            "openid",
-            http=lambda: httpx.Client(transport=httpx.MockTransport(provider.handler)),
-            clock=NOW.timestamp,
-        )
-        start = TestClient(app).get("/login/sso", follow_redirects=False)
-        _, _ = provider.authorize(start.headers["location"])
-        (params,) = provider.codes.values()
-        assert params["redirect_uri"] == "http://testserver/auth/callback"
+    )
+    with pytest.raises(ValueError, match="no deployment group named 'Nope'"):
+        app_for(engine, sessions, {**files, "roles": str(roles)})
 
 
 def test_roles_file(tmp_path):
@@ -668,11 +864,12 @@ def test_rebuild_keeps_accounts(sessions):  # noqa: F811
 
 class TestCli:
     @pytest.fixture
-    def env(self, engine, monkeypatch):  # noqa: F811
+    def env(self, engine, files, monkeypatch):  # noqa: F811
         monkeypatch.setenv(
             "TFWORKER_CONSOLE_DATABASE_URL",
             engine.url.render_as_string(hide_password=False),
         )
+        monkeypatch.setenv("TFWORKER_CONSOLE_GROUPS_FILE", files["groups"])
         return CliRunner()
 
     def run(self, runner, *args, input=None):
@@ -719,10 +916,16 @@ class TestCli:
             "--role",
             "operator",
             "--group",
-            "Sandbox",
+            "sandbox",
             "--replace",
         )
         assert granted.exit_code == 0
+        unknown = self.run(
+            env, "users", "grant", "sam", "--role", "viewer", "--group", "Nope"
+        )
+        assert (
+            unknown.exit_code and "no deployment group named 'Nope'" in unknown.output
+        )
         assert self.run(env, "users", "grant", "nobody", "--role", "viewer").exit_code
         assert (
             self.run(env, "users", "set-password", "sam", "--password", "new").exit_code
@@ -731,13 +934,28 @@ class TestCli:
         assert self.run(
             env, "users", "set-password", "nobody", "--password", "x"
         ).exit_code
+        with sessions() as session:
+            assert check_password(session.get(db.User, "sam").password_hash, "new")
+            assert session.get(db.User, "sam").session_version == 1
+            session.get(db.User, "root").locked_until = datetime.now(
+                timezone.utc
+            ) + timedelta(minutes=5)
+            session.commit()
+        assert self.run(env, "users", "sign-out", "sam").exit_code == 0
+        assert self.run(env, "users", "sign-out", "nobody").exit_code
         assert self.run(env, "users", "disable", "sam").exit_code == 0
         assert self.run(env, "users", "disable", "nobody").exit_code
         listed = self.run(env, "users", "list").output
-        assert "root\tadmin\tlocal break-glass totp" in listed
+        assert "root\tadmin\tlocal break-glass totp locked" in listed
         assert "sam\toperator in Sandbox\tlocal disabled" in listed
         with sessions() as session:
-            assert check_password(session.get(db.User, "sam").password_hash, "new")
+            assert session.get(db.User, "sam").session_version == 2
+        assert (
+            self.run(env, "users", "set-password", "root", "--password", "x").exit_code
+            == 0
+        )
+        with sessions() as session:
+            assert session.get(db.User, "root").locked_until is None
 
     def test_tokens(self, env, sessions):  # noqa: F811
         made = self.run(
@@ -759,8 +977,20 @@ class TestCli:
             env, "tokens", "create", "backstage", "--role", "viewer"
         ).exit_code
         assert (
-            self.run(env, "tokens", "create", "ci", "--role", "operator").exit_code == 0
+            self.run(
+                env,
+                "tokens",
+                "create",
+                "ci",
+                "--role",
+                "operator",
+                "--group",
+                "SANDBOX",
+            ).exit_code
+            == 0
         )
+        with sessions() as session:
+            assert session.get(db.ApiToken, "ci").groups == ["Sandbox"]
         listed = self.run(env, "tokens", "list").output
         assert "backstage\tviewer\texpires 20" in listed
         assert "ci\toperator\texpires never\tlast used never" in listed

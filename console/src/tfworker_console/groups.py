@@ -143,6 +143,16 @@ class Groups:
         """Every group in sort order, Unassigned last."""
         return [group.name for group in self.config.groups] + [UNASSIGNED]
 
+    def canonical(self, name: str) -> str:
+        """A group's configured name, given any case of it; ValueError if unknown."""
+        for known in self.names:
+            if known.casefold() == name.strip().casefold():
+                return known
+        raise ValueError(
+            f"no deployment group named {name!r}; the groups are "
+            + ", ".join(self.names)
+        )
+
     def rank(self, name: str) -> int:
         names = self.names
         return names.index(name) if name in names else len(names)

@@ -13,10 +13,11 @@ password with optional TOTP. Integrations use API tokens. With
 
 import base64
 import hashlib
+import hmac
 import secrets
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Literal, Optional, Set
 
@@ -37,6 +38,11 @@ RANKS: Dict[str, int] = {"viewer": 0, "operator": 1, "admin": 2}
 TOKEN_PREFIX = "tfw_"
 # seconds of clock skew allowed on ID token times
 LEEWAY = 60
+
+# failed sign-ins in a row before an account is locked, and for how long
+MAX_FAILED_LOGINS = 5
+LOCKOUT = timedelta(minutes=15)
+SIGN_IN_FAILED = "unknown user, wrong password or wrong one-time code"
 
 _hasher = PasswordHasher()
 
@@ -122,8 +128,15 @@ def new_totp_secret() -> str:
     return pyotp.random_base32()
 
 
-def check_totp(secret: str, code: str, now: Optional[float] = None) -> bool:
-    return pyotp.TOTP(secret).verify(code.strip(), for_time=now, valid_window=1)
+def totp_step(secret: str, code: str, now: float) -> Optional[int]:
+    """The time step `code` is valid for, one step either side of now, or None."""
+    totp = pyotp.TOTP(secret)
+    code = code.strip()
+    current = int(now // totp.interval)
+    for step in (current - 1, current, current + 1):
+        if hmac.compare_digest(totp.at(step * totp.interval), code):
+            return step
+    return None
 
 
 def user_grants(session: Session, username: str) -> List[Grant]:
@@ -141,14 +154,40 @@ def local_login(
     sso_enforced: bool,
     now: datetime,
 ) -> Principal:
+    """
+    Check a local sign-in. Every wrong password or code counts toward a
+    lockout, and all of them give the same message, so the password and the
+    code cannot be guessed separately. A code is accepted only once.
+    """
     user = session.get(db.User, username)
     valid = check_password(user.password_hash if user is not None else None, password)
-    if not valid or user.disabled or user.source != "local":
-        raise AuthError("unknown user or wrong password")
+    if user is None or user.source != "local":
+        raise AuthError(SIGN_IN_FAILED)
+    if user.locked_until is not None and now < user.locked_until:
+        raise AuthError(SIGN_IN_FAILED)
+    step = None
+    if valid and user.totp_secret:
+        step = totp_step(user.totp_secret, totp or "", now.timestamp())
+        if step is None or (
+            user.totp_last_step is not None and step <= user.totp_last_step
+        ):
+            valid = False
+    if not valid:
+        user.failed_logins += 1
+        if user.failed_logins >= MAX_FAILED_LOGINS:
+            user.locked_until = now + LOCKOUT
+            user.failed_logins = 0
+        session.commit()
+        raise AuthError(SIGN_IN_FAILED)
+    user.failed_logins = 0
+    user.locked_until = None
+    if step is not None:
+        user.totp_last_step = step
+    session.commit()
+    if user.disabled:
+        raise AuthError(SIGN_IN_FAILED)
     if sso_enforced and not user.break_glass:
         raise AuthError("sign in with SSO; local sign-in is for break-glass accounts")
-    if user.totp_secret and not check_totp(user.totp_secret, totp or ""):
-        raise AuthError("a valid one-time code is required")
     grants = user_grants(session, username)
     if not grants:
         raise AuthError("this account has no role")
@@ -258,10 +297,13 @@ class OIDCClient:
         self._keys: Optional[jwt.PyJWKSet] = None
 
     def _get(self, url: str) -> dict:
-        with self._http() as client:
-            response = client.get(url, timeout=10)
-            response.raise_for_status()
-            return response.json()
+        try:
+            with self._http() as client:
+                response = client.get(url, timeout=10)
+                response.raise_for_status()
+                return response.json()
+        except (httpx.HTTPError, ValueError) as e:
+            raise AuthError(f"could not reach the identity provider: {e}")
 
     @property
     def metadata(self) -> dict:
@@ -309,13 +351,15 @@ class OIDCClient:
             "client_id": self.client_id,
         }
         auth = (self.client_id, self.client_secret) if self.client_secret else None
-        with self._http() as client:
-            response = client.post(
-                self.metadata["token_endpoint"], data=data, auth=auth, timeout=10
-            )
-        if response.status_code != 200:
-            raise AuthError("the identity provider refused the sign-in")
-        id_token = response.json().get("id_token")
+        endpoint = self.metadata["token_endpoint"]
+        try:
+            with self._http() as client:
+                response = client.post(endpoint, data=data, auth=auth, timeout=10)
+            if response.status_code != 200:
+                raise AuthError("the identity provider refused the sign-in")
+            id_token = response.json().get("id_token")
+        except (httpx.HTTPError, ValueError) as e:
+            raise AuthError(f"could not reach the identity provider: {e}")
         if not id_token:
             raise AuthError("the identity provider returned no ID token")
         try:
