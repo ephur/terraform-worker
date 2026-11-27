@@ -40,7 +40,7 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         if: steps.creds.outputs.present == 'true'
         with:
           fetch-depth: 1
