@@ -2,7 +2,7 @@ import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, Optional, Union
+from typing import TYPE_CHECKING, Dict, Optional, Tuple, Union
 from uuid import uuid4
 from zipfile import ZipFile
 
@@ -20,7 +20,6 @@ from tfworker.util.duration import parse_duration
 from tfworker.util.plan_manifest import (
     PREVIEW_DIR,
     S3ManifestStore,
-    manifest_key,
     mark_pending_stale,
     move,
     new_manifest,
@@ -35,16 +34,37 @@ if TYPE_CHECKING:
     from tfworker.commands.terraform import TerraformResult
     from tfworker.definitions.model import Definition
 
+# intents whose plans are kept apart and never applied by a later run
+UNAPPLIED_INTENTS = ("preview", "drift")
+FINISH_ATTEMPTS = 3
+
+
+class _Slot:
+    """What a plan slot holds: a pointer to a manifest, or nothing (an older worker's plan)."""
+
+    def __init__(self, key: Optional[str], manifest: Optional[PlanManifest]):
+        self.key = key
+        self.manifest = manifest
+
+    @property
+    def legacy(self) -> bool:
+        return self.key is None
+
+    @property
+    def unreadable(self) -> bool:
+        return self.key is not None and self.manifest is None
+
 
 @HandlerRegistry.register("s3", always=True)
 class S3Handler(BaseHandler):
     """
     Save plans in the state bucket so a later run can apply them.
 
-    Each saved plan has a `tfworker.plan/v1` manifest beside it. A plan is
-    applied only while its manifest is pending and unexpired, its file matches
-    the manifest's sha256, and it was made against the current state; the run
-    that applies it first takes it with a conditional write.
+    Each saved plan has a `tfworker.plan/v1` manifest. A plan is applied only
+    while its manifest is pending and unexpired, its file matches the
+    manifest's sha256, it is the kind of plan (apply or destroy) the run is
+    for, and it was made against the current state; the run that applies it
+    first takes it with a conditional write.
     """
 
     actions = [TerraformAction.PLAN, TerraformAction.APPLY, TerraformAction.DESTROY]
@@ -65,10 +85,12 @@ class S3Handler(BaseHandler):
         self._app_state = None
         self._store = None
         self._provenance = None
-        # the manifest of the plan each definition will apply, if it has one
-        self._plans: Dict[str, Optional[PlanManifest]] = {}
+        # the slot of the plan each definition will apply
+        self._plans: Dict[str, _Slot] = {}
         # plans this run has taken and not yet finished applying
-        self._taken: Dict[str, PlanManifest] = {}
+        self._taken: Dict[str, Tuple[str, PlanManifest]] = {}
+        # S3 version of each definition's state when its plan started
+        self._base_versions: Dict[str, Optional[str]] = {}
         self._lock = threading.Lock()
 
         self.execution_functions = {
@@ -82,7 +104,7 @@ class S3Handler(BaseHandler):
                 TerraformStage.ERROR: self._apply_failed,
             },
             TerraformAction.DESTROY: {
-                TerraformStage.PRE: self._pre_apply,
+                TerraformStage.PRE: self._pre_destroy,
                 TerraformStage.POST: self._post_apply,
                 TerraformStage.ERROR: self._apply_failed,
             },
@@ -125,7 +147,10 @@ class S3Handler(BaseHandler):
         return current_run_id(self.app_state)[0]
 
     def _preview(self) -> bool:
-        return getattr(self.app_state.terraform_options, "intent", None) == "preview"
+        return (
+            getattr(self.app_state.terraform_options, "intent", None)
+            in UNAPPLIED_INTENTS
+        )
 
     def _require_manifest(self) -> bool:
         return bool(
@@ -136,18 +161,23 @@ class S3Handler(BaseHandler):
     def _now() -> datetime:
         return datetime.now(timezone.utc)
 
-    def _read_manifest(self, remotefile: str):
+    def _slot(self, remotefile: str) -> _Slot:
+        """Read the manifest the slot at `remotefile` points to."""
         try:
-            return self.store.read(manifest_key(remotefile))
+            key = self.store.current(remotefile)
+            if key is None:
+                return _Slot(None, None)
+            found = self.store.read(key)
         except BackendError as e:
             raise HandlerError(f"Error reading plan manifest: {e}")
+        return _Slot(key, found[0] if found else None)
 
-    def _move(self, remotefile: str, status: str, manifest=None, **kwargs):
+    def _move(self, key: str, status: str, manifest=None, **kwargs):
         """Move a manifest, logging rather than failing when the store errors."""
         try:
             return move(
                 self.store,
-                manifest_key(remotefile),
+                key,
                 status,
                 self._now(),
                 run_id=self.run_id,
@@ -155,8 +185,17 @@ class S3Handler(BaseHandler):
                 **kwargs,
             )
         except BackendError as e:
-            log.warn(f"unable to mark saved plan {remotefile} {status}: {e}")
+            log.warn(f"unable to mark saved plan {key} {status}: {e}")
             return None
+
+    def _retire(self, slot: _Slot, status: str, reason: Optional[str] = None):
+        """Move a pending plan to a terminal status and remove its file."""
+        moved = self._move(
+            slot.key, status, slot.manifest, expect={"pending"}, reason=reason
+        )
+        if moved is not None:
+            self.store.retire(slot.key, moved)
+        return moved
 
     def is_ready(self) -> bool:
         """
@@ -205,6 +244,9 @@ class S3Handler(BaseHandler):
         """
         has_plan checks if a remote plan file exists for the given definition.
         This allows the system to skip init/plan if a plan is already available.
+
+        Only a pending, unexpired plan is offered. A manifest that can't be
+        read is logged and treated as no plan, never as a reason to stop.
         """
         if not self.is_ready():
             return False
@@ -221,23 +263,26 @@ class S3Handler(BaseHandler):
         except botocore.exceptions.ClientError:
             return False
 
-        found = self._read_manifest(remotefile)
-        if found is None:
+        try:
+            slot = self._slot(remotefile)
+        except HandlerError as e:
+            log.warn(f"saved plan {remotefile} is not offered: {e}")
+            return False
+        if slot.legacy:
             if self._require_manifest():
                 log.warn(
                     f"saved plan {remotefile} has no manifest and require_plan_manifest is set; ignoring it"
                 )
                 return False
             return True
-        manifest = found[0]
-        if manifest is None:
+        if slot.unreadable:
             return False
-        if manifest.status != "pending":
-            log.debug(f"saved plan {remotefile} is {manifest.status}; ignoring it")
+        if slot.manifest.status != "pending":
+            log.debug(f"saved plan {remotefile} is {slot.manifest.status}; ignoring it")
             return False
-        if manifest.is_expired(self._now()):
+        if slot.manifest.is_expired(self._now()):
             log.info(f"saved plan {remotefile} has expired")
-            self._move(remotefile, "expired", manifest, expect={"pending"})
+            self._retire(slot, "expired")
             return False
         return True
 
@@ -276,6 +321,10 @@ class S3Handler(BaseHandler):
         """check_plan runs while the plan is being checked, it should fetch a file from the backend and store it in the local location"""
         remotefile = self.get_remote_file(definition.name)
         planfile = Path(definition.plan_file)
+        with self._lock:
+            self._base_versions[definition.name] = self._state_version_id(
+                definition.name
+            )
 
         if self._force_plan():
             # A forced plan supersedes the saved one, so drop it now rather than
@@ -284,13 +333,14 @@ class S3Handler(BaseHandler):
             # leave the superseded plan in place for a later apply to run.
             if planfile.exists():
                 planfile.unlink()
-            if self._move(
-                remotefile,
-                "superseded",
-                expect={"pending"},
-                reason=f"replaced by a forced plan in run {self.run_id}",
-            ):
-                log.info(f"forced plan: saved plan {remotefile} is now superseded")
+            slot = self._slot(remotefile)
+            if not slot.legacy and not slot.unreadable:
+                if self._retire(
+                    slot,
+                    "superseded",
+                    reason=f"replaced by a forced plan in run {self.run_id}",
+                ):
+                    log.info(f"forced plan: saved plan {remotefile} is now superseded")
             if self._s3_delete_plan(remotefile):
                 log.debug(
                     f"forced plan: discarded saved plan s3://{self.bucket}/{remotefile}"
@@ -322,22 +372,14 @@ class S3Handler(BaseHandler):
         statefile = f"{self.prefix}/{definition.name}/terraform.tfstate"
         planfile = Path(definition.plan_file)
 
-        found = self._read_manifest(remotefile)
-        manifest = found[0] if found else None
-        if found is None:
-            if self._require_manifest():
-                log.warn(
-                    f"saved plan {remotefile} has no manifest and require_plan_manifest is set; not applying it"
-                )
-                return False
-            log.warn(
-                f"saved plan {remotefile} has no manifest; it was saved by an older "
-                "worker and is used without the apply gate"
-            )
-        elif manifest is None:
+        slot = self._slot(remotefile)
+        if slot.unreadable:
             log.warn(
                 f"saved plan {remotefile} has an unreadable manifest; not using it"
             )
+            return False
+        if slot.manifest is not None and slot.manifest.status != "pending":
+            log.debug(f"saved plan {remotefile} is {slot.manifest.status}")
             return False
 
         if not self._s3_get_plan(planfile.resolve(), remotefile):
@@ -345,18 +387,24 @@ class S3Handler(BaseHandler):
         if not planfile.exists():
             raise HandlerError(f"planfile not found after download: {planfile}")
 
-        if manifest is not None:
-            reason = refusal(manifest, planfile, self._now())
+        if slot.legacy:
+            if self._require_manifest():
+                log.warn(
+                    f"saved plan {remotefile} has no manifest and require_plan_manifest is set; not applying it"
+                )
+                planfile.unlink()
+                return False
+            log.warn(
+                f"saved plan {remotefile} has no manifest; it was saved by an older "
+                "worker and is used without the apply gate"
+            )
+        else:
+            reason = refusal(slot.manifest, planfile, self._now())
             if reason:
                 log.warn(f"saved plan {remotefile} refused: {reason}")
                 planfile.unlink()
-                if manifest.status == "pending":
-                    status = (
-                        "expired" if manifest.is_expired(self._now()) else "discarded"
-                    )
-                    self._move(
-                        remotefile, status, manifest, expect={"pending"}, reason=reason
-                    )
+                expired = slot.manifest.is_expired(self._now())
+                self._retire(slot, "expired" if expired else "discarded", reason)
                 return False
 
         # verify the lineage and serial from the planfile matches the statefile
@@ -364,20 +412,16 @@ class S3Handler(BaseHandler):
             log.warn(
                 f"planfile {remotefile} lineage does not match statefile, remote plan is unsuitable and will be removed"
             )
-            if manifest is not None:
-                self._move(
-                    remotefile,
-                    "stale",
-                    manifest,
-                    expect={"pending"},
-                    reason="the state changed after the plan was made",
+            if not slot.legacy:
+                self._retire(
+                    slot, "stale", reason="the state changed after the plan was made"
                 )
             self._s3_delete_plan(remotefile)
             planfile.unlink()
             return False
 
         with self._lock:
-            self._plans[definition.name] = manifest
+            self._plans[definition.name] = slot
         log.info(
             f"remote planfile downloaded: s3://{self.bucket}/{remotefile} -> {planfile}"
         )
@@ -385,7 +429,8 @@ class S3Handler(BaseHandler):
 
     def _post_plan(self, definition: str, result: "TerraformResult", **kwargs):
         """
-        post_plan runs after the plan is completed, it should upload the planfile to the backend
+        Upload the plan to the backend. Its manifest is written first, so a
+        plan object is never found without one.
         """
         planfile = Path(definition.plan_file)
         logfile = planfile.with_suffix(".log")
@@ -394,12 +439,16 @@ class S3Handler(BaseHandler):
 
         result.log_file(logfile.resolve())
         try:
-            if planfile.exists() and result.exit_code == 2:
+            if (
+                planfile.exists()
+                and planfile.stat().st_size > 0
+                and result.exit_code == 2
+            ):
+                self._write_manifest(definition, planfile, remotefile)
                 if self._s3_put_plan(planfile, remotefile):
                     log.info(
                         f"remote planfile uploaded: {planfile} -> s3://{self.bucket}/{remotefile}"
                     )
-                    self._write_manifest(definition, planfile, remotefile)
                 if self._s3_put_plan(logfile, remotelog):
                     log.debug(
                         f"remote logfile uploaded: {logfile} -> s3://{self.bucket}/{remotelog}"
@@ -415,18 +464,21 @@ class S3Handler(BaseHandler):
     def _write_manifest(
         self, definition: "Definition", planfile: Path, remotefile: str
     ) -> None:
-        """Describe the plan just uploaded, superseding a pending one it replaced."""
+        """Record the plan about to be uploaded, superseding a pending one it replaces."""
         name = definition.name
-        self._move(
-            remotefile,
-            "superseded",
-            expect={"pending"},
-            reason=f"replaced by a plan from run {self.run_id}",
-        )
+        slot = self._slot(remotefile)
+        if not slot.legacy and not slot.unreadable:
+            self._retire(
+                slot,
+                "superseded",
+                reason=f"replaced by a plan from run {self.run_id}",
+            )
         options = self.app_state.terraform_options
         ttl = parse_duration(getattr(options, "plan_ttl", None) or 0)
         if self._provenance is None:
             self._provenance = run_provenance(self.app_state)
+        with self._lock:
+            version_id = self._base_versions.get(name)
         manifest = new_manifest(
             run_id=self.run_id,
             deployment=self.app_state.deployment,
@@ -436,18 +488,20 @@ class S3Handler(BaseHandler):
             storage="preview" if self._preview() else "backend",
             now=self._now(),
             ttl_seconds=ttl,
-            destroy=bool(getattr(options, "destroy", False)),
+            destroy=_destroy_plan(options),
             state=self._location(name),
             provenance=self._provenance,
-            base_state_version_id=self._state_version_id(name),
+            base_state_version_id=version_id,
         )
+        key = self.store.record_key(name, manifest.plan_id)
         try:
-            self.store.write(manifest_key(remotefile), manifest)
+            self.store.write(key, manifest, create_only=True)
+            self.store.point(remotefile, key)
         except BackendError as e:
             raise HandlerError(f"Error writing plan manifest: {e}")
         with self._lock:
-            self._plans[name] = manifest
-        log.debug(f"plan manifest written for {remotefile}: {manifest.plan_id}")
+            self._plans[name] = _Slot(key, manifest)
+        log.debug(f"plan manifest written for {remotefile}: {key}")
 
     def _location(self, name: str):
         try:
@@ -467,30 +521,74 @@ class S3Handler(BaseHandler):
         version = head.get("VersionId")
         return None if version in (None, "null") else version
 
-    def _pre_apply(self, definition: "Definition", **kwargs):
+    def _pre_destroy(self, definition: "Definition", **kwargs):
+        self._pre_apply(definition, destroy=True)
+
+    def _pre_apply(self, definition: "Definition", destroy: bool = False, **kwargs):
         """
-        Take the saved plan before it is applied, then remove it from the
-        backend so no other run can apply it.
+        Take the saved plan before it is applied, refusing one that fails the
+        gate. A plan already on disk is checked against the slot's manifest
+        too, as when `--plan-file-path` keeps a copy of a backend plan.
         """
-        remotefile = self.get_remote_file(definition.name)
-        remotelog = remotefile.replace(".tfplan", ".log")
+        name = definition.name
+        remotefile = self.get_remote_file(name)
         with self._lock:
-            manifest = self._plans.pop(definition.name, None)
-        if manifest is not None:
-            reason = refusal(manifest, Path(definition.plan_file), self._now())
-            if reason is None:
-                taken = self._move(remotefile, "applying", manifest, expect={"pending"})
-                if taken is None:
-                    reason = "it is no longer pending; another run may have taken it"
-            if reason:
-                raise PlanRefusedError(f"saved plan {remotefile}: {reason}")
-            with self._lock:
-                self._taken[definition.name] = taken
-            log.debug(f"took saved plan {remotefile} ({taken.plan_id})")
-        if self._s3_delete_plan(remotefile):
-            log.debug(f"remote planfile removed: s3://{self.bucket}/{remotefile}")
-        if self._s3_delete_plan(remotelog):
-            log.debug(f"remote logfile removed: s3://{self.bucket}/{remotelog}")
+            slot = self._plans.pop(name, None)
+        if slot is None:
+            try:
+                slot = self._slot(remotefile)
+            except HandlerError as e:
+                raise PlanRefusedError(f"saved plan {remotefile}: {e}")
+            if slot.legacy and self._s3_exists(remotefile):
+                if self._require_manifest():
+                    raise PlanRefusedError(
+                        f"saved plan {remotefile} has no manifest and require_plan_manifest is set"
+                    )
+        if slot.unreadable:
+            raise PlanRefusedError(
+                f"saved plan {remotefile} has an unreadable manifest"
+            )
+        if slot.legacy:
+            # an older worker's plan: remove it so no other run applies it
+            self._delete_remote_plan(remotefile)
+            return None
+
+        manifest = slot.manifest
+        # a run may apply its own preview plan (always_apply); no later run may
+        if manifest.storage == "preview" and manifest.run_id != self.run_id:
+            raise PlanRefusedError(
+                f"saved plan {remotefile}: preview plans are never applied"
+            )
+        if manifest.destroy != destroy:
+            kind = "a destroy plan" if manifest.destroy else "not a destroy plan"
+            raise PlanRefusedError(
+                f"saved plan {remotefile}: it is {kind}, and this run is "
+                f"{'destroying' if destroy else 'applying'}"
+            )
+        reason = refusal(manifest, Path(definition.plan_file), self._now())
+        if reason:
+            if manifest.status == "pending" and manifest.is_expired(self._now()):
+                self._retire(slot, "expired", reason)
+            raise PlanRefusedError(f"saved plan {remotefile}: {reason}")
+        try:
+            taken = move(
+                self.store,
+                slot.key,
+                "applying",
+                self._now(),
+                run_id=self.run_id,
+                expect={"pending"},
+                plan_id=manifest.plan_id,
+            )
+        except BackendError as e:
+            raise PlanRefusedError(f"saved plan {remotefile}: unable to take it: {e}")
+        if taken is None:
+            raise PlanRefusedError(
+                f"saved plan {remotefile}: it is no longer pending; another run may have taken it"
+            )
+        with self._lock:
+            self._taken[name] = (slot.key, taken)
+        log.debug(f"took saved plan {remotefile} ({taken.plan_id})")
         return None
 
     def _post_apply(self, definition: "Definition", **kwargs):
@@ -504,18 +602,60 @@ class S3Handler(BaseHandler):
             f"the state was changed by run {self.run_id}",
         )
 
-    def _apply_failed(self, definition: "Definition", **kwargs):
-        self._finish(definition.name, "failed", reason="terraform did not finish")
+    def _apply_failed(
+        self, definition: "Definition", result: "TerraformResult" = None, **kwargs
+    ):
+        """
+        A plan whose apply never reached terraform (a refusal or a failed
+        hook) is released back to pending; otherwise it failed.
+        """
+        if result is not None and getattr(result, "outside_terraform", False) is True:
+            self._finish(
+                definition.name,
+                "pending",
+                reason="released: terraform did not start",
+                retire=False,
+            )
+        else:
+            self._finish(definition.name, "failed", reason="terraform did not finish")
 
-    def _finish(self, name: str, status: str, reason: Optional[str] = None) -> None:
+    def _finish(
+        self,
+        name: str,
+        status: str,
+        reason: Optional[str] = None,
+        retire: bool = True,
+    ) -> None:
         with self._lock:
             taken = self._taken.pop(name, None)
         if taken is None:
             return
-        if self._move(
-            taken.plan_key, status, taken, expect={"applying"}, reason=reason
-        ):
-            log.debug(f"saved plan {taken.plan_key} is now {status}")
+        key, manifest = taken
+        for attempt in range(FINISH_ATTEMPTS):
+            try:
+                moved = move(
+                    self.store,
+                    key,
+                    status,
+                    self._now(),
+                    run_id=self.run_id,
+                    reason=reason,
+                    expect={"applying"},
+                    plan_id=manifest.plan_id,
+                )
+                break
+            except BackendError as e:
+                log.warn(
+                    f"unable to mark saved plan {manifest.plan_key} {status} "
+                    f"(attempt {attempt + 1} of {FINISH_ATTEMPTS}): {e}"
+                )
+        else:
+            return
+        if moved is None:
+            return
+        log.debug(f"saved plan {manifest.plan_key} is now {status}")
+        if retire:
+            self.store.retire(key, moved)
 
     def teardown(self, deployment: str, working_dir: str) -> None:
         """Mark any plan this run took but never finished applying as failed."""
@@ -523,6 +663,20 @@ class S3Handler(BaseHandler):
             self._finish(
                 name, "failed", reason="the run ended before the apply finished"
             )
+
+    def _delete_remote_plan(self, remotefile: str) -> None:
+        remotelog = remotefile.replace(".tfplan", ".log")
+        if self._s3_delete_plan(remotefile):
+            log.debug(f"remote planfile removed: s3://{self.bucket}/{remotefile}")
+        if self._s3_delete_plan(remotelog):
+            log.debug(f"remote logfile removed: s3://{self.bucket}/{remotelog}")
+
+    def _s3_exists(self, remotefile: str) -> bool:
+        try:
+            self.s3_client.head_object(Bucket=self.bucket, Key=remotefile)
+            return True
+        except botocore.exceptions.ClientError:
+            return False
 
     def _s3_get_plan(self, planfile: Path, remotefile: str) -> bool:
         """_get_plan downloads the file from s3"""
@@ -599,3 +753,10 @@ class S3Handler(BaseHandler):
             return False
 
         return True
+
+
+def _destroy_plan(options) -> bool:
+    """Whether terraform made a destroy plan, as it does for either flag."""
+    return bool(getattr(options, "destroy", False)) or bool(
+        getattr(options, "plan_destroy", False)
+    )

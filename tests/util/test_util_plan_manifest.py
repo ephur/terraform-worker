@@ -184,7 +184,7 @@ class TestLocalManifestStore:
         found, tag = store.read(key)
         assert found == manifest()
         assert len(tag) == 64
-        assert list(tmp_path.iterdir()) == [tmp_path / "m.json"]
+        assert sorted(p.name for p in tmp_path.iterdir()) == [".m.json.lock", "m.json"]
 
     def test_create_only_conflict(self, tmp_path):
         store = LocalManifestStore()
@@ -219,6 +219,40 @@ class TestLocalManifestStore:
     def test_write_error(self, tmp_path):
         with pytest.raises(BackendError):
             LocalManifestStore().write(str(tmp_path / "missing" / "m.json"), manifest())
+
+    def test_replace_error(self, tmp_path, monkeypatch):
+        def fail(*args):
+            raise OSError("read-only")
+
+        monkeypatch.setattr("tfworker.util.plan_manifest.os.replace", fail)
+        with pytest.raises(BackendError, match="read-only"):
+            LocalManifestStore().write(str(tmp_path / "m.json"), manifest())
+
+    def test_writers_take_turns(self, tmp_path):
+        """A writer that read before another wrote loses its conditional write."""
+        import threading
+
+        store = LocalManifestStore()
+        key = str(tmp_path / "m.json")
+        store.write(key, manifest())
+        tag = store.read(key)[1]
+        results = []
+
+        def take(run_id):
+            try:
+                store.write(
+                    key, manifest().moved("applying", run_id=run_id), if_match=tag
+                )
+                results.append(run_id)
+            except ReportConflictError:
+                results.append("lost")
+
+        threads = [threading.Thread(target=take, args=(f"r{i}",)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert results.count("lost") == 7
 
     def test_keys_for_is_empty(self):
         assert list(LocalManifestStore().keys_for("net")) == []
@@ -262,6 +296,77 @@ class TestS3ManifestStore:
             "prefix/_tfworker/pending/net/new"
         ]
 
+    def test_pointer(self, s3):
+        store = S3ManifestStore(s3, BUCKET, "prefix")
+        assert store.current("prefix/net/terraform.tfplan") is None
+        key = store.record_key("net", "p1")
+        assert key == "prefix/_tfworker/plans/net/p1.json"
+        store.point("prefix/net/terraform.tfplan", key)
+        assert store.current("prefix/net/terraform.tfplan") == key
+
+    def test_retire_removes_the_plan_and_log(self, s3):
+        store = S3ManifestStore(s3, BUCKET, "prefix")
+        plan = "prefix/net/terraform.tfplan"
+        for k in (plan, "prefix/net/terraform.log"):
+            s3.put_object(Bucket=BUCKET, Key=k, Body=b"x")
+        key = store.record_key("net", "p1")
+        store.point(plan, key)
+        store.retire(key, manifest(plan_key=plan))
+        assert [o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET)["Contents"]] == [
+            manifest_key(plan)
+        ]
+
+    def test_retire_leaves_a_newer_plan_alone(self, s3):
+        store = S3ManifestStore(s3, BUCKET, "prefix")
+        plan = "prefix/net/terraform.tfplan"
+        s3.put_object(Bucket=BUCKET, Key=plan, Body=b"newer")
+        store.point(plan, store.record_key("net", "newer"))
+        store.retire(store.record_key("net", "old"), manifest(plan_key=plan))
+        assert s3.get_object(Bucket=BUCKET, Key=plan)["Body"].read() == b"newer"
+
+    def test_retire_failure_is_logged(self, s3, monkeypatch):
+        store = S3ManifestStore(s3, BUCKET, "prefix")
+
+        def fail(**kwargs):
+            raise botocore.exceptions.ClientError({"Error": {"Code": "500"}}, "op")
+
+        monkeypatch.setattr(s3, "delete_object", fail)
+        store.retire("k", manifest(plan_key="prefix/net/terraform.tfplan"))
+
+    def test_unreadable_index_entries_are_skipped(self, s3, monkeypatch):
+        store = S3ManifestStore(s3, BUCKET, "prefix")
+        good = manifest_key("prefix/net/terraform.tfplan")
+        store.write(good, manifest(plan_id="good"))
+        s3.put_object(
+            Bucket=BUCKET, Key="prefix/_tfworker/pending/net/bad", Body=b"prefix/bad"
+        )
+        real_get = s3.get_object
+
+        def get(**kwargs):
+            if kwargs["Key"].endswith("/bad"):
+                raise botocore.exceptions.ClientError(
+                    {"Error": {"Code": "AccessDenied"}}, "GetObject"
+                )
+            return real_get(**kwargs)
+
+        monkeypatch.setattr(s3, "get_object", get)
+        assert store.keys_for("net") == [good]
+
+    def test_index_entry_deleted_by_another_run(self, s3, monkeypatch):
+        store = S3ManifestStore(s3, BUCKET, "prefix")
+        s3.put_object(Bucket=BUCKET, Key="prefix/_tfworker/pending/net/gone", Body=b"x")
+        real_get = s3.get_object
+
+        def get(**kwargs):
+            if kwargs["Key"].endswith("/gone"):
+                raise botocore.exceptions.ClientError(
+                    {"Error": {"Code": "NoSuchKey"}}, "GetObject"
+                )
+            return real_get(**kwargs)
+
+        monkeypatch.setattr(s3, "get_object", get)
+        assert store.keys_for("net") == []
+
     def test_conditional_writes(self, s3):
         store = S3ManifestStore(s3, BUCKET, "prefix")
         store.write("prefix/m", manifest(), create_only=True)
@@ -298,6 +403,10 @@ class TestS3ManifestStore:
             store.write("prefix/m", manifest())
         with pytest.raises(BackendError):
             store.keys_for("net")
+        with pytest.raises(BackendError):
+            store.current("prefix/net/terraform.tfplan")
+        with pytest.raises(BackendError):
+            store.point("prefix/net/terraform.tfplan", "k")
 
     def test_index_failure_is_logged_not_raised(self, s3, monkeypatch):
         store = S3ManifestStore(s3, BUCKET, "prefix")

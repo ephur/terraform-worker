@@ -1374,6 +1374,8 @@ class TerraformResult:
         self.finished_at = finished_at
         # monotonic seconds, immune to wall clock steps; set by _run
         self.elapsed: Optional[float] = None
+        # True when terraform never ran, such as a failed hook or a refusal
+        self.outside_terraform = False
 
     @classmethod
     def synthesized(cls, exit_code: int, message: str) -> "TerraformResult":
@@ -1382,7 +1384,9 @@ class TerraformResult:
         such as a failed hook. Its start and finish are the moment of failure.
         """
         now = datetime.now(timezone.utc)
-        return cls(exit_code, b"", message.encode(), started_at=now, finished_at=now)
+        result = cls(exit_code, b"", message.encode(), started_at=now, finished_at=now)
+        result.outside_terraform = True
+        return result
 
     @property
     def duration(self) -> Optional[float]:

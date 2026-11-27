@@ -194,8 +194,7 @@ class TestPreApply:
         definition = MagicMock()
         definition.name = "def"
         with patch.object(handler, "_s3_delete_plan") as delete_mock:
-            # The execution_functions map DESTROY.PRE to _pre_apply
-            handler._pre_apply(definition)
+            handler._pre_destroy(definition)
             remotefile = handler.get_remote_file("def")
             delete_mock.assert_any_call(remotefile)
             delete_mock.assert_any_call(remotefile.replace(".tfplan", ".log"))
@@ -432,7 +431,7 @@ class TestDestroyActionSupport:
         assert TerraformAction.DESTROY in handler.default_priority
 
     def test_destroy_execution_function_configured(self):
-        """Test that DESTROY PRE stage is mapped to _pre_apply"""
+        """Test that DESTROY PRE stage is mapped to _pre_destroy"""
         handler = S3Handler()
         assert TerraformAction.DESTROY in handler.execution_functions
         from tfworker.custom_types.terraform import TerraformStage
@@ -442,5 +441,5 @@ class TestDestroyActionSupport:
         )
         assert (
             handler.execution_functions[TerraformAction.DESTROY][TerraformStage.PRE]
-            == handler._pre_apply
+            == handler._pre_destroy
         )

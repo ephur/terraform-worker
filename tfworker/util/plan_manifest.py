@@ -1,5 +1,14 @@
-"""Read, write and move plan manifests, beside plans in S3 or on local disk."""
+"""
+Read, write and move plan manifests.
 
+In the backend each plan's manifest is kept at its own key,
+`<prefix>/_tfworker/plans/<definition>/<plan_id>.json`, so its history
+survives a newer plan in the same slot; the slot holds a small pointer,
+`<plan key>.manifest.json`, naming the current one. On disk the manifest sits
+beside the plan file.
+"""
+
+import fcntl
 import hashlib
 import json
 import os
@@ -21,6 +30,7 @@ MANIFEST_SUFFIX = ".manifest.json"
 PLAN_NAME = "terraform.tfplan"
 PREVIEW_DIR = "_tfworker/previews"
 PENDING_DIR = "_tfworker/pending"
+RECORD_DIR = "_tfworker/plans"
 CONFLICT_CODES = ("PreconditionFailed", "ConditionalRequestConflict", "412", "409")
 
 
@@ -128,6 +138,9 @@ class ManifestStore(ABC):
         """The manifest keys of a definition's pending backend plans."""
         return []
 
+    def retire(self, key: str, manifest: PlanManifest) -> None:
+        """Remove what is left of a plan that can no longer be applied."""
+
     @staticmethod
     def _parse(key: str, text: str) -> Optional[PlanManifest]:
         try:
@@ -150,6 +163,58 @@ class S3ManifestStore(ManifestStore):
         self._client = client
         self._bucket = bucket
         self._prefix = prefix
+
+    def record_key(self, definition: str, plan_id: str) -> str:
+        return f"{self._prefix}/{RECORD_DIR}/{definition}/{plan_id}.json"
+
+    def current(self, plan_key: str) -> Optional[str]:
+        """The manifest key the slot at `plan_key` points to, or None."""
+        pointer = manifest_key(plan_key)
+        try:
+            obj = self._client.get_object(Bucket=self._bucket, Key=pointer)
+            with closing(obj["Body"]) as body:
+                return body.read().decode().strip()
+        except botocore.exceptions.ClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                return None
+            raise BackendError(f"unable to read plan pointer {pointer}: {e}") from e
+        except botocore.exceptions.BotoCoreError as e:
+            raise BackendError(f"unable to read plan pointer {pointer}: {e}") from e
+
+    def point(self, plan_key: str, key: str) -> None:
+        pointer = manifest_key(plan_key)
+        try:
+            self._client.put_object(
+                Bucket=self._bucket,
+                Key=pointer,
+                Body=key.encode(),
+                ContentType="text/plain",
+            )
+        except (
+            botocore.exceptions.ClientError,
+            botocore.exceptions.BotoCoreError,
+        ) as e:
+            raise BackendError(f"unable to write plan pointer {pointer}: {e}") from e
+
+    def retire(self, key, manifest):
+        """
+        Delete a retired plan's file and log, unless the slot already holds a
+        newer plan.
+        """
+        try:
+            if self.current(manifest.plan_key) not in (None, key):
+                return
+            for obj in (
+                manifest.plan_key,
+                manifest.plan_key.replace(".tfplan", ".log"),
+            ):
+                self._client.delete_object(Bucket=self._bucket, Key=obj)
+        except (
+            BackendError,
+            botocore.exceptions.ClientError,
+            botocore.exceptions.BotoCoreError,
+        ) as e:
+            log.warn(f"unable to remove retired plan {manifest.plan_key}: {e}")
 
     def _index_key(self, manifest: PlanManifest) -> str:
         return f"{self._prefix}/{PENDING_DIR}/{manifest.definition}/{manifest.plan_id}"
@@ -207,35 +272,57 @@ class S3ManifestStore(ManifestStore):
     def keys_for(self, definition):
         """
         Entries whose manifest is gone, no longer pending, or now describes
-        another plan are pruned as they are found.
+        another plan are pruned as they are found. An entry that can't be read
+        is skipped, so one bad entry never hides the others.
         """
         index = f"{self._prefix}/{PENDING_DIR}/{definition}/"
         keys = []
         try:
             paginator = self._client.get_paginator("list_objects_v2")
-            for page in paginator.paginate(Bucket=self._bucket, Prefix=index):
-                for item in page.get("Contents", []):
-                    entry = item["Key"]
-                    obj = self._client.get_object(Bucket=self._bucket, Key=entry)
-                    with closing(obj["Body"]) as body:
-                        key = body.read().decode()
-                    found = self.read(key)
-                    manifest = found[0] if found else None
-                    if (
-                        manifest is None
-                        or manifest.status != "pending"
-                        or manifest.plan_id != entry.rsplit("/", 1)[-1]
-                    ):
-                        self._client.delete_object(Bucket=self._bucket, Key=entry)
-                        continue
-                    if key not in keys:
-                        keys.append(key)
+            entries = [
+                item["Key"]
+                for page in paginator.paginate(Bucket=self._bucket, Prefix=index)
+                for item in page.get("Contents", [])
+            ]
         except (
             botocore.exceptions.ClientError,
             botocore.exceptions.BotoCoreError,
         ) as e:
             raise BackendError(f"unable to list pending plans: {e}") from e
+        for entry in entries:
+            try:
+                key = self._entry_key(entry)
+            except (
+                BackendError,
+                botocore.exceptions.ClientError,
+                botocore.exceptions.BotoCoreError,
+            ) as e:
+                log.warn(f"skipping pending plan index entry {entry}: {e}")
+                continue
+            if key is not None and key not in keys:
+                keys.append(key)
         return keys
+
+    def _entry_key(self, entry: str) -> Optional[str]:
+        """The manifest an index entry names, pruning the entry if it is stale."""
+        try:
+            obj = self._client.get_object(Bucket=self._bucket, Key=entry)
+        except botocore.exceptions.ClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                return None
+            raise
+        with closing(obj["Body"]) as body:
+            key = body.read().decode()
+        found = self.read(key)
+        manifest = found[0] if found else None
+        if (
+            manifest is None
+            or manifest.status != "pending"
+            or manifest.plan_id != entry.rsplit("/", 1)[-1]
+        ):
+            self._client.delete_object(Bucket=self._bucket, Key=entry)
+            return None
+        return key
 
 
 class LocalManifestStore(ManifestStore):
@@ -252,18 +339,26 @@ class LocalManifestStore(ManifestStore):
         return self._parse(key, text), hashlib.sha256(text.encode()).hexdigest()
 
     def write(self, key, manifest, if_match=None, create_only=False):
+        """Compare and replace under an exclusive lock, so two runs can't both win."""
         path = Path(key)
-        current = self.read(key)
-        if create_only and current is not None:
-            raise ReportConflictError(f"plan manifest {key} already exists")
-        if if_match is not None and (current is None or current[1] != if_match):
-            raise ReportConflictError(f"plan manifest {key} changed")
-        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        lock = path.with_name(f".{path.name}.lock")
         try:
-            tmp.write_text(manifest.model_dump_json(by_alias=True))
-            os.replace(tmp, path)
+            handle = open(lock, "a")
         except OSError as e:
             raise BackendError(f"unable to write plan manifest {key}: {e}") from e
+        with handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            current = self.read(key)
+            if create_only and current is not None:
+                raise ReportConflictError(f"plan manifest {key} already exists")
+            if if_match is not None and (current is None or current[1] != if_match):
+                raise ReportConflictError(f"plan manifest {key} changed")
+            tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+            try:
+                tmp.write_text(manifest.model_dump_json(by_alias=True))
+                os.replace(tmp, path)
+            except OSError as e:
+                raise BackendError(f"unable to write plan manifest {key}: {e}") from e
 
 
 def move(
@@ -324,8 +419,10 @@ def mark_pending_stale(
         if key == keep:
             continue
         try:
-            if move(store, key, "stale", now, run_id, reason, expect={"pending"}):
-                log.info(f"saved plan {key} is now stale: {reason}")
+            stale = move(store, key, "stale", now, run_id, reason, expect={"pending"})
+            if stale:
+                log.info(f"saved plan {stale.plan_key} is now stale: {reason}")
+                store.retire(key, stale)
                 moved += 1
         except BackendError as e:
             log.warn(f"unable to mark saved plan {key} stale: {e}")

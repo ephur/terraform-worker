@@ -7,14 +7,15 @@ manifest as a plan saved in the backend, beside the file as
 checks and takes it the same way, so it links back to the run that made it.
 
 Local plans are never pending fleet wide: only the holder of the file can
-apply them. Applying one still marks the definition's pending backend plans
-stale, because the state they were made against has changed.
+apply them. This handler is ready for every run that doesn't save plans in
+the backend, so that any successful apply or destroy, with or without a
+local plan file, marks the definition's pending backend plans stale.
 """
 
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Dict, Optional, Tuple
 
 import click
 
@@ -58,7 +59,7 @@ class LocalPlanHandler(BaseHandler):
         self._app_state = None
         self._store = LocalManifestStore()
         self._provenance = None
-        self._taken: Dict[str, PlanManifest] = {}
+        self._taken: Dict[str, Tuple[str, PlanManifest]] = {}
         self._lock = threading.Lock()
         self.execution_functions = {
             TerraformAction.PLAN: {TerraformStage.POST: self._post_plan},
@@ -68,7 +69,7 @@ class LocalPlanHandler(BaseHandler):
                 TerraformStage.ERROR: self._apply_failed,
             },
             TerraformAction.DESTROY: {
-                TerraformStage.PRE: self._pre_apply,
+                TerraformStage.PRE: self._pre_destroy,
                 TerraformStage.POST: self._post_apply,
                 TerraformStage.ERROR: self._apply_failed,
             },
@@ -85,10 +86,17 @@ class LocalPlanHandler(BaseHandler):
         return current_run_id(self.app_state)[0]
 
     def is_ready(self) -> bool:
-        """Ready for runs that keep plans on disk; backend plans are the s3 handler's."""
-        options = self.app_state.terraform_options
-        return bool(getattr(options, "plan_file_path", None)) and not getattr(
-            self.app_state.root_options, "backend_plans", False
+        """Ready unless plans are saved in the backend, which the s3 handler owns."""
+        return not getattr(self.app_state.root_options, "backend_plans", False)
+
+    def _local(self) -> bool:
+        """Whether this run keeps its plans on disk, where they get manifests."""
+        return bool(getattr(self.app_state.terraform_options, "plan_file_path", None))
+
+    def _preview(self) -> bool:
+        return getattr(self.app_state.terraform_options, "intent", None) in (
+            "preview",
+            "drift",
         )
 
     def execute(
@@ -124,6 +132,8 @@ class LocalPlanHandler(BaseHandler):
             return None
 
     def _post_plan(self, definition: "Definition", result) -> None:
+        if not self._local():
+            return
         planfile = Path(definition.plan_file)
         key = manifest_key(str(planfile))
         self._move(
@@ -143,10 +153,11 @@ class LocalPlanHandler(BaseHandler):
             definition=definition.name,
             planfile=planfile,
             plan_key=str(planfile),
-            storage="local",
+            storage="preview" if self._preview() else "local",
             now=self._now(),
             ttl_seconds=parse_duration(getattr(options, "plan_ttl", None) or 0),
-            destroy=bool(getattr(options, "destroy", False)),
+            destroy=bool(getattr(options, "destroy", False))
+            or bool(getattr(options, "plan_destroy", False)),
             state=self._location(definition.name),
             provenance=self._provenance,
         )
@@ -164,7 +175,12 @@ class LocalPlanHandler(BaseHandler):
             return None
         return location if isinstance(location, BackendLocation) else None
 
-    def _pre_apply(self, definition: "Definition", result) -> None:
+    def _pre_destroy(self, definition: "Definition", result) -> None:
+        self._pre_apply(definition, result, destroy=True)
+
+    def _pre_apply(self, definition: "Definition", result, destroy=False) -> None:
+        if not self._local():
+            return
         planfile = Path(definition.plan_file)
         key = manifest_key(str(planfile))
         try:
@@ -185,9 +201,30 @@ class LocalPlanHandler(BaseHandler):
         manifest = found[0]
         if manifest is None:
             raise PlanRefusedError(f"plan file {planfile} has an unreadable manifest")
+        if manifest.storage == "preview" and manifest.run_id != self.run_id:
+            raise PlanRefusedError(
+                f"plan file {planfile}: preview plans are never applied"
+            )
+        if manifest.destroy != destroy:
+            kind = "a destroy plan" if manifest.destroy else "not a destroy plan"
+            raise PlanRefusedError(
+                f"plan file {planfile}: it is {kind}, and this run is "
+                f"{'destroying' if destroy else 'applying'}"
+            )
         reason = refusal(manifest, planfile, self._now())
         if reason is None:
-            taken = self._move(key, "applying", manifest, expect={"pending"})
+            try:
+                taken = move(
+                    self._store,
+                    key,
+                    "applying",
+                    self._now(),
+                    run_id=self.run_id,
+                    expect={"pending"},
+                    plan_id=manifest.plan_id,
+                )
+            except BackendError as e:
+                raise PlanRefusedError(f"plan file {planfile}: unable to take it: {e}")
             if taken is None:
                 reason = "it is no longer pending; another run may have taken it"
         elif manifest.status == "pending" and manifest.is_expired(self._now()):
@@ -195,7 +232,7 @@ class LocalPlanHandler(BaseHandler):
         if reason:
             raise PlanRefusedError(f"plan file {planfile}: {reason}")
         with self._lock:
-            self._taken[definition.name] = taken
+            self._taken[definition.name] = (key, taken)
 
     def _post_apply(self, definition: "Definition", result) -> None:
         self._finish(definition.name, "applied")
@@ -210,20 +247,20 @@ class LocalPlanHandler(BaseHandler):
             )
 
     def _apply_failed(self, definition: "Definition", result) -> None:
-        self._finish(definition.name, "failed", reason="terraform did not finish")
+        if result is not None and getattr(result, "outside_terraform", False) is True:
+            self._finish(
+                definition.name, "pending", reason="released: terraform did not start"
+            )
+        else:
+            self._finish(definition.name, "failed", reason="terraform did not finish")
 
     def _finish(self, name: str, status: str, reason: Optional[str] = None) -> None:
         with self._lock:
             taken = self._taken.pop(name, None)
         if taken is None:
             return
-        self._move(
-            manifest_key(taken.plan_key),
-            status,
-            taken,
-            expect={"applying"},
-            reason=reason,
-        )
+        key, manifest = taken
+        self._move(key, status, manifest, expect={"applying"}, reason=reason)
 
     def _backend_store(self) -> Optional[S3ManifestStore]:
         """The store holding the definition's backend plans, if they live in S3."""

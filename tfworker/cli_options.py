@@ -445,6 +445,19 @@ class CLIOptionsTerraform(FreezableBaseModel):
                     type="value_error",
                 )
             )
+        if values.get("intent") in ("preview", "drift") and (
+            values.get("apply") or values.get("destroy")
+        ):
+            errors.append(
+                InitErrorDetails(
+                    loc=("--intent", "--intent"),
+                    input=(values.get("intent")),
+                    ctx={
+                        "error": f"a {values.get('intent')} run cannot apply or destroy"
+                    },
+                    type="value_error",
+                )
+            )
         if values.get("plan") and values.get("plan_destroy"):
             errors.append(
                 InitErrorDetails(
