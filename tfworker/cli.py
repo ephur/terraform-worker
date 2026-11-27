@@ -145,8 +145,8 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
                     working_dir=str(tfc.app_state.working_dir),
                     raise_errors=not run_failed,
                 )
-            except HandlerError as e:
-                log.error(f"handler teardown failed: {e}")
+            except HandlerError:
+                # exec_teardown already logged the failure with the handler name
                 ctx.exit(1)
 
 

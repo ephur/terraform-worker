@@ -184,7 +184,8 @@ class TestCliCommands:
 
         assert result.exit_code == 1
         assert tfc.app_state.handlers.exec_teardown.call_args.kwargs["raise_errors"]
-        assert any("teardown" in c.args[0] for c in err.call_args_list)
+        # exec_teardown logs the failure itself; the CLI must not log it again
+        err.assert_not_called()
 
     def test_terraform_setup_handler_error_exits_1(self, mocker):
         tfc = self._patch_terraform_cli(mocker)
