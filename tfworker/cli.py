@@ -11,6 +11,7 @@ from tfworker.commands.config import log_limiter
 from tfworker.commands.env import EnvCommand
 from tfworker.commands.root import RootCommand
 from tfworker.commands.terraform import TerraformCommand
+from tfworker.exceptions import HandlerError
 from tfworker.util.cli import (
     handle_option_error,
     pydantic_to_click,
@@ -115,25 +116,38 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
     tfc = TerraformCommand(deployment=deployment)
 
     if tfc.app_state.handlers is not None:
-        tfc.app_state.handlers.exec_setup(
-            deployment=deployment,
-            definitions=tfc.app_state.definitions,
-            working_dir=str(tfc.app_state.working_dir),
-            terraform_options=tfc.app_state.terraform_options,
-        )
+        try:
+            tfc.app_state.handlers.exec_setup(
+                deployment=deployment,
+                definitions=tfc.app_state.definitions,
+                working_dir=str(tfc.app_state.working_dir),
+                terraform_options=tfc.app_state.terraform_options,
+            )
+        except HandlerError as e:
+            log.error(f"handler setup failed: {e}")
+            ctx.exit(1)
 
+    run_failed = True
     try:
         # Prepare the provider cache
         tfc.prep_providers()
         tfc.terraform_init()
         tfc.terraform_plan()
         tfc.terraform_apply_or_destroy()
+        run_failed = False
     finally:
         if tfc.app_state.handlers is not None:
-            tfc.app_state.handlers.exec_teardown(
-                deployment=deployment,
-                working_dir=str(tfc.app_state.working_dir),
-            )
+            try:
+                # when the run already failed, teardown errors are only
+                # logged so they cannot replace the original failure
+                tfc.app_state.handlers.exec_teardown(
+                    deployment=deployment,
+                    working_dir=str(tfc.app_state.working_dir),
+                    raise_errors=not run_failed,
+                )
+            except HandlerError as e:
+                log.error(f"handler teardown failed: {e}")
+                ctx.exit(1)
 
 
 @cli.command()
