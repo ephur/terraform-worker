@@ -753,3 +753,51 @@ def local_module_applies(
         )
         for week, (applies, local) in sorted(totals.items())
     ]
+
+
+class AuditView(BaseModel):
+    at: datetime
+    actor: str
+    actor_kind: str
+    action: str
+    store: str
+    deployment: str
+    definition: str
+    group: str
+    target: str
+    outcome: str
+    reason: Optional[str] = None
+    detail: Optional[str] = None
+
+
+def audit(session: Session, scope: Scope, limit: int = 200) -> List[AuditView]:
+    """
+    Admin actions, newest first. Each entry keeps the group its deployment
+    was in at the time, and is shown to whoever may see that group.
+    """
+    query = select(db.AuditEntry)
+    if scope.stores:
+        query = query.where(db.AuditEntry.store.in_(scope.stores))
+    if scope.deployments:
+        query = query.where(db.AuditEntry.deployment.in_(scope.deployments))
+    wanted = scope.wanted
+    if wanted is not None:
+        query = query.where(db.AuditEntry.group_name.in_(wanted))
+    query = query.order_by(db.AuditEntry.at.desc(), db.AuditEntry.id.desc())
+    return [
+        AuditView(
+            at=row.at,
+            actor=row.actor,
+            actor_kind=row.actor_kind,
+            action=row.action,
+            store=row.store,
+            deployment=row.deployment,
+            definition=row.definition,
+            group=row.group_name,
+            target=row.target,
+            outcome=row.outcome,
+            reason=row.reason,
+            detail=row.detail,
+        )
+        for row in session.scalars(query.limit(limit))
+    ]

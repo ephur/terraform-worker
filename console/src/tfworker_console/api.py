@@ -1,16 +1,18 @@
-"""The read-only JSON API, served under /api/v1 (see /docs for OpenAPI)."""
+"""The JSON API, served under /api/v1 (see /docs for OpenAPI)."""
 
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Callable, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from . import queries
+from .actions import ActionError, Actions
 from .auth import Principal
 from .queries import Scope
-from .security import require_admin, require_viewer
+from .security import require_admin, require_operator, require_viewer
 
 
 def get_session(request: Request):
@@ -209,3 +211,82 @@ def local_modules(
 ):
     """The weekly share of definition applies that used a module from a local path."""
     return queries.local_module_applies(session, scope, now, weeks)
+
+
+def get_actions(request: Request) -> Actions:
+    actions = request.app.state.actions
+    if actions is None:
+        raise HTTPException(
+            503,
+            "nothing to act on: the console has no database, or is showing the demo",
+        )
+    return actions
+
+
+class PlanAction(BaseModel):
+    reason: str = Field("", max_length=1000, description="Required to discard")
+
+
+class ForceUnlock(BaseModel):
+    lock_id: str = Field(description="The lock's ID, as the locks view shows it")
+    confirm: str = Field(description="The definition's name, typed to confirm")
+
+
+@router.post("/plans/{store}/{plan_id}/{action}", tags=["actions"])
+def plan_action(
+    store: str,
+    plan_id: str,
+    action: str,
+    body: Optional[PlanAction] = None,
+    actions: Actions = Depends(get_actions),
+    principal: Principal = Depends(require_operator),
+    now: datetime = Depends(get_now),
+) -> dict:
+    """
+    Act on a pending saved plan: `recheck` it against its state, `expire` it
+    once past its expiry or its group's plan TTL, or `discard` it with a
+    reason. Needs the operator role on the plan's group; every attempt is
+    audited.
+    """
+    try:
+        reason = body.reason if body else ""
+        result = actions.plan(principal, store, plan_id, action, now, reason)
+    except ActionError as e:
+        raise HTTPException(e.status, str(e))
+    return asdict(result)
+
+
+@router.post(
+    "/locks/{store}/{deployment}/{definition:path}/force-unlock", tags=["actions"]
+)
+def force_unlock(
+    store: str,
+    deployment: str,
+    definition: str,
+    body: ForceUnlock,
+    actions: Actions = Depends(get_actions),
+    principal: Principal = Depends(require_operator),
+    now: datetime = Depends(get_now),
+) -> dict:
+    """
+    Remove a dead state lock: its holder's lease stopped beating, or it has
+    no lease and is older than the stale threshold. The group's policy says
+    whether operators or only admins may; every attempt is audited.
+    """
+    try:
+        result = actions.force_unlock(
+            principal, store, deployment, definition, body.lock_id, body.confirm, now
+        )
+    except ActionError as e:
+        raise HTTPException(e.status, str(e))
+    return asdict(result)
+
+
+@router.get("/audit", response_model=List[queries.AuditView], tags=["actions"])
+def audit(
+    limit: int = Query(200, ge=1, le=1000),
+    session: Session = Depends(get_session),
+    scope: Scope = Depends(get_scope),
+):
+    """Admin actions and attempts, newest first, in the groups the caller sees."""
+    return queries.audit(session, scope, limit)

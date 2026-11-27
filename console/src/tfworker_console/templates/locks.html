@@ -2,13 +2,20 @@
 {% block title %}Locks · tfworker console{% endblock %}
 {% block content %}
 <h1>Locks</h1>
-<p class="muted">Live or stale as of the last reconcile that saw each lock.</p>
+<p class="muted">Live or stale as of the last reconcile that saw each lock. A force-unlock checks the lock again first.</p>
+{% include "_notice.html" %}
 <table>
-  <tr><th>Definition</th><th>Deployment</th><th>Group</th><th>State</th><th>Held by</th><th>Operation</th><th>Age</th><th>Lease</th></tr>
+  <tr><th>Definition</th><th>Deployment</th><th>Group</th><th>State</th><th>Held by</th><th>Operation</th><th>Age</th><th>Lease</th><th>Actions</th></tr>
   {% for l in locks %}
   <tr><td><a href="/definitions/{{ l.definition | urlencode }}{% if scope_query %}?{{ scope_query }}{% endif %}">{{ l.definition }}</a></td><td>{{ l.deployment }}</td><td>{{ l.group }} <span class="muted">unlock: {{ l.force_unlock }}</span></td>
       <td class="health h-{{ l.state }}">{{ l.state }}</td><td>{{ l.who }}</td><td>{{ l.operation }}</td>
-      <td>{{ (l.age_seconds // 60)|int }}m</td><td class="muted">{{ 'heartbeat ' ~ l.lease.heartbeat_at if l.lease else 'none' }}</td></tr>
-  {% else %}<tr><td colspan="8" class="muted">No locks held.</td></tr>{% endfor %}
+      <td>{{ (l.age_seconds // 60)|int }}m</td><td class="muted">{{ 'heartbeat ' ~ l.lease.heartbeat_at if l.lease else 'none' }}</td>
+      <td>{% if actions_enabled and l.state == 'stale' and principal and principal.allows('operator' if l.force_unlock == 'operators' else 'admin', l.group) %}
+        <form class="act" method="post" action="/locks/{{ l.store | urlencode }}/{{ l.deployment | urlencode }}/{{ l.definition | urlencode }}/force-unlock{% if scope_query %}?{{ scope_query }}{% endif %}">
+          <input type="hidden" name="lock_id" value="{{ l.lock_id }}">
+          <input name="confirm" required autocomplete="off" placeholder="Type {{ l.definition }}" aria-label="Type {{ l.definition }} to confirm">
+          <button type="submit">Force unlock</button></form>
+      {% endif %}</td></tr>
+  {% else %}<tr><td colspan="9" class="muted">No locks held.</td></tr>{% endfor %}
 </table>
 {% endblock %}
