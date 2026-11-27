@@ -4,10 +4,26 @@ from tfworker.commands.root import RootCommand
 
 class TestRootHelpers:
     def test_resolve_working_dir_tmp(self, tmp_path, mocker):
-        tmp = mocker.Mock()
-        tmp.name = str(tmp_path)
-        mocker.patch("tempfile.TemporaryDirectory", return_value=tmp)
+        mocker.patch("tempfile.mkdtemp", return_value=str(tmp_path))
+        reg = mocker.patch("atexit.register")
         assert RootCommand._resolve_working_dir(None) == tmp_path
+        reg.assert_called_once()
+
+    def test_resolve_working_dir_tmp_exists(self, mocker):
+        """The temporary working dir must still exist after it is resolved (#181)."""
+        mocker.patch("atexit.register")
+        wd = RootCommand._resolve_working_dir(None)
+        try:
+            assert wd.is_dir()
+        finally:
+            wd.rmdir()
+
+    def test_prepare_template_vars_value_with_equals(self):
+        """A config var whose value contains '=' keeps the whole value (#187)."""
+        opts = CLIOptionsRoot(config_file=[], config_var=["token=YWJj==", "u=a?b=c"])
+        res = RootCommand._prepare_template_vars(opts, "dep")
+        assert res["token"] == "YWJj=="
+        assert res["u"] == "a?b=c"
 
     def test_prepare_template_vars(self):
         opts = CLIOptionsRoot(

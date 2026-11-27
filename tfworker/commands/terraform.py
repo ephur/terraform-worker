@@ -68,7 +68,7 @@ class TerraformCommand(BaseCommand):
             tf_util.mirror_providers(
                 self.app_state.providers,
                 self.app_state.terraform_options.terraform_bin,
-                self.app_state.root_options.working_dir,
+                str(self.app_state.working_dir),
                 self.app_state.terraform_options.provider_cache,
             )
         except TFWorkerException as e:
@@ -886,9 +886,7 @@ class TerraformCommand(BaseCommand):
         log.debug(f"generating JSON plan file for {name}")
         definition: Definition = self.app_state.definitions[name]
 
-        working_dir: str = definition.get_target_path(
-            self.app_state.root_options.working_dir
-        )
+        working_dir: str = definition.get_target_path(self.app_state.working_dir)
 
         result: TerraformResult = TerraformResult(
             *pipe_exec(
@@ -919,9 +917,7 @@ class TerraformCommand(BaseCommand):
             action, plan_file=definition.plan_file
         )
 
-        working_dir: str = definition.get_target_path(
-            self.app_state.root_options.working_dir
-        )
+        working_dir: str = definition.get_target_path(self.app_state.working_dir)
 
         # For DESTROY action, use "apply" command since terraform requires
         # "terraform apply planfile" for both regular and destroy plans

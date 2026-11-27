@@ -1,3 +1,5 @@
+import atexit
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Dict
@@ -55,7 +57,12 @@ class RootCommand:
         """
         if working_dir is None:
             log.trace("working directory not provided, using temporary directory")
-            return Path(tempfile.TemporaryDirectory().name)
+            # mkdtemp keeps the directory on disk for the whole run; a bare
+            # TemporaryDirectory().name is deleted as soon as the object is
+            # garbage collected, leaving only the path string behind.
+            temp_dir = tempfile.mkdtemp(prefix="tfworker-")
+            atexit.register(shutil.rmtree, temp_dir, ignore_errors=True)
+            return Path(temp_dir)
         log.trace(f"working directory provided: {working_dir}")
         return Path(working_dir).resolve()
 
@@ -90,7 +97,7 @@ class RootCommand:
                 log.trace(f"attempting to add list of strings {k}={v}")
                 for i in v:
                     if isinstance(i, str):
-                        subs = i.split("=")
+                        subs = i.split("=", 1)
                         if len(subs) == 2:
                             log.trace(f"adding list item {subs[0]}={subs[1]}")
                             template_items[subs[0]] = subs[1]

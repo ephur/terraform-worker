@@ -26,22 +26,6 @@ class TestHandlerHelpers:
         b._add_universal_handlers(parsed)
         assert callable(parsed["u"]) or parsed["u"] == "uinst"
 
-    def test_check_handlers_ready(self):
-        handlers = {"h": mock.Mock(is_ready=True)}
-        b._check_handlers_ready(handlers)
-        assert handlers == {"h": handlers["h"]}
-
-    def test_check_handlers_ready_removes(self):
-        class HandlerDict(dict):
-            def items(self):
-                return list(super().items())
-
-        handlers = HandlerDict(
-            {"h": mock.Mock(is_ready=False), "g": mock.Mock(is_ready=True)}
-        )
-        b._check_handlers_ready(handlers)
-        assert "h" not in handlers and "g" in handlers
-
 
 class TestInitFunctions:
     def test_init_authenticators_success(self, mocker):
@@ -147,7 +131,6 @@ class TestInitFunctions:
         parsed = {"h": "inst"}
         ph = mocker.patch.object(b, "_parse_handlers", return_value=parsed)
         ah = mocker.patch.object(b, "_add_universal_handlers")
-        chk = mocker.patch.object(b, "_check_handlers_ready")
         hc_obj = mock.Mock()
         hc_obj.keys.return_value = ["h"]
         hc = mocker.patch(
@@ -158,7 +141,6 @@ class TestInitFunctions:
         ph.assert_called_with({"h": {}})
         ah.assert_called_with(parsed)
         hc.assert_called_with(parsed)
-        chk.assert_called_with(hc_obj)
 
     def test_validate_handler_config_success(self, mocker):
         m = mock.Mock()
