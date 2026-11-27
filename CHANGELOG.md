@@ -7,6 +7,13 @@
   - The `--gcp-region`, `--gcp-creds-path` and `--gcp-project` root options (and the `GCP_REGION`, `GCP_CREDS_PATH`, `GCP_PROJECT` environment variables) were removed.
   - `google-cloud-storage` is no longer a dependency.
 
+## Bug fixes
+- Without `--working-dir`, terraform init/plan/apply, plan JSON output and provider mirroring now run in the resolved temporary working directory instead of `<cwd>/None/...`. The temporary directory is created with `mkdtemp`, so it exists for the whole run, and it is removed at exit (#181).
+- A `.tf` and `.tf.j2` file with the same name now raises the intended "already exists" error instead of `UnboundLocalError` (#182).
+- Hook remote vars (`TF_REMOTE_*`) are now resolved by the HCL2 path: python-hcl2 wraps references as `${...}`, which the parser rejected, and a call to the nonexistent `log.warning` crashed into the regex fallback. Simple references produce the same values as before; nested references in maps and lists are now resolved (#183).
+- Removed `_check_handlers_ready`, which never removed anything. The handlers collection already filters on `is_ready()` (#184).
+- `--config-var` values containing `=` no longer crash definition preparation or get dropped from config templates (#187).
+
 # Changes 0.12.0 -> 0.13.0 (2024-06...)
 
 ## Notes
