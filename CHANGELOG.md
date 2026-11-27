@@ -11,6 +11,9 @@
 - `--backend-use-all-remotes` now only counts `<prefix>/<definition>/terraform.tfstate` as a definition (#219). Before, any key under the prefix added its parent directory, so saved plans under a `--run-id` directory and anything else in the bucket produced bogus remotes.
 
 ## Features
+- Run records and per-definition status (#214). A new `report` handler writes an immutable `tfworker.run/v1` record per run and a `tfworker.status/v1` snapshot per definition under `<prefix>/_tfworker/`, beside each run's own state. Records carry phase timings, lock wait, exit codes, change counts and addresses (never attribute values), state lineage and serial, module sources and run provenance; status tracks the last plan, apply and failure, the pending plan and drift. Status updates are conditional writes retried on conflict. The models live in `tfworker.report` with JSON Schema exports, and are documented under "Run reporting".
+- `--run-label key=value` (`WORKER_RUN_LABELS`) and `--intent deploy|preview|drift` (`WORKER_INTENT`) are recorded by the report handler (#214). Without `--run-id`, the report handler records a generated ULID.
+- `worker clean` keeps `_tfworker/` run history (#214).
 - State lock waiting (#213). A new `lock` handler reads the definition's state lock before each plan, apply and destroy, waits out a live lock with backoff, and fails the definition, not the run, when the wait runs out (`on_timeout: fail_run` stops the run instead). While terraform runs, each worker keeps a heartbeat lease at `<state key>.tfworker-lease.<host>`: a lock whose lease is fresh is live at any age, a lock whose lease missed three heartbeats (plus a minute of skew) is stale, and a lock with no lease is stale after `stale_after`. A stale lock fails with the lock ID by default; `on_stale: wait` or `force_unlock` change that, and `force_unlock` only removes a lock that looked stale on two polls. `worker clean` removes leases left by killed workers.
 - `--lock-timeout` (`WORKER_LOCK_TIMEOUT`) passes `-lock-timeout` to plan, apply and destroy, so terraform retries a held lock instead of failing at once (#213). With the lock handler, the time left of its wait is used instead.
 - Handlers can implement `skip(action, deployment, definition, reason)` to hear about definitions a phase passed over without running terraform: a plan that was not needed, a definition that did not initialize, an apply-only run with no saved plan, a destroy outside `--limit`, or a definition left behind when a failure halted the phase (#219). Each definition is reported at most once per action. It is a no-op by default, and a handler that raises from it is logged without stopping the run.
@@ -48,6 +51,7 @@ These landed after 0.13.0 and are summarized here; see the linked PRs and the do
 - **Logging**: `--log-format JSON` for structured logs, and cleaner subprocess output.
 
 ## Tooling
+- Coverage gate raised to 94% (#214).
 - Packaging and dev tooling moved from Poetry to uv; the version now comes from git tags via hatch-vcs (#202).
 - CI runs lint (black, isort, flake8) and tests on Python 3.11 to 3.14 (#157), and builds and smoke-tests the Docker image (#212).
 - The coverage gate is raised from 60% to 93%, the measured level, and is set once in `pyproject.toml` for CI and `make` (#194).

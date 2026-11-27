@@ -74,6 +74,8 @@ class Definition(BaseModel):
     lock_deadline: Optional[float] = None
     # a lock still held at the deadline stops the run (lock on_timeout: fail_run)
     lock_fail_run: bool = False
+    # seconds the lock handler spent waiting for the state lock this action
+    lock_wait_seconds: Optional[float] = None
     needs_apply: bool = False
     plan_failed: bool = False
     # preparation (copy/template/terraform get) or terraform init failed

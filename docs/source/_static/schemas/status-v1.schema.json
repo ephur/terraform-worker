@@ -1,0 +1,356 @@
+{
+  "$defs": {
+    "BackendLocation": {
+      "description": "Where a definition's state lives. A state is identified by this, not by name.",
+      "properties": {
+        "account_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Account Id"
+        },
+        "backend": {
+          "title": "Backend",
+          "type": "string"
+        },
+        "bucket": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bucket"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region"
+        },
+        "state_key": {
+          "title": "State Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend",
+        "state_key"
+      ],
+      "title": "BackendLocation",
+      "type": "object"
+    },
+    "ChangeSummary": {
+      "description": "Counts as terraform prints them, plus the address and actions of each change.",
+      "properties": {
+        "add": {
+          "default": 0,
+          "title": "Add",
+          "type": "integer"
+        },
+        "change": {
+          "default": 0,
+          "title": "Change",
+          "type": "integer"
+        },
+        "destroy": {
+          "default": 0,
+          "title": "Destroy",
+          "type": "integer"
+        },
+        "import": {
+          "default": 0,
+          "title": "Import",
+          "type": "integer"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/ResourceChange"
+          },
+          "title": "Resources",
+          "type": "array"
+        }
+      },
+      "title": "ChangeSummary",
+      "type": "object"
+    },
+    "ResourceChange": {
+      "properties": {
+        "actions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "address": {
+          "title": "Address",
+          "type": "string"
+        },
+        "importing": {
+          "default": false,
+          "title": "Importing",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "address",
+        "actions"
+      ],
+      "title": "ResourceChange",
+      "type": "object"
+    },
+    "RunEvent": {
+      "description": "One phase of one run, as it appears in a status snapshot.",
+      "properties": {
+        "action": {
+          "enum": [
+            "init",
+            "plan",
+            "apply",
+            "destroy"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "applied_serial": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Applied Serial"
+        },
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        },
+        "base_lineage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Lineage"
+        },
+        "base_serial": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Serial"
+        },
+        "changes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChangeSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "duration_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Seconds"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        },
+        "plan_storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "backend",
+                "local",
+                "run"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plan Storage"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "succeeded",
+            "failed",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "run_id",
+        "action",
+        "status",
+        "at"
+      ],
+      "title": "RunEvent",
+      "type": "object"
+    }
+  },
+  "$id": "tfworker.status/v1",
+  "description": "The latest known state of one definition, rewritten by each run.",
+  "properties": {
+    "definition": {
+      "title": "Definition",
+      "type": "string"
+    },
+    "deployment": {
+      "title": "Deployment",
+      "type": "string"
+    },
+    "drift": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RunEvent"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "last_apply": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RunEvent"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "last_failure": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RunEvent"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "last_plan": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RunEvent"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "pending_plan": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RunEvent"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "schema": {
+      "const": "tfworker.status/v1",
+      "default": "tfworker.status/v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/BackendLocation"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    },
+    "updated_by_run": {
+      "title": "Updated By Run",
+      "type": "string"
+    }
+  },
+  "required": [
+    "deployment",
+    "definition",
+    "state",
+    "updated_at",
+    "updated_by_run"
+  ],
+  "title": "DefinitionStatus",
+  "type": "object"
+}

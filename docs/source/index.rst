@@ -29,6 +29,7 @@ data source.
 
    concepts
    hooks
+   reporting
    schema
 
 Indices and tables

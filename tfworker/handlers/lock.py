@@ -244,6 +244,18 @@ class LockHandler(BaseHandler):
                 self._warned_no_inspection = True
             definition.lock_deadline = deadline
             return
+        started = self._monotonic()
+        try:
+            self._wait_for_lock(definition, working_dir, deadline)
+        finally:
+            definition.lock_wait_seconds = self._monotonic() - started
+        definition.lock_deadline = deadline
+        if self.config.heartbeat > 0:
+            self._start_heartbeat(action, definition)
+
+    def _wait_for_lock(
+        self, definition: "Definition", working_dir: str, deadline: float
+    ) -> None:
         attempt = 0
         while True:
             lock = self._read_lock(definition.name)
@@ -278,10 +290,6 @@ class LockHandler(BaseHandler):
             delay = min(self._poll_delay(attempt), remaining)
             attempt += 1
             self._sleep(delay)
-
-        definition.lock_deadline = deadline
-        if self.config.heartbeat > 0:
-            self._start_heartbeat(action, definition)
 
     def _read_lock(self, name: str) -> Optional[LockInfo]:
         try:

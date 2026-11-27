@@ -896,3 +896,95 @@ class TestS3BackendLocks:
         backend._clean_bucket_state("def1")
         listing = s3.list_objects_v2(Bucket="test-bucket", Prefix="prefix/def1/")
         assert listing.get("KeyCount", 0) == 0
+
+
+class TestS3BackendReports:
+    @mock_aws
+    def test_location(self, mock_authenticators):
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        location = backend.location("def1")
+        assert backend.report_storage is True
+        assert location.backend == "s3"
+        assert location.account_id == "123456789012"
+        assert location.region == "us-east-1"
+        assert location.bucket == "test-bucket"
+        assert location.state_key == "prefix/def1/terraform.tfstate"
+        backend.location("def2")
+
+    @mock_aws
+    def test_account_id_lookup_failure(self, mock_authenticators, mocker):
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        sts = mocker.MagicMock()
+        sts.get_caller_identity.side_effect = botocore.exceptions.NoCredentialsError()
+        mocker.patch.object(
+            mock_authenticators["aws"].backend_session, "client", return_value=sts
+        )
+        assert backend.location("def1").account_id is None
+
+    @mock_aws
+    def test_state_version(self, mock_authenticators):
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        assert backend.state_version("def1") is None
+        backend._s3_client.put_object(
+            Bucket="test-bucket",
+            Key="prefix/def1/terraform.tfstate",
+            Body='{"lineage": "abc", "serial": 7, "resources": []}',
+        )
+        assert backend.state_version("def1") == ("abc", 7)
+        backend._s3_client.put_object(
+            Bucket="test-bucket", Key="prefix/def1/terraform.tfstate", Body="{}"
+        )
+        with pytest.raises(BackendError, match="lineage"):
+            backend.state_version("def1")
+
+    @mock_aws
+    def test_report_round_trip_and_conditions(self, mock_authenticators):
+        from tfworker.exceptions import ReportConflictError
+
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        assert backend.read_report("status/def1.json") is None
+        backend.write_report("status/def1.json", "one", create_only=True)
+        text, etag = backend.read_report("status/def1.json")
+        assert text == "one"
+        with pytest.raises(ReportConflictError):
+            backend.write_report("status/def1.json", "two", create_only=True)
+        backend.write_report("status/def1.json", "two", if_match=etag)
+        with pytest.raises(ReportConflictError):
+            backend.write_report("status/def1.json", "three", if_match=etag)
+        assert backend.read_report("status/def1.json")[0] == "two"
+        obj = backend._s3_client.get_object(
+            Bucket="test-bucket", Key="prefix/_tfworker/status/def1.json"
+        )
+        assert obj["ContentType"] == "application/json"
+
+    @mock_aws
+    def test_report_errors(self, mock_authenticators, mocker):
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        denied = botocore.exceptions.ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "no"}}, "Op"
+        )
+        timeout = botocore.exceptions.ConnectTimeoutError(endpoint_url="https://s3")
+        for error in (denied, timeout):
+            mocker.patch.object(backend._s3_client, "get_object", side_effect=error)
+            mocker.patch.object(backend._s3_client, "put_object", side_effect=error)
+            with pytest.raises(BackendError, match="unable to read report"):
+                backend.read_report("x.json")
+            with pytest.raises(BackendError, match="unable to write report"):
+                backend.write_report("x.json", "{}")
+
+    @mock_aws
+    def test_clean_keeps_run_history(self, mock_authenticators, empty_state):
+        backend = S3Backend(mock_authenticators, "test-deployment")
+        s3 = backend._s3_client
+        s3.put_object(
+            Bucket="test-bucket", Key="prefix/def1/terraform.tfstate", Body=empty_state
+        )
+        backend.write_report("runs/2026/11/27/r1.json", "{}")
+        backend._clean_bucket_state()
+        keys = [
+            o["Key"]
+            for o in s3.list_objects_v2(Bucket="test-bucket", Prefix="prefix/")[
+                "Contents"
+            ]
+        ]
+        assert keys == ["prefix/_tfworker/runs/2026/11/27/r1.json"]

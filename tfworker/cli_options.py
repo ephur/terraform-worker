@@ -1,6 +1,6 @@
 import os
 import shutil
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import click
 from pydantic import (
@@ -95,6 +95,11 @@ class CLIOptionsRoot(FreezableBaseModel):
         None,
         json_schema_extra={"env": "WORKER_RUN_ID"},
         description="When set, prefix remote plan files with this id",
+    )
+    run_label: Optional[List[str]] = Field(
+        None,
+        json_schema_extra={"env": "WORKER_RUN_LABELS"},
+        description="key=value recorded on the run by the report handler, such as origin=ci; repeatable, or comma separated",
     )
     create_backend_bucket: bool = Field(
         True, description="Create the backend bucket if it does not exist"
@@ -210,6 +215,11 @@ class CLIOptionsRoot(FreezableBaseModel):
         except KeyError:
             raise ValueError("Invalid log format")
 
+    @field_validator("run_label", mode="before")
+    @classmethod
+    def validate_run_label(cls, value):
+        return split_labels(value)
+
     @field_validator("backend_prefix")
     @classmethod
     def validate_backend_prefix(cls, prefix: str) -> str:
@@ -290,6 +300,11 @@ class CLIOptionsTerraform(FreezableBaseModel):
         False,
         json_schema_extra={"env": "WORKER_FORCE_PLAN"},
         description="Plan even when a saved plan is available, replacing the saved plan",
+    )
+    intent: Optional[str] = Field(
+        None,
+        json_schema_extra={"env": "WORKER_INTENT"},
+        description="Optional: what the run's plans are for (deploy, preview or drift), recorded by the report handler",
     )
     lock_timeout: Optional[str] = Field(
         None,
@@ -489,6 +504,13 @@ class CLIOptionsTerraform(FreezableBaseModel):
     def validate_plan_file_path(cls, fpath: Union[str, None]) -> Union[str, None]:
         return validate_existing_dir(fpath)
 
+    @field_validator("intent")
+    @classmethod
+    def validate_intent(cls, value: Union[str, None]) -> Union[str, None]:
+        if value is not None and value not in INTENTS:
+            raise ValueError(f"intent must be one of {', '.join(INTENTS)}")
+        return value
+
     @field_validator("lock_timeout")
     @classmethod
     def validate_lock_timeout(cls, value: Union[str, None]) -> Union[str, None]:
@@ -530,6 +552,36 @@ def validate_existing_dir(fpath: Union[str, None], empty=False) -> Union[str, No
     if empty and any(os.listdir(fpath)):
         raise ValueError(f"path {fpath} must be empty!")
     return fpath
+
+
+INTENTS = ("deploy", "preview", "drift")
+
+
+def split_labels(value) -> Union[List[str], None]:
+    """Accept repeated or comma separated key=value labels."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = [value]
+    labels = []
+    for item in value:
+        for label in str(item).split(","):
+            label = label.strip()
+            if not label:
+                continue
+            key, sep, _ = label.partition("=")
+            if not sep or not key.strip():
+                raise ValueError(f"run label {label!r} must be key=value")
+            labels.append(label)
+    return labels or None
+
+
+def parse_labels(labels: Union[List[str], None]) -> Dict[str, str]:
+    out = {}
+    for label in labels or []:
+        key, _, value = label.partition("=")
+        out[key.strip()] = value.strip()
+    return out
 
 
 def validate_limit(values):

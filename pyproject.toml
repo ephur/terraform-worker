@@ -99,7 +99,7 @@ markers = [
 ]
 
 [tool.coverage.report]
-fail_under = 93
+fail_under = 94
 show_missing = true
 skip_empty = true
 
