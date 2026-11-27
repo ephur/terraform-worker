@@ -275,7 +275,8 @@ class AuditEntry(Base):
     group_name: Mapped[str] = mapped_column(String(64), index=True)
     # the plan id or lock id acted on
     target: Mapped[str] = mapped_column(String(255))
-    # done, unchanged, refused, forbidden or failed
+    # started while the action runs, then done, unchanged, refused, forbidden
+    # or failed; an entry left started means the console stopped mid-action
     outcome: Mapped[str] = mapped_column(String(16))
     reason: Mapped[Optional[str]] = mapped_column(String(2048))
     detail: Mapped[Optional[str]] = mapped_column(String(2048))

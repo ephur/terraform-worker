@@ -2,11 +2,11 @@
 
 from datetime import datetime
 from importlib import resources
-from typing import Optional, Tuple
+from typing import Optional
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -140,33 +140,33 @@ def plans_page(
     scope: Scope = Depends(get_scope),
     now: datetime = Depends(get_now),
 ):
-    return _plans(request, session, scope, now, status)
-
-
-def _plans(request, session, scope, now, status=None, notice=None, code=200):
-    response = _render(
+    return _render(
         request,
         "plans.html",
         session,
         scope,
         status=status,
-        notice=notice,
+        notice=request.session.pop("notice", None),
         plans=queries.plans(session, scope, now, status or None),
     )
-    response.status_code = code
-    return response
 
 
-def _act(request: Request, act) -> Tuple[dict, int]:
-    """Run an action for a screen: the notice to show, and the status to answer."""
+def _act(request: Request, page: str, act) -> RedirectResponse:
+    """
+    Run an action for a screen, then send the browser back to the screen
+    with the outcome, so a reload doesn't repeat the action.
+    """
     actions = request.app.state.actions
     if actions is None:
-        return {"ok": False, "text": "the console is not connected to any stores"}, 503
-    try:
-        result = act(actions)
-    except ActionError as e:
-        return {"ok": False, "text": str(e)}, e.status
-    return {"ok": True, "text": result.message}, 200
+        notice = {"ok": False, "text": "the console is not connected to any stores"}
+    else:
+        try:
+            notice = {"ok": True, "text": act(actions).message}
+        except ActionError as e:
+            notice = {"ok": False, "text": str(e)}
+    request.session["notice"] = notice
+    target = page + (f"?{request.url.query}" if request.url.query else "")
+    return RedirectResponse(target, status_code=303)
 
 
 # the scope's query parameters are named store and deployment, so the path's
@@ -178,17 +178,16 @@ def plan_action(
     action: str,
     request: Request,
     reason: str = Form(""),
-    session: Session = Depends(get_session),
     scope: Scope = Depends(get_scope),
     now: datetime = Depends(get_now),
 ):
-    notice, code = _act(
+    return _act(
         request,
+        "/plans",
         lambda actions: actions.plan(
             request.state.principal, plan_store, plan_id, action, now, reason[:1000]
         ),
     )
-    return _plans(request, session, scope, now, notice=notice, code=code)
 
 
 @router.get("/locks", response_class=HTMLResponse)
@@ -200,21 +199,15 @@ def locks_page(
     now: datetime = Depends(get_now),
     stale: float = Depends(stale_after),
 ):
-    return _locks(request, session, scope, now, stale, state)
-
-
-def _locks(request, session, scope, now, stale, state=None, notice=None, code=200):
-    response = _render(
+    return _render(
         request,
         "locks.html",
         session,
         scope,
         state=state,
-        notice=notice,
+        notice=request.session.pop("notice", None),
         locks=queries.locks(session, scope, now, stale, state or None),
     )
-    response.status_code = code
-    return response
 
 
 @router.post(
@@ -226,15 +219,14 @@ def force_unlock(
     lock_deployment: str,
     definition: str,
     request: Request,
-    lock_id: str = Form(...),
+    lock_id: str = Form(..., max_length=255),
     confirm: str = Form(""),
-    session: Session = Depends(get_session),
     scope: Scope = Depends(get_scope),
     now: datetime = Depends(get_now),
-    stale: float = Depends(stale_after),
 ):
-    notice, code = _act(
+    return _act(
         request,
+        "/locks",
         lambda actions: actions.force_unlock(
             request.state.principal,
             lock_store,
@@ -245,7 +237,6 @@ def force_unlock(
             now,
         ),
     )
-    return _locks(request, session, scope, now, stale, notice=notice, code=code)
 
 
 @router.get("/audit", response_class=HTMLResponse)

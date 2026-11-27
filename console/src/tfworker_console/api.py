@@ -228,7 +228,9 @@ class PlanAction(BaseModel):
 
 
 class ForceUnlock(BaseModel):
-    lock_id: str = Field(description="The lock's ID, as the locks view shows it")
+    lock_id: str = Field(
+        max_length=255, description="The lock's ID, as the locks view shows it"
+    )
     confirm: str = Field(description="The definition's name, typed to confirm")
 
 

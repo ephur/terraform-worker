@@ -29,6 +29,7 @@ from typing import Callable, Dict, Optional, Tuple
 from urllib.parse import quote
 
 import botocore.exceptions
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from tfworker.backends.lock import LockInfo, WorkerLease
 from tfworker.exceptions import BackendError
@@ -164,7 +165,7 @@ class Actions:
             raise Refused(f"the plan is {manifest.status}, not pending")
 
         if action == "recheck":
-            verdict = self._verdict(client, config, target.deployment, manifest, now)
+            verdict = self._verdict(client, config, target, manifest, now)
             if verdict is None:
                 return ActionResult(
                     action,
@@ -198,9 +199,21 @@ class Actions:
         )
         if moved is None:
             raise Refused("the plan changed while acting on it; reload and try again")
-        plans.retire(key, moved)
+        message = f"the plan is now {status}: {note}"
+        if self._owns(config, target, moved.plan_key, ".tfplan"):
+            plans.retire(key, moved)
+        else:
+            # a manifest names its plan file; never delete outside the deployment
+            log.warning(f"not removing {moved.plan_key}: outside {target.deployment}")
+            message += f"; its plan file {moved.plan_key} was left alone"
         self._project_plan(target.store, moved)
-        return ActionResult(action, "done", f"the plan is now {status}: {note}", status)
+        return ActionResult(action, "done", message, status)
+
+    @staticmethod
+    def _owns(config: StoreConfig, target, key: str, suffix: str) -> bool:
+        """Whether `key` is a `suffix` object of this definition in this deployment."""
+        base = f"{config.render(target.deployment)}/{target.definition}/"
+        return key.startswith(base) and key.endswith(suffix) and ".." not in key
 
     def _past_ttl(self, target, manifest: PlanManifest, now) -> Optional[str]:
         if manifest.is_expired(now):
@@ -212,17 +225,22 @@ class Actions:
         return None
 
     def _verdict(
-        self, client, config: StoreConfig, deployment: str, manifest, now
+        self, client, config: StoreConfig, target, manifest, now
     ) -> Optional[Tuple[str, str]]:
         """What a re-check finds: (status, why) to retire the plan, or None."""
         if manifest.is_expired(now):
             return "expired", f"expired at {manifest.expires_at.isoformat()}"
-        if manifest.state is not None:
-            bucket = manifest.state.bucket or config.bucket
-            key = manifest.state.state_key
-        else:
-            bucket = config.bucket
-            key = f"{config.render(deployment)}/{manifest.definition}/{STATE_FILE}"
+        # only the definition's own state, whatever the manifest says
+        bucket = config.bucket
+        key = f"{config.render(target.deployment)}/{target.definition}/{STATE_FILE}"
+        named = manifest.state
+        if named is not None and (
+            named.state_key != key or (named.bucket or bucket) != bucket
+        ):
+            raise Refused(
+                f"the manifest names state {named.state_key} outside "
+                f"{target.deployment}; discard the plan instead"
+            )
         try:
             head = client.head_object(Bucket=bucket, Key=key)
         except botocore.exceptions.ClientError as e:
@@ -251,13 +269,19 @@ class Actions:
         )
 
     def _project_plan(self, store: str, manifest: PlanManifest) -> None:
-        """Show the plan's new status now rather than after the next reconcile."""
-        with self.sessions() as session:
-            row = session.get(db.Plan, (store, manifest.plan_id))
-            if row is not None:
-                row.status = manifest.status
-                row.body = manifest.model_dump(mode="json", by_alias=True)
-                session.commit()
+        """
+        Show the plan's new status now rather than after the next reconcile,
+        which catches up if this fails.
+        """
+        try:
+            with self.sessions() as session:
+                row = session.get(db.Plan, (store, manifest.plan_id))
+                if row is not None:
+                    row.status = manifest.status
+                    row.body = manifest.model_dump(mode="json", by_alias=True)
+                    session.commit()
+        except SQLAlchemyError as e:
+            log.warning(f"unable to project plan {manifest.plan_id} now: {e}")
 
     # locks
 
@@ -308,13 +332,20 @@ class Actions:
                 raise
             self._forget_lock(target)
             raise Refused("the lock was already released")
-        lock = LockInfo.model_validate_json(obj["Body"].read())
+        try:
+            lock = LockInfo.model_validate_json(obj["Body"].read())
+        except ValueError as e:
+            raise Refused(
+                f"the lock object is not a terraform lock, so it can't be judged: {e}"
+            )
         if lock.id != lock_id:
             raise Refused(
                 f"the lock changed: it is now {lock.id}, held by {lock.who or 'unknown'}; "
                 "reload and look again"
             )
-        lease_key, lease = self._lease(client, config.bucket, state_key, lock)
+        lease_key, lease, lease_tag = self._lease(
+            client, config.bucket, state_key, lock
+        )
         if lease is not None and lease.holds(lock):
             if lease.is_fresh(now):
                 raise Refused(
@@ -340,39 +371,55 @@ class Actions:
                     "the lock changed while removing it; reload and look again"
                 )
             raise
-        if lease is not None:
-            client.delete_object(Bucket=config.bucket, Key=lease_key)
-        self._forget_lock(target)
         held = f"held by {lock.who or 'unknown'}" + (
             f" for {lock.operation}" if lock.operation else ""
         )
-        return ActionResult("force_unlock", "done", f"removed the lock {held}: {why}")
+        message = f"removed the lock {held}: {why}"
+        if lease is not None:
+            # the lock is gone either way; a lease left behind is harmless
+            try:
+                client.delete_object(
+                    Bucket=config.bucket, Key=lease_key, IfMatch=lease_tag
+                )
+            except CLIENT_ERRORS as e:
+                log.warning(f"unable to remove the dead lease {lease_key}: {e}")
+                message += f"; its dead lease could not be removed ({_describe(e)})"
+        self._forget_lock(target)
+        return ActionResult("force_unlock", "done", message)
 
     @staticmethod
-    def _lease(client, bucket, state_key, lock) -> Tuple[str, Optional[WorkerLease]]:
+    def _lease(
+        client, bucket, state_key, lock
+    ) -> Tuple[str, Optional[WorkerLease], Optional[str]]:
+        """The holder's lease key, the lease if readable, and its ETag."""
         key = f"{state_key}{LEASE_SUFFIX}{quote(lock.host, safe='')}"
         if not lock.host:
-            return key, None
+            return key, None, None
         try:
             obj = client.get_object(Bucket=bucket, Key=key)
         except botocore.exceptions.ClientError as e:
             if _code(e) not in MISSING:
                 raise
-            return key, None
+            return key, None, None
         try:
-            return key, WorkerLease.model_validate_json(obj["Body"].read())
+            lease = WorkerLease.model_validate_json(obj["Body"].read())
         except ValueError as e:
             log.warning(f"ignoring unreadable worker lease {key}: {e}")
-            return key, None
+            return key, None, None
+        return key, lease, obj["ETag"]
 
     def _forget_lock(self, target: _Target) -> None:
-        with self.sessions() as session:
-            row = session.get(
-                db.Lock, (target.store, target.deployment, target.definition)
-            )
-            if row is not None:
-                session.delete(row)
-                session.commit()
+        """Drop the lock from the projection now; the next reconcile would too."""
+        try:
+            with self.sessions() as session:
+                row = session.get(
+                    db.Lock, (target.store, target.deployment, target.definition)
+                )
+                if row is not None:
+                    session.delete(row)
+                    session.commit()
+        except SQLAlchemyError as e:
+            log.warning(f"unable to drop the lock on {target.definition} now: {e}")
 
     # shared
 
@@ -388,40 +435,61 @@ class Actions:
         return config
 
     def _audited(self, principal, action, target, reason, now, act) -> ActionResult:
+        """
+        Run an action between two audit writes: the entry is recorded as
+        started before the store is touched, so an action that happens is
+        never missing from the log, and then given its outcome.
+        """
+        entry = self._audit_start(principal, action, target, reason, now)
         try:
             result = act()
         except ActionError as e:
-            self._audit(principal, action, target, e.outcome, reason, str(e), now)
+            self._audit_end(entry, e.outcome, str(e))
             raise
         except CLIENT_ERRORS as e:
             log.warning(f"{action} on {target.target} failed: {e}")
-            message = f"the store could not be changed: {e}"
-            self._audit(principal, action, target, "failed", reason, message, now)
+            message = f"the store could not be changed: {_describe(e)}"
+            self._audit_end(entry, "failed", message)
             raise Failed(message) from e
-        self._audit(
-            principal, action, target, result.outcome, reason, result.message, now
-        )
+        except Exception as e:
+            log.exception(f"{action} on {target.target} failed: {e}")
+            message = f"the action failed: {e.__class__.__name__}"
+            self._audit_end(entry, "failed", message)
+            raise Failed(message) from e
+        self._audit_end(entry, result.outcome, result.message)
         return result
 
-    def _audit(self, principal, action, target, outcome, reason, detail, now) -> None:
+    def _audit_start(self, principal, action, target, reason, now) -> int:
         with self.sessions() as session:
-            session.add(
-                db.AuditEntry(
-                    at=now,
-                    actor=principal.name,
-                    actor_kind=principal.kind,
-                    action=action,
-                    store=target.store,
-                    deployment=target.deployment,
-                    definition=target.definition,
-                    group_name=target.group,
-                    target=target.target,
-                    outcome=outcome,
-                    reason=(reason or None) and reason[:TEXT],
-                    detail=detail[:TEXT],
-                )
+            entry = db.AuditEntry(
+                at=now,
+                actor=principal.name[:255],
+                actor_kind=principal.kind,
+                action=action,
+                store=target.store[:128],
+                deployment=target.deployment[:255],
+                definition=target.definition[:255],
+                group_name=target.group[:64],
+                target=target.target[:255],
+                outcome="started",
+                reason=(reason or None) and reason[:TEXT],
             )
+            session.add(entry)
             session.commit()
+            return entry.id
+
+    def _audit_end(self, entry: int, outcome: str, detail: str) -> None:
+        with self.sessions() as session:
+            row = session.get(db.AuditEntry, entry)
+            row.outcome = outcome
+            row.detail = detail[:TEXT]
+            session.commit()
+
+
+def _describe(error: Exception) -> str:
+    if isinstance(error, botocore.exceptions.ClientError):
+        return f"{_code(error)}: {error}"
+    return str(error)
 
 
 def _code(error: botocore.exceptions.ClientError) -> str:

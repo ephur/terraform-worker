@@ -257,13 +257,48 @@ class TestPlans:
         fresh = actions.plan(OPERATOR, "prod", "plan-2", "recheck", NOW)
         assert fresh.outcome == "unchanged"
 
-    def test_recheck_reads_the_state_the_manifest_names(self, world):
-        other = "elsewhere/network.tfstate"
-        put(world.s3, BUCKET, other, json.dumps({"lineage": "lineage-1", "serial": 3}))
-        world.add_plan(manifest(state=BackendLocation(backend="s3", state_key=other)))
+    def test_recheck_reads_only_the_definitions_own_state(self, world):
+        own = BackendLocation(backend="s3", bucket=BUCKET, state_key=state_key("east"))
+        world.add_plan(manifest(state=own))
+        world.state()
+        other = "tf/prod/network/terraform.tfstate"
+        world.add_plan(
+            manifest(
+                plan_id="plan-2",
+                state=BackendLocation(backend="s3", state_key=other),
+            )
+        )
+        elsewhere = BackendLocation(
+            backend="s3", bucket="other", state_key=state_key("east")
+        )
+        world.add_plan(manifest(plan_id="plan-3", state=elsewhere))
         world.reconcile()
-        result = world.actions().plan(OPERATOR, "prod", "plan-1", "recheck", NOW)
+        actions = world.actions()
+        result = actions.plan(OPERATOR, "prod", "plan-1", "recheck", NOW)
         assert result.outcome == "unchanged"
+        for plan_id in ("plan-2", "plan-3"):
+            refused(
+                lambda: actions.plan(OPERATOR, "prod", plan_id, "recheck", NOW),
+                409,
+                "outside east",
+            )
+
+    @pytest.mark.parametrize(
+        "plan_key",
+        [
+            "tf/prod/network/terraform.tfstate",
+            "tf/east/network/terraform.tfstate",
+            "tf/east/other/terraform.tfplan",
+            "tf/east/network/../../prod/network/terraform.tfplan",
+        ],
+    )
+    def test_a_forged_plan_key_is_never_deleted(self, world, plan_key):
+        world.add_plan(manifest(plan_key=plan_key))
+        world.reconcile()
+        result = world.actions().plan(OPERATOR, "prod", "plan-1", "discard", NOW, "x")
+        assert result.status == "discarded"
+        assert "was left alone" in result.message
+        assert world.exists(plan_key)
 
     def test_recheck_of_an_expired_plan_expires_it(self, world):
         world.add_plan(manifest(expires_at=NOW - HOUR))
@@ -606,7 +641,7 @@ class TestApi:
         response = client.post("/api/v1/plans/demo-prod/edge-cdn-10/discard")
         assert response.status_code == 503 and "demo" in response.json()["detail"]
         page = client.post("/plans/demo-prod/edge-cdn-10/discard", data={"reason": "x"})
-        assert page.status_code == 503
+        assert page.status_code == 200
         assert "not connected to any stores" in page.text
 
 
@@ -617,11 +652,18 @@ class TestScreens:
         page = client.get("/plans").text
         for action in ("recheck", "expire", "discard"):
             assert f'action="/plans/prod/plan-1/{action}"' in page
-        done = client.post("/plans/prod/plan-1/expire?group=Production")
-        assert done.status_code == 200
-        assert 'class="notice ok"' in done.text and "now expired" in done.text
+        done = client.post(
+            "/plans/prod/plan-1/expire?group=Production", follow_redirects=False
+        )
+        # back to the screen, keeping the scope, so a reload doesn't repeat it
+        assert done.status_code == 303
+        assert done.headers["location"] == "/plans?group=Production"
+        page = client.get(done.headers["location"]).text
+        assert 'class="notice ok"' in page and "now expired" in page
+        # the notice shows once
+        assert "notice" not in client.get("/plans").text.split("<main>")[1]
         refused = client.post("/plans/prod/plan-1/discard", data={"reason": "x"})
-        assert refused.status_code == 409
+        assert refused.url.path == "/plans"
         assert 'class="notice bad"' in refused.text
         audit = client.get("/audit").text
         assert "plan.expire" in audit and "plan.discard" in audit
@@ -638,7 +680,7 @@ class TestScreens:
             "/locks/prod/east/network/force-unlock",
             data={"lock_id": "lock-1", "confirm": "network"},
         )
-        assert done.status_code == 200
+        assert done.url.path == "/locks"
         assert "removed the lock" in done.text
 
     def test_no_buttons_without_the_role(self, world, client, monkeypatch):
@@ -719,3 +761,145 @@ def test_audit_scope(world, client):
     assert len(client.get("/api/v1/audit?store=prod&deployment=east").json()) == 1
     assert client.get("/api/v1/audit?deployment=west").json() == []
     assert client.get("/api/v1/audit?store=dev").json() == []
+
+
+class TestRobustness:
+    def test_a_lease_that_cannot_be_removed(self, world):
+        world.lock()
+        world.lease(beat=NOW - HOUR)
+        world.reconcile()
+        real = world.s3
+
+        class NoLeaseDelete:
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+            def delete_object(self, **kwargs):
+                if ".tfworker-lease." in kwargs["Key"]:
+                    raise denied("DeleteObject")
+                return real.delete_object(**kwargs)
+
+        actions = world.actions()
+        actions._client_for = lambda store: NoLeaseDelete()
+        result = actions.force_unlock(
+            ADMIN, "prod", "east", "network", "lock-1", "network", NOW
+        )
+        # the lock is gone, so it is done, and says what was left
+        assert result.outcome == "done"
+        assert "dead lease could not be removed (AccessDenied" in result.message
+        assert not world.exists(state_key("east") + ".tflock")
+        assert world.audit()[-1].outcome == "done"
+        with world.sessions() as session:
+            assert session.scalars(select(db.Lock)).all() == []
+
+    def test_a_lease_rewritten_meanwhile_is_kept(self, world):
+        world.lock()
+        world.lease(beat=NOW - HOUR)
+        world.reconcile()
+        real = world.s3
+
+        class Rewriting:
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+            def delete_object(self, **kwargs):
+                if kwargs["Key"].endswith(".tflock"):
+                    world.lease(beat=NOW)
+                return real.delete_object(**kwargs)
+
+        actions = world.actions()
+        actions._client_for = lambda store: Rewriting()
+        result = actions.force_unlock(
+            ADMIN, "prod", "east", "network", "lock-1", "network", NOW
+        )
+        assert "could not be removed" in result.message
+        assert world.exists(world.lease_key())
+
+    def test_a_lock_that_is_not_a_lock(self, world):
+        world.lock()
+        world.reconcile()
+        put(world.s3, BUCKET, state_key("east") + ".tflock", "{}")
+        refused(lambda: TestForceUnlock().unlock(world), 409, "not a terraform lock")
+        assert world.audit()[-1].outcome == "refused"
+
+    def test_an_unexpected_error_is_audited(self, world, mocker):
+        world.add_plan(manifest())
+        world.reconcile()
+        mocker.patch(
+            "tfworker_console.actions.move", side_effect=RuntimeError("surprise")
+        )
+        refused(
+            lambda: world.actions().plan(
+                OPERATOR, "prod", "plan-1", "discard", NOW, "x"
+            ),
+            502,
+            "RuntimeError",
+        )
+        assert world.audit()[-1].outcome == "failed"
+
+    def test_the_entry_is_started_before_the_store_is_touched(self, world, mocker):
+        world.add_plan(manifest())
+        world.reconcile()
+        actions = world.actions()
+        seen = []
+        real = actions._plan
+
+        def spy(*args):
+            seen.append([entry.outcome for entry in world.audit()])
+            return real(*args)
+
+        mocker.patch.object(actions, "_plan", side_effect=spy)
+        actions.plan(OPERATOR, "prod", "plan-1", "discard", NOW, "x")
+        assert seen == [["started"]]
+        assert [entry.outcome for entry in world.audit()] == ["done"]
+
+    def test_projection_errors_do_not_hide_the_outcome(self, world, mocker, caplog):
+        from sqlalchemy.exc import OperationalError
+
+        world.add_plan(manifest())
+        world.lock()
+        world.reconcile()
+        actions = world.actions()
+        real = world.sessions
+        calls = {"n": 0}
+
+        def flaky():
+            # the audit start and end work; the projection update in between fails
+            calls["n"] += 1
+            if calls["n"] == 3:
+                raise OperationalError("UPDATE", {}, Exception("db gone"))
+            return real()
+
+        actions.sessions = flaky
+        result = actions.plan(OPERATOR, "prod", "plan-1", "discard", NOW, "x")
+        assert result.outcome == "done"
+        calls["n"] = 0
+        result = actions.force_unlock(
+            ADMIN, "prod", "east", "network", "lock-1", "network", NOW
+        )
+        assert result.outcome == "done"
+        assert "unable to project plan" in caplog.text
+        assert "unable to drop the lock" in caplog.text
+
+    def test_long_values_fit_the_audit_log(self, world, client):
+        world.lock()
+        world.reconcile()
+        url = "/api/v1/locks/prod/east/network/force-unlock"
+        long = {"lock_id": "x" * 256, "confirm": "network"}
+        assert client.post(url, json=long).status_code == 422
+        actions = world.actions()
+        refused(
+            lambda: actions.force_unlock(
+                Principal("a" * 300, "user", [Grant("admin")]),
+                "prod",
+                "east",
+                "network",
+                "y" * 300,
+                "network",
+                NOW,
+            ),
+            409,
+            "lock changed",
+        )
+        entry = world.audit()[-1]
+        assert len(entry.target) == 255 and len(entry.actor) == 255

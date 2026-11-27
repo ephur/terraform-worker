@@ -313,7 +313,10 @@ the manifest's history with who made it and why.
 
 Each action needs the operator role on the plan's group, and works only on
 a pending plan. A plan that leaves pending also loses its plan file and log,
-as when the worker retires one; its manifest stays as the record.
+as when the worker retires one; its manifest stays as the record. The console
+only deletes a plan file that sits under the plan's own definition in its
+deployment, and a re-check only reads that definition's own state, whatever
+the manifest names, so a forged manifest can't reach another deployment.
 
 A state lock can be force-unlocked from `/locks`, or with
 `POST /api/v1/locks/{store}/{deployment}/{definition}/force-unlock` and
@@ -325,12 +328,15 @@ dead:
 The console reads the lock and lease from the store again rather than
 trusting the last reconcile, and removes the lock only if it is still the
 same object, so a lock taken in the meantime is left alone. The dead
-holder's lease is removed with it. The group's `force_unlock` policy says
+holder's lease is removed with it if it is unchanged; if that fails, the
+unlock still counts as done and says so. The group's `force_unlock` policy says
 whether operators or only admins may do it, and the person must type the
 definition's name to confirm.
 
 Every attempt is written to the audit log, including those refused for a
-role, a live lock or a plan that is no longer pending.
+role, a live lock or a plan that is no longer pending. The entry is written
+as `started` before the store is touched and then given its outcome, so an
+entry left `started` means the console stopped partway through.
 `GET /api/v1/audit` and `/audit` show it, newest first, to whoever may see
 the deployment's group. The audit log is kept when the projection is rebuilt.
 
@@ -339,4 +345,6 @@ The console writes only plan manifests and their index entries under
 `*.tfworker-lease.*` objects. Re-checking a plan reads its state file. The
 console's role needs `s3:GetObject` on the state files for re-checks, and
 `s3:PutObject` and `s3:DeleteObject` on those keys. The read-only reconciler
-needs none of these. Actions are refused while the console shows the demo.
+needs none of these. Actions are refused while the console shows the demo. On the screens, each
+action sends the browser back to `/plans` or `/locks` with the outcome, so
+reloading doesn't repeat it.
