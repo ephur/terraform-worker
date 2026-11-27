@@ -36,8 +36,13 @@ RUN set -eu; \
     if [ -n "${TERRAFORM_SHA256}" ]; then \
         echo "${TERRAFORM_SHA256}  ${zip}" > SHA256SUMS; \
     else \
-        curl -fsSL "${base}/terraform_${TERRAFORM_VERSION}_SHA256SUMS" \
-            | grep "  ${zip}\$" > SHA256SUMS; \
+        curl -fsSLo SHA256SUMS.all "${base}/terraform_${TERRAFORM_VERSION}_SHA256SUMS"; \
+        # exact match on the file name field, not a regex
+        awk -v f="${zip}" '$2 == f' SHA256SUMS.all > SHA256SUMS; \
+        if [ ! -s SHA256SUMS ]; then \
+            echo "no checksum for ${zip} in the ${TERRAFORM_VERSION} SHA256SUMS" >&2; \
+            exit 1; \
+        fi; \
     fi; \
     sha256sum -c SHA256SUMS; \
     unzip -q "${zip}" terraform; \
