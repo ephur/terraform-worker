@@ -27,8 +27,11 @@ Example configuration::
 
 import getpass
 import json
+import random
+import re
 import socket
 import threading
+import time
 from datetime import datetime, timezone
 from importlib import metadata
 from pathlib import Path
@@ -50,9 +53,10 @@ from tfworker.report import (
     RunRecord,
     new_ulid,
 )
-from tfworker.report.models import LOCAL_MODULE_TAG
+from tfworker.report.models import LOCAL_MODULE_TAG, STATUS_SCHEMA
 from tfworker.report.status import merge_status
 from tfworker.util.provenance import module_sources, repository_state
+from tfworker.util.system import strip_ansi
 
 from .base import BaseHandler
 from .registry import HandlerRegistry
@@ -60,6 +64,10 @@ from .registry import HandlerRegistry
 if TYPE_CHECKING:  # pragma: no cover
     from tfworker.commands.terraform import TerraformResult
     from tfworker.definitions.model import Definition
+
+# the frame terraform draws around diagnostics
+_BOX = re.compile(r"^[\s│╷╵]+")
+REASON_LIMIT = 300
 
 REPORTED_ACTIONS = [
     TerraformAction.INIT,
@@ -97,7 +105,10 @@ class ReportHandler(BaseHandler):
         self._run_id_generated = False
         self._started_at: Optional[datetime] = None
         self._deployment: Optional[str] = None
+        self._record_id = new_ulid()
+        self._warned_not_ready = False
         self._now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
+        self._sleep: Callable[[float], None] = time.sleep
 
     @property
     def app_state(self):
@@ -119,7 +130,11 @@ class ReportHandler(BaseHandler):
 
     def is_ready(self) -> bool:
         backend = getattr(self.app_state, "backend", None)
-        return bool(getattr(backend, "report_storage", False))
+        ready = bool(getattr(backend, "report_storage", False))
+        if not ready and backend is not None and not self._warned_not_ready:
+            log.warn("the backend cannot store reports; the report handler is off")
+            self._warned_not_ready = True
+        return ready
 
     def setup(self, deployment, definitions, working_dir, terraform_options) -> None:
         self._deployment = deployment
@@ -152,48 +167,63 @@ class ReportHandler(BaseHandler):
         working_dir: str,
         result: Optional["TerraformResult"],
     ) -> None:
+        self._ensure_entry(definition.name)
         if stage == TerraformStage.PRE:
             with self._lock:
                 self._phase_starts[(definition.name, action)] = self._now()
             if action == TerraformAction.PLAN and self.config.state_serials:
                 lineage = self._state_version(definition.name)
                 with self._lock:
-                    entry = self._entry(definition.name)
+                    entry = self._results[definition.name]
                     entry.base_lineage, entry.base_serial = lineage or (None, None)
             return
 
         succeeded = stage == TerraformStage.POST
+        with self._lock:
+            started = (definition.name, action) in self._phase_starts
+            recorded = self._results[definition.name].phases.get(action.value)
+        if (
+            not succeeded
+            and not started
+            and recorded
+            and recorded.status == "succeeded"
+        ):
+            # a POST hook failed after terraform finished: keep the real timings
+            with self._lock:
+                recorded.status = "failed"
+                recorded.reason = self._failure_reason(result) or (
+                    f"post-{action.value} hook failed"
+                )
+            return
+
         phase = self._phase(action, definition, result, succeeded)
-        changes = None
+        with self._lock:
+            self._results[definition.name].phases[action.value] = phase
+
         if action == TerraformAction.PLAN and succeeded:
             changes = self._plan_changes(definition)
-        sources = None
+            with self._lock:
+                self._results[definition.name].changes = changes
         if action == TerraformAction.INIT and succeeded:
             sources = module_sources(definition.get_target_path(working_dir))
-        applied = None
-        if (
-            action in (TerraformAction.APPLY, TerraformAction.DESTROY)
-            and self.config.state_serials
-        ):
-            version = self._state_version(definition.name)
-            applied = version[1] if version else None
-
-        with self._lock:
-            entry = self._entry(definition.name)
-            entry.phases[action.value] = phase
-            if changes is not None:
-                entry.changes = changes
-            if sources is not None:
-                entry.module_sources = sources
-            if action in (TerraformAction.APPLY, TerraformAction.DESTROY):
+            with self._lock:
+                self._results[definition.name].module_sources = sources
+        if action in (TerraformAction.APPLY, TerraformAction.DESTROY):
+            applied = None
+            if self.config.state_serials:
+                version = self._state_version(definition.name)
+                applied = version[1] if version else None
+            with self._lock:
+                entry = self._results[definition.name]
                 entry.applied_serial = applied
                 if succeeded and any(m.kind == "local" for m in entry.module_sources):
                     if LOCAL_MODULE_TAG not in entry.tags:
                         entry.tags.append(LOCAL_MODULE_TAG)
 
     def skip(self, action, deployment, definition, reason) -> None:
+        self._ensure_entry(definition.name)
         with self._lock:
-            entry = self._entry(definition.name)
+            entry = self._results[definition.name]
             if action.value not in entry.phases:
                 entry.phases[action.value] = PhaseResult(
                     action=action.value, status="skipped", reason=reason
@@ -201,6 +231,17 @@ class ReportHandler(BaseHandler):
 
     def teardown(self, deployment: str, working_dir: str) -> None:
         with self._lock:
+            # a phase that started but never finished: the run stopped under it
+            for (name, action), started in self._phase_starts.items():
+                entry = self._results.get(name)
+                if entry is not None:
+                    entry.phases[action.value] = PhaseResult(
+                        action=action.value,
+                        status="failed",
+                        started_at=started,
+                        reason="the run stopped before this finished",
+                    )
+            self._phase_starts.clear()
             results = [self._results[name] for name in sorted(self._results)]
         if not results:
             log.debug("no definitions ran; no run record written")
@@ -210,12 +251,16 @@ class ReportHandler(BaseHandler):
         for result in results:
             self._write_status(record, result)
 
-    def _entry(self, name: str) -> DefinitionResult:
-        entry = self._results.get(name)
-        if entry is None:
-            entry = DefinitionResult(definition=name, state=self.backend.location(name))
-            self._results[name] = entry
-        return entry
+    def _ensure_entry(self, name: str) -> None:
+        with self._lock:
+            if name in self._results:
+                return
+        # the location may call STS; keep that outside the lock
+        location = self.backend.location(name)
+        with self._lock:
+            self._results.setdefault(
+                name, DefinitionResult(definition=name, state=location)
+            )
 
     def _phase(
         self,
@@ -246,15 +291,25 @@ class ReportHandler(BaseHandler):
 
     @staticmethod
     def _failure_reason(result: Optional["TerraformResult"]) -> Optional[str]:
+        """
+        The summary line of terraform's first error, such as
+        "Error: creating S3 Bucket: AccessDenied". The detail lines below it
+        are left out, since provider messages there can carry values.
+        """
         stderr = getattr(result, "stderr", None)
         if not stderr:
             return None
-        lines = [line.strip() for line in stderr.decode(errors="replace").splitlines()]
+        lines = [
+            _BOX.sub("", strip_ansi(line)).strip()
+            for line in stderr.decode(errors="replace").splitlines()
+        ]
+        lines = [line for line in lines if line]
         errors = [line for line in lines if line.startswith("Error:")]
-        first = (errors or [line for line in lines if line] or [None])[0]
-        return first[:500] if first else None
+        first = (errors or lines or [None])[0]
+        return first[:REASON_LIMIT] if first else None
 
-    def _plan_changes(self, definition: "Definition") -> ChangeSummary:
+    def _plan_changes(self, definition: "Definition") -> Optional[ChangeSummary]:
+        """The plan's changes; None when they could not be read."""
         if not definition.needs_apply or not definition.plan_file:
             return ChangeSummary()
         jsonfile = Path(definition.plan_file).with_suffix(".tfplan.json")
@@ -262,7 +317,7 @@ class ReportHandler(BaseHandler):
             summary = ChangeSummary.from_plan_json(json.loads(jsonfile.read_text()))
         except (OSError, ValueError) as e:
             log.warn(f"unable to read plan changes for {definition.name}: {e}")
-            return ChangeSummary()
+            return None
         return summary if self.config.resources else summary.counts_only()
 
     def _state_version(self, name: str):
@@ -316,6 +371,7 @@ class ReportHandler(BaseHandler):
         ]
         failed = any(result.failed for result in results)
         return RunRecord(
+            record_id=self._record_id,
             run_id=self.run_id,
             run_id_generated=self._run_id_generated,
             deployment=self._deployment or self.app_state.deployment,
@@ -328,26 +384,37 @@ class ReportHandler(BaseHandler):
         )
 
     def _write_record(self, record: RunRecord) -> None:
+        # keyed by this invocation, since a plan job and its apply job can
+        # share one --run-id
         day = record.started_at.strftime("%Y/%m/%d")
-        path = f"runs/{day}/{record.run_id}.json"
+        path = f"runs/{day}/{record.record_id}.json"
         try:
             self.backend.write_report(
                 path, record.model_dump_json(by_alias=True), create_only=True
             )
             log.info(f"run record written: {path}")
         except ReportConflictError:
-            log.warn(f"a run record for {record.run_id} already exists; not replaced")
+            log.warn(f"run record {path} already exists; not replaced")
         except BackendError as e:
             log.warn(f"unable to write the run record {path}: {e}")
 
     def _write_status(self, record: RunRecord, result: DefinitionResult) -> None:
         path = f"status/{result.definition}.json"
-        for _ in range(self.config.status_retries):
+        for attempt in range(self.config.status_retries):
+            if attempt:
+                self._sleep(random.uniform(0.05, 0.25) * 2**attempt)
             try:
                 found = self.backend.read_report(path)
                 current, etag = None, None
                 if found is not None:
                     text, etag = found
+                    schema = _schema_of(text)
+                    if schema is not None and schema != STATUS_SCHEMA:
+                        log.warn(
+                            f"status {path} is {schema}, which this worker cannot "
+                            "update; leaving it as is"
+                        )
+                        return
                     try:
                         current = DefinitionStatus.model_validate_json(text)
                     except ValueError as e:
@@ -383,3 +450,11 @@ def _user() -> Optional[str]:
         return getpass.getuser()
     except (KeyError, OSError):
         return None
+
+
+def _schema_of(text: str) -> Optional[str]:
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    return data.get("schema") if isinstance(data, dict) else None

@@ -31,7 +31,8 @@ def _utc(value: Optional[datetime]) -> Optional[datetime]:
 
 
 class _Model(BaseModel):
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    # unknown fields from a newer worker survive a read-modify-write
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
 
 class BackendLocation(_Model):
@@ -177,6 +178,8 @@ class RunRecord(_Model):
     """One immutable record per run, written when the run ends."""
 
     schema_: Literal["tfworker.run/v1"] = Field(RUN_SCHEMA, alias="schema")
+    # unique to this invocation; a plan job and its apply job may share run_id
+    record_id: str
     run_id: str
     run_id_generated: bool = False
     deployment: str
@@ -197,6 +200,7 @@ class RunEvent(_Model):
     """One phase of one run, as it appears in a status snapshot."""
 
     run_id: str
+    record_id: Optional[str] = None
     action: PhaseName
     status: PhaseStatus
     at: datetime

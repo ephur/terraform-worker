@@ -45,7 +45,7 @@ def repository_state(
     if sha is None:
         return None
     branch = _git(path, "rev-parse", "--abbrev-ref", "HEAD")
-    status = _git(path, "status", "--porcelain", "--untracked-files=no")
+    status = _git(path, "status", "--porcelain")
     if tracked_ref is None:
         tracked_ref = _git(path, "rev-parse", "--abbrev-ref", "origin/HEAD")
     on_tracked = None
@@ -95,9 +95,24 @@ def _classify(source: str) -> str:
         ".git" in source.split("?", 1)[0]
     ):
         return "git"
-    if _REGISTRY.match(source):
+    if _REGISTRY.match(source.split("//", 1)[0]):
         return "registry"
     return "other"
+
+
+def _clone_root(root: Path, module_dir: Path) -> Optional[Path]:
+    """
+    The checkout a git module was fetched into. A `//subdir` source points
+    below it, so walk up to the directory holding .git, never leaving
+    .terraform/modules: above that, git would report an enclosing checkout.
+    """
+    modules = (root / ".terraform" / "modules").resolve()
+    current = module_dir.resolve()
+    while current != modules and modules in current.parents:
+        if (current / ".git").exists():
+            return current
+        current = current.parent
+    return None
 
 
 def module_sources(target_dir: Path) -> List[ModuleSource]:
@@ -138,10 +153,9 @@ def module_sources(target_dir: Path) -> List[ModuleSource]:
                     kind = "bundled"
         elif kind == "git":
             ref = _git_ref(source)
-            module_dir = root / entry.get("Dir", "")
-            # without its own .git, git would report an enclosing checkout
-            if (module_dir / ".git").exists():
-                sha = _git(module_dir, "rev-parse", "HEAD")
+            clone = _clone_root(root, root / entry.get("Dir", ""))
+            if clone is not None:
+                sha = _git(clone, "rev-parse", "HEAD")
         elif kind == "registry":
             ref = entry.get("Version")
         module = ModuleSource(key=key, source=source, kind=kind, ref=ref, sha=sha)

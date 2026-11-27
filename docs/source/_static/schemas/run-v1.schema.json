@@ -1,6 +1,7 @@
 {
   "$defs": {
     "BackendLocation": {
+      "additionalProperties": true,
       "description": "Where a definition's state lives. A state is identified by this, not by name.",
       "properties": {
         "account_id": {
@@ -56,6 +57,7 @@
       "type": "object"
     },
     "ChangeSummary": {
+      "additionalProperties": true,
       "description": "Counts as terraform prints them, plus the address and actions of each change.",
       "properties": {
         "add": {
@@ -90,6 +92,7 @@
       "type": "object"
     },
     "DefinitionResult": {
+      "additionalProperties": true,
       "properties": {
         "applied_serial": {
           "anyOf": [
@@ -183,6 +186,7 @@
       "type": "object"
     },
     "ModuleSource": {
+      "additionalProperties": true,
       "description": "A module terraform installed for a definition, as recorded in modules.json.\n\nkind \"local\" is a path outside the definition, such as a mounted module\ncheckout; \"bundled\" is a path inside the definition or inside a module\nfetched from git or a registry.",
       "properties": {
         "key": {
@@ -238,6 +242,7 @@
       "type": "object"
     },
     "PhaseResult": {
+      "additionalProperties": true,
       "properties": {
         "action": {
           "enum": [
@@ -341,6 +346,7 @@
       "type": "object"
     },
     "Provenance": {
+      "additionalProperties": true,
       "description": "Observable facts about where a run came from, recorded in place of intent.",
       "properties": {
         "host": {
@@ -441,6 +447,7 @@
       "type": "object"
     },
     "RepositoryState": {
+      "additionalProperties": true,
       "description": "The git checkout the worker ran from.",
       "properties": {
         "branch": {
@@ -508,6 +515,7 @@
       "type": "object"
     },
     "ResourceChange": {
+      "additionalProperties": true,
       "properties": {
         "actions": {
           "items": {
@@ -535,6 +543,7 @@
     }
   },
   "$id": "tfworker.run/v1",
+  "additionalProperties": true,
   "description": "One immutable record per run, written when the run ends.",
   "properties": {
     "actions": {
@@ -576,6 +585,10 @@
     "provenance": {
       "$ref": "#/$defs/Provenance"
     },
+    "record_id": {
+      "title": "Record Id",
+      "type": "string"
+    },
     "run_id": {
       "title": "Run Id",
       "type": "string"
@@ -606,6 +619,7 @@
     }
   },
   "required": [
+    "record_id",
     "run_id",
     "deployment",
     "started_at",

@@ -10,6 +10,7 @@ def _event(run: RunRecord, result: DefinitionResult, phase: PhaseResult) -> RunE
     planned = phase.action == "plan"
     return RunEvent(
         run_id=run.run_id,
+        record_id=run.record_id,
         action=phase.action,
         status=phase.status,
         at=phase.finished_at or run.finished_at or run.started_at,
@@ -40,8 +41,9 @@ def merge_status(
 
     A pending plan is a successful plan with changes, stored in the backend,
     from a run that did not mean it as a preview or drift check. A later
-    successful apply or destroy clears it, because the plan no longer matches
-    the state. A drift check sets or clears drift.
+    successful apply or destroy, or a later plan with no changes, clears it.
+    A drift check sets or clears drift. Plans older than the last apply
+    already recorded, and plans whose changes are unknown, leave both alone.
     """
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
@@ -60,6 +62,9 @@ def merge_status(
     status.updated_at = now
     status.updated_by_run = run.run_id
     intent = run.provenance.intent
+    # a plan made before the last apply already known no longer describes the
+    # state; it must not come back as pending or as drift
+    applied_before = status.last_apply.at if status.last_apply else None
 
     for phase in result.phases.values():
         if phase.status == "skipped":
@@ -71,15 +76,20 @@ def merge_status(
         if phase.action == "plan":
             if _newer(event, status.last_plan):
                 status.last_plan = event
-            if phase.status != "succeeded":
+            if phase.status != "succeeded" or result.changes is None:
                 continue
-            changed = bool(result.changes and result.changes.total)
+            if applied_before is not None and event.at < applied_before:
+                continue
+            changed = bool(result.changes.total)
             if intent == "drift":
                 if _newer(event, status.drift):
                     status.drift = event if changed else None
+            if not changed:
+                # the state matches the config, so an older pending plan is moot
+                if status.pending_plan and event.at >= status.pending_plan.at:
+                    status.pending_plan = None
             elif (
-                changed
-                and intent != "preview"
+                intent not in ("preview", "drift")
                 and run.provenance.plan_storage == "backend"
                 and _newer(event, status.pending_plan)
             ):

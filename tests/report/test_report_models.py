@@ -113,6 +113,7 @@ def _run(run_id="r1", at=T0, intent=None, storage="backend", **phases):
             reason="boom" if status == "failed" else None,
         )
     run = RunRecord(
+        record_id=f"rec-{run_id}",
         run_id=run_id,
         deployment="dep",
         started_at=at,
@@ -206,6 +207,65 @@ class TestMergeStatus:
         )
         assert merge_status(status, run2, result2, T0).drift is None
 
+    def test_late_plan_does_not_return_after_apply(self):
+        """A run that planned before another run applied finishes last."""
+        applied, applied_result = _run(
+            "b",
+            T0 + timedelta(hours=1),
+            plan="succeeded",
+            apply="succeeded",
+            changes=CHANGES,
+        )
+        status = merge_status(None, applied, applied_result, T0)
+        late, late_result = _run(
+            "a", T0, intent="drift", plan="succeeded", changes=CHANGES
+        )
+        status = merge_status(status, late, late_result, T0 + timedelta(hours=2))
+        assert status.pending_plan is None
+        assert status.drift is None
+        late, late_result = _run("a2", T0, plan="succeeded", changes=CHANGES)
+        assert merge_status(status, late, late_result, T0).pending_plan is None
+
+    def test_no_change_plan_clears_older_pending(self):
+        run, result = _run(plan="succeeded", changes=CHANGES)
+        status = merge_status(None, run, result, T0)
+        later, later_result = _run(
+            "r2",
+            T0 + timedelta(hours=1),
+            intent="preview",
+            storage="local",
+            plan="succeeded",
+            changes=ChangeSummary(),
+        )
+        assert merge_status(status, later, later_result, T0).pending_plan is None
+
+    def test_unknown_changes_leave_pending_and_drift(self):
+        run, result = _run(intent="drift", plan="succeeded", changes=CHANGES)
+        status = merge_status(None, run, result, T0)
+        later, later_result = _run(
+            "r2",
+            T0 + timedelta(hours=1),
+            intent="drift",
+            plan="succeeded",
+            changes=None,
+        )
+        status = merge_status(status, later, later_result, T0)
+        assert status.drift.run_id == "r1"
+        assert status.last_plan.run_id == "r2"
+
+    def test_unknown_fields_survive(self):
+        run, result = _run(plan="succeeded", changes=CHANGES)
+        data = json.loads(
+            merge_status(None, run, result, T0).model_dump_json(by_alias=True)
+        )
+        data["future_field"] = {"x": 1}
+        status = DefinitionStatus.model_validate(data)
+        later, later_result = _run("r2", T0 + timedelta(hours=1), plan="succeeded")
+        merged = merge_status(status, later, later_result, T0)
+        assert json.loads(merged.model_dump_json(by_alias=True))["future_field"] == {
+            "x": 1
+        }
+
     def test_older_run_does_not_move_status_back(self):
         newer, newer_result = _run(
             "new", T0 + timedelta(hours=1), plan="succeeded", changes=CHANGES
@@ -230,6 +290,7 @@ class TestMergeStatus:
         assert phase.started_at.tzinfo is not None
         assert (
             RunRecord(
+                record_id="x",
                 run_id="x",
                 deployment="d",
                 started_at=datetime(2026, 1, 1),

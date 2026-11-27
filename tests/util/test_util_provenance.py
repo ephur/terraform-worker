@@ -56,6 +56,10 @@ class TestRepositoryState:
         assert state.dirty is True
         assert state.on_tracked_ref is False
 
+    def test_untracked_files_are_dirty(self, repo):
+        (repo / "new.tf").write_text("")
+        assert repository_state(repo, "main").dirty is True
+
     def test_no_remote_default(self, repo):
         state = repository_state(repo)
         assert state.tracked_ref is None
@@ -158,6 +162,50 @@ class TestModuleSources:
         assert found["nogit"].kind == "git"
         assert found["nogit"].sha is None
         assert "" not in found
+
+    def test_git_subdirectory_source_uses_clone_root(self, tmp_path):
+        target = tmp_path / "def"
+        write_manifest(
+            target,
+            [
+                {
+                    "Key": "net",
+                    "Source": "git::https://example.com/mods.git//modules/net?ref=v2",
+                    "Dir": ".terraform/modules/net/modules/net",
+                },
+                {
+                    "Key": "iam",
+                    "Source": "terraform-aws-modules/iam/aws//modules/iam-user",
+                    "Version": "5.0.0",
+                    "Dir": ".terraform/modules/iam/modules/iam-user",
+                },
+            ],
+        )
+        clone = target / ".terraform" / "modules" / "net"
+        (clone / "modules" / "net").mkdir(parents=True)
+        git(clone, "init", "-q")
+        git(clone, "commit", "-q", "--allow-empty", "-m", "m")
+        found = {m.key: m for m in module_sources(target)}
+        assert len(found["net"].sha) == 40
+        assert found["net"].ref == "v2"
+        assert found["iam"].kind == "registry"
+        assert found["iam"].ref == "5.0.0"
+
+    def test_git_module_without_clone_has_no_sha(self, tmp_path, repo):
+        """Never report the sha of a checkout that encloses the definition."""
+        target = repo / "def"
+        write_manifest(
+            target,
+            [
+                {
+                    "Key": "m",
+                    "Source": "git::https://x/m.git",
+                    "Dir": ".terraform/modules/m",
+                }
+            ],
+        )
+        (target / ".terraform" / "modules" / "m").mkdir()
+        assert module_sources(target)[0].sha is None
 
     def test_unreadable_manifest(self, tmp_path):
         path = tmp_path / ".terraform" / "modules"

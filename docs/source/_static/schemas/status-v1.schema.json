@@ -1,6 +1,7 @@
 {
   "$defs": {
     "BackendLocation": {
+      "additionalProperties": true,
       "description": "Where a definition's state lives. A state is identified by this, not by name.",
       "properties": {
         "account_id": {
@@ -56,6 +57,7 @@
       "type": "object"
     },
     "ChangeSummary": {
+      "additionalProperties": true,
       "description": "Counts as terraform prints them, plus the address and actions of each change.",
       "properties": {
         "add": {
@@ -90,6 +92,7 @@
       "type": "object"
     },
     "ResourceChange": {
+      "additionalProperties": true,
       "properties": {
         "actions": {
           "items": {
@@ -116,6 +119,7 @@
       "type": "object"
     },
     "RunEvent": {
+      "additionalProperties": true,
       "description": "One phase of one run, as it appears in a status snapshot.",
       "properties": {
         "action": {
@@ -228,6 +232,18 @@
           "default": null,
           "title": "Reason"
         },
+        "record_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Record Id"
+        },
         "run_id": {
           "title": "Run Id",
           "type": "string"
@@ -260,6 +276,7 @@
     }
   },
   "$id": "tfworker.status/v1",
+  "additionalProperties": true,
   "description": "The latest known state of one definition, rewritten by each run.",
   "properties": {
     "definition": {
