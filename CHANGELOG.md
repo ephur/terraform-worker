@@ -1,3 +1,12 @@
+# Unreleased
+
+## Breaking changes
+- Removed GCP support (#191). The worker is only used against AWS, and the GCP code had no users while still needing maintenance, tests and the `google-cloud-storage` dependency.
+  - The `gcs` backend is gone; `--backend` now only accepts `s3`.
+  - The Google authenticator and the special-cased `google` / `google-beta` providers are gone. Those providers can still be configured in `providers`; they are now handled like any other provider by the generic provider, without the worker injecting credentials, region or project.
+  - The `--gcp-region`, `--gcp-creds-path` and `--gcp-project` root options (and the `GCP_REGION`, `GCP_CREDS_PATH`, `GCP_PROJECT` environment variables) were removed.
+  - `google-cloud-storage` is no longer a dependency.
+
 # Changes 0.12.0 -> 0.13.0 (2024-06...)
 
 ## Notes

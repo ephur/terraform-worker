@@ -22,7 +22,7 @@ event might be named: ``post_apply.py`` and might include ``#!/usr/bin/env pytho
 
       .
       ├── README.md
-      ├── gcs.tf
+      ├── main.tf
       ├── hooks
       │  └── post_apply.py
       ├── inputs.tf

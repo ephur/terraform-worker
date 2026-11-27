@@ -9,12 +9,11 @@ from tfworker.exceptions import FrozenInstanceError, UnknownAuthenticator
 
 from .aws import AWSAuthenticator  # noqa
 from .base import BaseAuthenticator  # noqa
-from .google import GoogleAuthenticator, GoogleBetaAuthenticator  # noqa
 
 if TYPE_CHECKING:
     from tfworker.cli_options import CLIOptionsRoot  # pragma: no cover  # noqa
 
-ALL = [AWSAuthenticator, GoogleAuthenticator, GoogleBetaAuthenticator]
+ALL = [AWSAuthenticator]
 
 
 class AuthenticatorsCollection(collections.abc.Mapping):
