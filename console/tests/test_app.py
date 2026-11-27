@@ -39,3 +39,13 @@ def test_serve_uses_settings(monkeypatch):
         port=8081,
         reload=False,
     )
+
+
+def test_version_option():
+    from click.testing import CliRunner
+
+    from tfworker_console import cli, version
+
+    result = CliRunner().invoke(cli.main, ["--version"])
+    assert result.exit_code == 0
+    assert version() in result.output

@@ -85,6 +85,7 @@ source = "vcs"
 tag-pattern = '^v(?P<version>\d+\.\d+\.\d+.*)$'
 
 [tool.hatch.version.raw-options]
+dist_name = "terraform-worker"
 git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--match", "v[0-9]*"]
 # Used only when building outside a git checkout (e.g. from a tarball).
 fallback_version = "0.12.0"
@@ -93,7 +94,7 @@ fallback_version = "0.12.0"
 packages = ["tfworker"]
 
 [tool.hatch.build.targets.sdist]
-include = ["tfworker", "tests", "docs", "README.md", "LICENSE", "CHANGELOG.md"]
+include = ["/tfworker", "/tests", "/docs", "/README.md", "/LICENSE", "/CHANGELOG.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

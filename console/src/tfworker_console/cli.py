@@ -1,10 +1,12 @@
 import click
 import uvicorn
 
+from . import version
 from .settings import ConsoleSettings
 
 
 @click.group()
+@click.version_option(version(), prog_name="tfworker-console")
 def main() -> None:
     """Run the terraform-worker console."""
 

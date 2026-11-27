@@ -1,14 +1,25 @@
 name: Console
 
 on:
+  push:
+    branches:
+      - master
+    paths:
+      - "console/**"
+      - "tfworker/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".dockerignore"
+      - ".github/workflows/console.yml"
   pull_request:
     branches:
       - master
     paths:
       - "console/**"
-      - "tfworker/report/**"
+      - "tfworker/**"
       - "pyproject.toml"
       - "uv.lock"
+      - ".dockerignore"
       - ".github/workflows/console.yml"
 
 jobs:
@@ -58,4 +69,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build the console image
-        run: docker build -f console/Dockerfile -t tfworker-console:ci .
+        run: docker build -f console/Dockerfile --build-arg CONSOLE_VERSION=0.0.0+ci -t tfworker-console:ci .
+
+      - name: Check the image runs and carries the version
+        run: |
+          docker run --rm tfworker-console:ci --version | tee version.txt
+          grep -q "0.0.0+ci" version.txt

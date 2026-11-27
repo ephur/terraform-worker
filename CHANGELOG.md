@@ -55,7 +55,7 @@ These landed after 0.13.0 and are summarized here; see the linked PRs and the do
 - **Logging**: `--log-format JSON` for structured logs, and cleaner subprocess output.
 
 ## Tooling
-- The management console (#218) starts as its own uv workspace package, `tfworker-console`, under `console/` (#233). It depends on the worker only for `tfworker.report`, so installing `terraform-worker` never pulls in web dependencies. It has its own Dockerfile (`console/Dockerfile`, built from the repository root), a CI workflow limited to `console/` and `tfworker/report/`, and its own `console-v*` release tags. Root pytest now only collects `tests/`.
+- The management console (#218) starts as its own uv workspace package, `tfworker-console`, under `console/` (#233). It depends on the worker only for `tfworker.report`, so installing `terraform-worker` never pulls in web dependencies. It has its own Dockerfile (`console/Dockerfile`, built from the repository root), a CI workflow, and its own `console-v*` release tags; it depends on the worker from the same commit. Root pytest now only collects `tests/`.
 - Coverage gate raised to 94% (#214).
 - Packaging and dev tooling moved from Poetry to uv; the version now comes from git tags via hatch-vcs (#202).
 - CI runs lint (black, isort, flake8) and tests on Python 3.11 to 3.14 (#157), and builds and smoke-tests the Docker image (#212).

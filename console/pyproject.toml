@@ -5,6 +5,7 @@ description = "A console for terraform-worker runs, plans and locks"
 authors = [{ name = "Richard Maynard", email = "richard.maynard@gmail.com" }]
 readme = "README.md"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "terraform-worker",
@@ -43,11 +44,15 @@ tag-pattern = '^console-v(?P<version>\d+\.\d+\.\d+.*)$'
 
 [tool.hatch.version.raw-options]
 root = ".."
+dist_name = "tfworker-console"
 git_describe_command = ["git", "describe", "--dirty", "--tags", "--long", "--match", "console-v[0-9]*"]
 fallback_version = "0.1.0"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tfworker_console"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/README.md", "/LICENSE"]
 
 [tool.pytest.ini_options]
 addopts = "--capture=sys --cov=tfworker_console --cov-report="

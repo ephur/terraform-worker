@@ -40,7 +40,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     if [ -n "${TFWORKER_VERSION}" ]; then \
         export SETUPTOOLS_SCM_PRETEND_VERSION_FOR_TERRAFORM_WORKER="${TFWORKER_VERSION}"; \
     fi; \
-    uv sync --locked --no-default-groups --package tfworker-console --no-editable
+    uv sync --locked --no-default-groups --package tfworker-console --no-editable \
+        --reinstall-package tfworker-console --reinstall-package terraform-worker
 
 FROM python:${PYTHON_VERSION}-slim
 
@@ -52,7 +53,7 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     TFWORKER_CONSOLE_HOST=0.0.0.0 \
     TFWORKER_CONSOLE_PORT=8000
 
-USER console
+USER 10001
 EXPOSE 8000
 ENTRYPOINT ["tfworker-console"]
 CMD ["serve"]
