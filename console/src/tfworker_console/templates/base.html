@@ -1,0 +1,46 @@
+{% if partial %}{% block content %}{% endblock %}{% else %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}tfworker console{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12" crossorigin="anonymous"></script>
+  <style>
+    :root { --fg: #1d2330; --muted: #5d6677; --line: #dde1e8; --bg: #fff; --accent: #2f5bd3;
+            --failing: #b42318; --drifted: #b54708; --pending: #175cd3; --locked: #6941c6; --ok: #067647; }
+    @media (prefers-color-scheme: dark) {
+      :root { --fg: #e6e9ef; --muted: #9aa3b2; --line: #2c3240; --bg: #14171f; --accent: #7aa2ff; } }
+    body { font: 14px/1.45 system-ui, sans-serif; color: var(--fg); background: var(--bg); margin: 0; }
+    header { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 10px 16px;
+             border-bottom: 1px solid var(--line); }
+    header a { color: var(--fg); text-decoration: none; } header a:hover { color: var(--accent); }
+    header strong { margin-right: 8px; }
+    main { padding: 16px; max-width: 1200px; }
+    form.picker { margin-left: auto; display: flex; gap: 8px; }
+    table { border-collapse: collapse; width: 100%; } th, td { text-align: left; padding: 6px 8px;
+      border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; } .muted { color: var(--muted); }
+    .health { font-weight: 600; } .h-failing { color: var(--failing); } .h-drifted { color: var(--drifted); }
+    .h-pending { color: var(--pending); } .h-locked, .h-stale { color: var(--locked); } .h-ok, .h-live { color: var(--ok); }
+    .counts span { margin-right: 16px; } code { font-size: 12px; }
+  </style>
+</head>
+<body>
+<header>
+  <strong>tfworker console</strong>
+  <a href="/">Fleet</a><a href="/deployments">Deployments</a><a href="/plans">Plans</a>
+  <a href="/locks">Locks</a><a href="/runs">Runs</a><a href="/tracking/local-modules">Local modules</a>
+  <form class="picker" hx-get="" hx-target="main" hx-push-url="true" hx-trigger="change">
+    <select name="store" aria-label="Store">
+      <option value="">All stores</option>
+      {% for store in stores %}<option {% if store in scope.stores %}selected{% endif %}>{{ store }}</option>{% endfor %}
+    </select>
+    <select name="deployment" aria-label="Deployment">
+      <option value="">All deployments</option>
+      {% for name in all_deployments %}<option {% if name in scope.deployments %}selected{% endif %}>{{ name }}</option>{% endfor %}
+    </select>
+  </form>
+</header>
+<main>{{ self.content() }}</main>
+</body>
+</html>{% endif %}

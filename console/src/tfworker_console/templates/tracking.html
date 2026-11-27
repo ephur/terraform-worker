@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Local modules · tfworker console{% endblock %}
+{% block content %}
+<h1>Applies from local module paths</h1>
+<p class="muted">The weekly share of definition applies that used a module from a local path instead of a reviewed source. It is a trend to watch, not an alert.</p>
+<table>
+  <tr><th>Week</th><th>Applies</th><th>From local paths</th><th>Share</th></tr>
+  {% for w in weeks %}
+  <tr><td>{{ w.week }}</td><td>{{ w.applies }}</td><td>{{ w.local }}</td><td>{{ '%.0f'|format(w.share * 100) }}%</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}
