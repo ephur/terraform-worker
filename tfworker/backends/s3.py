@@ -490,8 +490,8 @@ class S3Backend(BaseBackend):
 
     def _list_bucket_definitions(self) -> set:
         """
-        _get_bucket_files returns a set of the keys in the bucket that correspond
-        to all the definitions in a deployment, the function is poorly named.
+        Return the names of the definitions that have a state file in the
+        deployment's prefix, see _definition_from_state_key.
         """
         bucket_files = set()
         root_options = click.get_current_context().obj.root_options

@@ -2,6 +2,8 @@ import threading
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Dict, Union
 
+import click
+
 import tfworker.util.log as log
 from tfworker.exceptions import FrozenInstanceError, HandlerError, UnknownHandler
 
@@ -256,8 +258,10 @@ class HandlersCollection(Mapping):
         A skip is informational, so a handler that fails to record it is logged
         and never stops the run.
         """
-        from tfworker.custom_types import TerraformStage
+        from tfworker.custom_types import TerraformAction, TerraformStage
 
+        if action not in TerraformAction:
+            raise HandlerError(f"Invalid action {action}")
         for name, handler in self._ordered_handlers(action, TerraformStage.PRE):
             try:
                 handler.skip(
@@ -266,6 +270,8 @@ class HandlersCollection(Mapping):
                     definition=definition,
                     reason=reason,
                 )
+            except click.exceptions.Exit:
+                raise
             except Exception as e:
                 log.error(
                     f"handler {name} failed to record the skipped {action.value} "

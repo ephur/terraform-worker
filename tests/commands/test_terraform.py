@@ -2203,3 +2203,127 @@ class TestSkipNotifications:
         cmd._mark_init_skipped([])
         cmd._mark_apply_skipped([], TerraformAction.APPLY)
         cmd.app_state.handlers.exec_skip.assert_not_called()
+
+
+class TestSkipNotificationsAcrossPhases:
+    """Each definition is reported once per action, and never alongside an apply."""
+
+    @staticmethod
+    def _skips(cmd):
+        return [
+            (c.kwargs["definition"].name, c.kwargs["action"], c.kwargs["reason"])
+            for c in cmd.app_state.handlers.exec_skip.call_args_list
+        ]
+
+    def test_uninitialized_definition_in_apply_only_run_is_reported_once(
+        self, tmp_path, mocker
+    ):
+        cmd = make_command(tmp_path, apply=True, backend_plans=True)
+        cmd.app_state.definitions["def"].init_failed = True
+        plan_cls = mocker.patch("tfworker.definitions.plan.DefinitionPlan")
+        plan_cls.return_value.needs_plan.return_value = (True, "no plan file")
+
+        cmd.terraform_plan()
+        cmd.terraform_apply_or_destroy()
+
+        assert self._skips(cmd) == [("def", TerraformAction.APPLY, "not initialized")]
+        cmd.app_state.handlers.get_available_plan.assert_not_called()
+
+    def test_fetch_halt_does_not_skip_a_definition_that_still_applies(
+        self, tmp_path, mocker
+    ):
+        cmd = make_command(
+            tmp_path,
+            apply=True,
+            backend_plans=True,
+            plan_failures=True,
+            fail_on_plan_error=False,
+        )
+        defs = cmd.app_state.definitions
+        defs["local"] = Definition(name="local", path="local")
+        defs["remote"] = Definition(name="remote", path="remote")
+        local_plan = tmp_path / "local.tfplan"
+        local_plan.touch()
+
+        def needs_plan(definition):
+            if definition.name == "local":
+                definition.plan_file = str(local_plan)
+                return (False, "plan file exists")
+            return (False, "plan available from handler")
+
+        plan_cls = mocker.patch("tfworker.definitions.plan.DefinitionPlan")
+        plan_cls.return_value.needs_plan.side_effect = needs_plan
+        cmd.app_state.handlers.get_available_plan.side_effect = HandlerError("boom")
+        ran = mocker.patch.object(
+            cmd, "_exec_terraform_action", return_value=TerraformResult(0, b"", b"")
+        )
+
+        cmd.terraform_plan()
+        cmd.terraform_apply_or_destroy()
+
+        assert self._skips(cmd) == [
+            ("remote", TerraformAction.APPLY, "apply halted by an earlier failure")
+        ]
+        assert [c.kwargs["name"] for c in ran.call_args_list] == ["local"]
+
+    def test_unusable_saved_plan_is_a_skip(self, tmp_path, mocker):
+        cmd = make_command(tmp_path, apply=True, backend_plans=True)
+        plan_cls = mocker.patch("tfworker.definitions.plan.DefinitionPlan")
+        plan_cls.return_value.needs_plan.return_value = (False, "from handler")
+        cmd.app_state.handlers.get_available_plan.return_value = False
+
+        cmd.terraform_plan()
+        cmd.terraform_apply_or_destroy()
+
+        assert self._skips(cmd) == [
+            ("def", TerraformAction.APPLY, "saved plan could not be used")
+        ]
+
+    def test_always_apply_halt_is_reported_once(self, tmp_path, mocker):
+        cmd = make_command(tmp_path, apply=True)
+        definition = cmd.app_state.definitions["def"]
+        definition.needs_apply = True
+        plan_file = tmp_path / "def.tfplan"
+        plan_file.touch()
+        definition.plan_file = str(plan_file)
+        cmd._apply_halted = True
+
+        cmd._always_apply("def")
+        cmd.terraform_apply_or_destroy()
+
+        assert self._skips(cmd) == [
+            ("def", TerraformAction.APPLY, "apply halted by an earlier failure")
+        ]
+
+
+class TestSynthesizedResultTiming:
+    def test_synthesized_result_is_stamped(self):
+        result = TerraformResult.synthesized(2, "pre-plan hook failed")
+        assert result.exit_code == 2
+        assert result.stderr == b"pre-plan hook failed"
+        assert result.started_at is not None
+        assert result.finished_at == result.started_at
+        assert result.duration == 0
+
+    def test_hook_failure_result_is_stamped(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        result = cmd._hook_failure(
+            "def", TerraformAction.PLAN, TerraformStage.PRE, exit_on_error=False
+        )
+        assert result.started_at is not None
+
+    def test_init_failure_result_is_stamped(self, tmp_path):
+        cmd = make_command(tmp_path)
+        cmd._record_init_failure("def", "copy failed", dispatch_error_stage=True)
+        result = cmd.app_state.handlers.exec_handlers.call_args.kwargs["result"]
+        assert result.started_at is not None
+
+    def test_duration_prefers_monotonic_elapsed(self):
+        from datetime import datetime, timedelta, timezone
+
+        start = datetime(2026, 11, 27, tzinfo=timezone.utc)
+        result = TerraformResult(
+            0, b"", b"", started_at=start, finished_at=start - timedelta(seconds=5)
+        )
+        result.elapsed = 12.5
+        assert result.duration == 12.5

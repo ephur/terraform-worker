@@ -27,6 +27,11 @@ class TestDefinitionsCollection:
         with pytest.raises(ValueError, match="reserved"):
             DefinitionsCollection({"_tfworker": {"path": "path1"}})
 
+    def test_setitem_rejects_leading_underscore(self):
+        collection = DefinitionsCollection({"def1": {"path": "path1"}})
+        with pytest.raises(ValueError, match="reserved"):
+            collection["_tfworker"] = collection["def1"]
+
     def test_init_allows_underscore_inside_definition_name(self):
         collection = DefinitionsCollection({"def_1": {"path": "path1"}})
         assert "def_1" in collection

@@ -43,12 +43,7 @@ class DefinitionsCollection(Mapping):
                     raise ValueError(
                         f"definition {definition} contains a comma, and commas are not allowed, aborting"
                     )
-                # names starting with an underscore are reserved for worker
-                # metadata stored beside state, such as <prefix>/_tfworker/
-                if definition.startswith("_"):
-                    raise ValueError(
-                        f"definition {definition} starts with an underscore, which is reserved, aborting"
-                    )
+                _check_reserved_name(definition)
                 # validation the definition regardless of inclusion
                 try:
                     log.trace(f"validating definition: {definition}")
@@ -78,6 +73,7 @@ class DefinitionsCollection(Mapping):
     def __setitem__(self, key: str, value: "Definition"):
         if self._frozen:
             raise FrozenInstanceError("Cannot modify a frozen instance.")
+        _check_reserved_name(key)
         self._definitions[key] = value
 
     def freeze(self):
@@ -94,3 +90,14 @@ class DefinitionsCollection(Mapping):
         cls, _, handler: GetCoreSchemaHandler
     ) -> CoreSchema:
         return core_schema.no_info_after_validator_function(cls, handler(dict))
+
+
+def _check_reserved_name(name: str) -> None:
+    """
+    Reject definition names starting with an underscore; they are reserved for
+    worker metadata stored beside state, such as <prefix>/_tfworker/.
+    """
+    if name.startswith("_"):
+        raise ValueError(
+            f"definition {name} starts with an underscore, which is reserved, aborting"
+        )
