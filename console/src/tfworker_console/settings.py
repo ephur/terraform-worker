@@ -11,3 +11,7 @@ class ConsoleSettings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
     database_url: Optional[str] = None
+    # a YAML file listing the backend stores to read (see tfworker_console.stores)
+    stores_file: Optional[str] = None
+    # seconds between scheduled reconciles while serving; 0 turns them off
+    reconcile_interval: float = 300.0

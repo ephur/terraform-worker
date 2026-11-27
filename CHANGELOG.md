@@ -56,6 +56,7 @@ These landed after 0.13.0 and are summarized here; see the linked PRs and the do
 
 ## Tooling
 - The management console (#218) starts as its own uv workspace package, `tfworker-console`, under `console/` (#233). It depends on the worker only for `tfworker.report`, so installing `terraform-worker` never pulls in web dependencies. It has its own Dockerfile (`console/Dockerfile`, built from the repository root), a CI workflow, and its own `console-v*` release tags; it depends on the worker from the same commit. Root pytest now only collects `tests/`.
+- The console projects the worker's stores into Postgres (#234). Stores (bucket, region, prefix template and an assumed role, profile or ambient credentials) are listed in a YAML file. `tfworker-console reconcile` discovers deployments from the prefix template and their run records, projects run records, status, plan manifests and held locks using ETags to skip unchanged objects, and never reads state files. It also runs on a schedule while serving. `db upgrade` applies the Alembic migrations, and `reconcile --rebuild` rebuilds the projection from empty.
 - Coverage gate raised to 94% (#214).
 - Packaging and dev tooling moved from Poetry to uv; the version now comes from git tags via hatch-vcs (#202).
 - CI runs lint (black, isort, flake8) and tests on Python 3.11 to 3.14 (#157), and builds and smoke-tests the Docker image (#212).
