@@ -36,7 +36,7 @@ class ReconcileScheduler:
                     f"{summary.removed} removed, {summary.locks} locks held"
                 )
         except Exception as e:  # the schedule must keep running
-            log.error(f"scheduled reconcile failed: {e}")
+            log.exception(f"scheduled reconcile failed: {e}")
 
     def _loop(self) -> None:
         while True:

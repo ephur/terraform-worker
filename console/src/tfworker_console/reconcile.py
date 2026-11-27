@@ -109,7 +109,7 @@ class Reconciler:
             try:
                 summaries.append(self.reconcile(name))
             except Exception as e:  # the next store still reconciles
-                log.error(f"unable to record the reconcile of store {name}: {e}")
+                log.exception(f"unable to record the reconcile of store {name}: {e}")
                 summaries.append(StoreSummary(store=name, errors=[str(e)]))
         return summaries
 
@@ -137,7 +137,7 @@ class Reconciler:
                 row.reconciled_at = self.now()
                 session.commit()
             except Exception as e:  # the next store still reconciles
-                log.error(f"unable to reconcile store {name}: {e}")
+                log.exception(f"unable to reconcile store {name}: {e}")
                 session.rollback()
                 error = f"{e.__class__.__name__}: {e}"
                 summary.errors.append(error)
