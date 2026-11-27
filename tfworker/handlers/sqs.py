@@ -31,14 +31,17 @@ EventBridge bus::
         options:
           format: cloudevents
           queues:
-            https://sqs.us-east-1.amazonaws.com/123456789012/all-events: {}
+            https://sqs.us-east-1.amazonaws.com/123456789012/all-events:
+              types: ["*"]
             https://sqs.us-east-1.amazonaws.com/123456789012/plans:
               types: [io.tfworker.plan.*]
           event_bus: tfworker
           types: [io.tfworker.run.v1, io.tfworker.status.v1]
 
 In the `cloudevents` format, `types` filters events by type (shell-style
-patterns), and the per-queue `actions`, `stages` and `results` do not apply.
+patterns). The top-level `types` applies to the bus and to every queue
+without its own `types`. The per-queue `actions`, `stages` and `results` do
+not apply.
 """
 
 import json
@@ -47,6 +50,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
 import click
+from botocore.config import Config
 from pydantic import BaseModel, Field, model_validator
 
 import tfworker.report.events as events
@@ -62,11 +66,14 @@ if TYPE_CHECKING:
     from tfworker.definitions.model import Definition
 
 
+CLOUDEVENTS_CONTENT_TYPE = "application/cloudevents+json"
+
+
 class QueueRule(BaseModel):
     actions: List[TerraformAction] | None = None
     stages: List[TerraformStage] | None = None
     results: List[int] | None = None
-    types: List[str] | None = None
+    types: List[str] | None = Field(default=None, min_length=1)
 
 
 class SQSConfig(BaseModel):
@@ -84,6 +91,7 @@ class SQSConfig(BaseModel):
     )
     types: List[str] | None = Field(
         default=None,
+        min_length=1,
         description="CloudEvents types to publish (shell-style patterns); all when unset",
     )
     event_bus: Optional[str] = Field(
@@ -96,9 +104,7 @@ class SQSConfig(BaseModel):
     @model_validator(mode="after")
     def _targets(self) -> "SQSConfig":
         if self.format == "legacy":
-            if not self.queues:
-                raise ValueError("queues are required")
-            if self.event_bus or self.types:
+            if self.event_bus is not None or self.types is not None:
                 raise ValueError("event_bus and types need format: cloudevents")
         elif not self.queues and not self.event_bus:
             raise ValueError("cloudevents needs queues, an event_bus, or both")
@@ -143,7 +149,7 @@ class SQSHandler(BaseHandler):
             aws = self.app_state.authenticators.get("aws")
             if aws is None:
                 raise ValueError("AWS authenticator not available")
-            self._sqs_client = aws.session.client("sqs")
+            self._sqs_client = aws.session.client("sqs", config=self._client_config())
         return self._sqs_client
 
     @property
@@ -152,8 +158,20 @@ class SQSHandler(BaseHandler):
             aws = self.app_state.authenticators.get("aws")
             if aws is None:
                 raise ValueError("AWS authenticator not available")
-            self._events_client = aws.session.client("events")
+            self._events_client = aws.session.client(
+                "events", config=self._client_config()
+            )
         return self._events_client
+
+    def _client_config(self) -> Optional[Config]:
+        """Events are sent inline with the run, so a slow endpoint must give up quickly."""
+        if self.config.format != "cloudevents":
+            return None
+        return Config(
+            connect_timeout=5,
+            read_timeout=10,
+            retries={"total_max_attempts": 2, "mode": "standard"},
+        )
 
     def is_ready(self) -> bool:
         if not self._ready:
@@ -189,7 +207,16 @@ class SQSHandler(BaseHandler):
         body = json.dumps(event)
         for queue in self._event_queues(event["type"]):
             try:
-                self.sqs_client.send_message(QueueUrl=queue, MessageBody=body)
+                self.sqs_client.send_message(
+                    QueueUrl=queue,
+                    MessageBody=body,
+                    MessageAttributes={
+                        "content-type": {
+                            "DataType": "String",
+                            "StringValue": CLOUDEVENTS_CONTENT_TYPE,
+                        }
+                    },
+                )
             except Exception as e:
                 log.error(f"Failed to send {event['type']} event to {queue}: {e}")
         if self.config.event_bus and _matches(event["type"], self.config.types):

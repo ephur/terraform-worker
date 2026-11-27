@@ -21,7 +21,10 @@ class TestParseDuration:
     def test_valid(self, value, expected):
         assert parse_duration(value) == expected
 
-    @pytest.mark.parametrize("value", ["", "abc", "10x", "1h foo", True, -1, "-5"])
+    @pytest.mark.parametrize(
+        "value",
+        ["", "abc", "10x", "1h foo", True, -1, "-5", "nan", "inf", float("inf")],
+    )
     def test_invalid(self, value):
         with pytest.raises(ValueError):
             parse_duration(value)

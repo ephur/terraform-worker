@@ -147,6 +147,16 @@ class TestInitFunctions:
         ah.assert_called_with(parsed)
         hc.assert_called_with(parsed)
 
+    def test_init_handlers_drops_old_event_sinks(self, mocker):
+        import tfworker.report.events as events
+
+        events.subscribe(mock.Mock())
+        mocker.patch.object(b, "_parse_handlers", return_value={})
+        mocker.patch.object(b, "_add_universal_handlers")
+        mocker.patch("tfworker.handlers.collection.HandlersCollection")
+        b._init_handlers({})
+        assert events.subscribed() is False
+
     def test_validate_handler_config_success(self, mocker):
         m = mock.Mock()
         m.model_validate.return_value = "cfg"

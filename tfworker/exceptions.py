@@ -102,7 +102,8 @@ class ReportConflictError(BackendError):
 
 class DefinitionRefusedError(HandlerError):
     """
-    A handler refused to let terraform run for one definition.
+    Terraform could not run for one definition: a handler refused it, or its
+    state lock could not be acquired.
 
     The phase treats it as that definition's failure rather than ending the
     run, unless `fail_run` is set.

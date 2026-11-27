@@ -261,8 +261,12 @@ def _init_handlers(handlers_config: Dict[str, Any]) -> "HandlersCollection":
         HandlersCollection: The initialized handlers collection.
 
     """
+    import tfworker.report.events as events
     from tfworker.handlers.collection import HandlersCollection
 
+    # handlers subscribe to report events as they are built; drop any left
+    # from an earlier command in this process
+    events.reset()
     parsed_handlers = _parse_handlers(handlers_config)
     _add_universal_handlers(parsed_handlers)
 
