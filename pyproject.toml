@@ -91,7 +91,7 @@ fallback_version = "0.12.0"
 packages = ["tfworker"]
 
 [tool.hatch.build.targets.sdist]
-include = ["tfworker", "tests", "README.md", "LICENSE", "CHANGELOG.md"]
+include = ["tfworker", "tests", "docs", "README.md", "LICENSE", "CHANGELOG.md"]
 
 [tool.pytest.ini_options]
 addopts = "--capture=sys --cov=tfworker --cov-report= -m 'not performance'"
