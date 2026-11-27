@@ -86,9 +86,10 @@ class TestAssignment:
 class TestConfig:
     def test_durations(self):
         assert groups().group("Production").plan_ttl == 3600
-        assert groups({"groups": [{"name": "A", "plan_ttl": None}]}).group(
-            "A"
-        ).plan_ttl is None
+        assert (
+            groups({"groups": [{"name": "A", "plan_ttl": None}]}).group("A").plan_ttl
+            is None
+        )
         assert (
             groups({"groups": [{"name": "A", "plan_ttl": 90}]}).group("A").plan_ttl
             == 90
@@ -306,9 +307,11 @@ class TestViews:
         assert rows[0]["plan_ttl"] == 3600 and rows[0]["counts"]["failing"] == 1
         assert rows[1]["force_unlock"] == "operators"
 
-    def test_groups_view_ignores_a_group_scope(self, client):
+    def test_a_group_scope_lists_only_those_groups(self, client):
         rows = client.get("/api/v1/groups?group=Sandbox").json()
-        assert rows[0]["deployments"] == ["prod/alpha", "prod/beta-us"]
+        assert [(g["name"], g["deployments"]) for g in rows] == [
+            ("Sandbox", ["dev/sandbox"])
+        ]
         page = client.get("/groups?store=prod").text
         assert 'href="/?group=Production&amp;store=prod"' in page
 

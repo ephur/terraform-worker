@@ -366,13 +366,15 @@ def deployments(
 
 def groups(session: Session, scope: Scope, now: datetime) -> List[GroupView]:
     """Every group in sort order with its policy, members and health counts."""
-    # every group is listed, so a group scope does not narrow this view
+    # a group scope picks which groups are listed; each lists all its members
     unscoped = Scope(scope.stores, scope.deployments, resolver=scope.resolver)
     members: Dict[str, List[DeploymentSummary]] = defaultdict(list)
     for summary in deployments(session, unscoped, now):
         members[summary.group].append(summary)
     result = []
     for name in scope.resolver.names:
+        if scope.groups and name not in scope.groups:
+            continue
         group = scope.resolver.group(name)
         counts = {health: 0 for health in HEALTH_ORDER}
         for summary in members[name]:
