@@ -9,11 +9,17 @@ following:
 
     % pip install --user terraform-worker
 
-If using `poetry <https://python-poetry.org/>`_:
+If using `uv <https://docs.astral.sh/uv/>`_:
 
 .. code-block:: bash
 
-    % poetry add terraform-worker
+    % uv tool install terraform-worker
+
+or, to add it to an existing uv project:
+
+.. code-block:: bash
+
+    % uv add terraform-worker
 
 Dependencies
 ------------

@@ -7,7 +7,7 @@ payloads the message APIs reject, so only real calls prove the layout.
 Skipped unless SLACK_LIVE_TEST=1, SLACK_BOT_TOKEN and SLACK_TEST_CHANNEL are
 set. Messages are posted to SLACK_TEST_CHANNEL and deleted after each test. Run with::
 
-    SLACK_LIVE_TEST=1 SLACK_BOT_TOKEN=xoxb-... SLACK_TEST_CHANNEL=C... poetry run pytest \
+    SLACK_LIVE_TEST=1 SLACK_BOT_TOKEN=xoxb-... SLACK_TEST_CHANNEL=C... uv run pytest \
         tests/handlers/test_slack_live.py -v
 """
 

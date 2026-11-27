@@ -1,36 +1,36 @@
 init:
-	poetry install
+	uv sync --no-default-groups
 
 init-dev:
-	poetry install --with dev
+	uv sync
 
 default: lint test
 
 lint: init-dev
-	poetry run flake8 --ignore E203,E501,W503 tfworker tests
+	uv run flake8 --ignore E203,E501,W503 tfworker tests
 
 format: init-dev
-	poetry run black tfworker tests
-	@poetry run seed-isort-config || echo "known_third_party setting changed. Please commit pyproject.toml"
-	poetry run isort tfworker tests
+	uv run black tfworker tests
+	@uv run seed-isort-config || echo "known_third_party setting changed. Please commit .isort.cfg"
+	uv run isort tfworker tests
 
 test: init-dev
-	poetry run pytest -p no:warnings --disable-socket
-	poetry run coverage report --fail-under=60 -m --skip-empty
+	uv run pytest -p no:warnings --disable-socket
+	uv run coverage report --fail-under=60 -m --skip-empty
 
 ci-test: init-dev
-	poetry run pytest --disable-socket --junitxml=reports/junit.xml
-	poetry run coverage xml -o reports/coverage.xml
+	uv run pytest --disable-socket --junitxml=reports/junit.xml
+	uv run coverage xml -o reports/coverage.xml
 
 dep-test: init-dev
-	poetry run pytest --disable-socket
-	poetry run coverage report --fail-under=60 -m --skip-empty
+	uv run pytest --disable-socket
+	uv run coverage report --fail-under=60 -m --skip-empty
 
 typecheck: init-dev
-	poetry run mypy -p tfworker
+	uv run mypy -p tfworker
 
 typecheck-report: init-dev
-	-poetry run mypy tfworker | tee mypy-report.txt
+	-uv run mypy tfworker | tee mypy-report.txt
 
 clean:
 	@echo "removing python temporary and build files "

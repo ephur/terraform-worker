@@ -79,23 +79,27 @@ To have the worker assume a role once the role and permissions are configured th
 
 ## Development
 
+The project uses [uv](https://docs.astral.sh/uv/) to manage its environment and dependencies.
+
 ```sh
- # virtualenv setup stuff... and then:
- % pip install poetry && make init
+ % make init-dev        # or: uv sync
+ % make lint test
 ```
+
+`uv sync` creates `.venv` and installs the dev dependency group by default. Run tools through `uv run`, for example `uv run pytest -k my_test`.
 
 ## Releasing
 
-Publishing a release to PYPI is done locally through poetry. Instructions on how to configure credentials for poetry can be found [here](https://python-poetry.org/docs/repositories/#configuring-credentials).
-
-Bump the version of the worker and commit the change:
+The package version comes from git tags (via `hatch-vcs`), so there is no version to bump in `pyproject.toml`. Tag the release commit and push the tag:
 ```sh
- % poetry version <semver_version_number>
+ % git tag v<semver_version_number>
+ % git push origin v<semver_version_number>
 ```
 
-Build and publish the package to PYPI:
+Build and publish the package to PYPI from the tagged commit. Instructions on configuring credentials for `uv publish` can be found [here](https://docs.astral.sh/uv/guides/package/#publishing-your-package).
 ```sh
- % poetry publish --build
+ % rm -rf dist && uv build
+ % uv publish
 ```
 
 ## Configuration
