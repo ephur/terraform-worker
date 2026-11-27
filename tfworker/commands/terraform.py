@@ -1128,6 +1128,11 @@ class TerraformCommand(BaseCommand):
             options = getattr(self.app_state.loaded_config, "locking", None)
             self._state_locker = None
             if options is not None:
+                if getattr(self.app_state.terraform_options, "lock_timeout", None):
+                    log.info(
+                        "--lock-timeout is ignored because locking is configured; "
+                        "terraform gets what is left of its wait instead"
+                    )
                 self._state_locker = StateLocker(
                     options,
                     self.app_state.backend,
@@ -1313,7 +1318,7 @@ class TerraformCommand(BaseCommand):
             return False
         log.error(
             f"state lock unavailable for definition {name}: terraform could not "
-            "acquire the lock before -lock-timeout ran out"
+            "acquire the lock"
         )
         return self.state_locker is not None and self.state_locker.fail_run
 
