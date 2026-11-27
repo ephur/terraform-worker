@@ -17,7 +17,7 @@ jobs:
     if: >-
       github.repository == 'ephur/terraform-worker' &&
       !github.event.pull_request.draft &&
-      github.event.pull_request.user.login != 'dependabot[bot]'
+      github.event.sender.type != 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -71,8 +71,9 @@ jobs:
             Formatting, import order and lint are enforced by CI; do not comment on them.
             Do not praise, restate the change, or comment on things that are fine.
 
-            Before commenting, list existing review comments with
-            `gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments`
+            Before commenting, read the existing review comments with
+            `gh api --paginate repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments`
+            and the conversation with `gh pr view ${{ github.event.pull_request.number }} --comments`,
             and do not repeat a point that has already been raised, including in a resolved thread.
 
             Post each finding as an inline comment with
@@ -82,5 +83,4 @@ jobs:
             top-level comment with `gh pr comment`. If there are no new findings, post nothing.
           claude_args: |
             --model claude-fable-5-2
-            --max-turns 40
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments:*)"
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh api --paginate repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments:*)"
