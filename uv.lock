@@ -2645,6 +2645,7 @@ dev = [
     { name = "moto", extra = ["s3"] },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "pytest-mock" },
 ]
 
 [package.metadata]
@@ -2678,6 +2679,7 @@ dev = [
     { name = "moto", extras = ["s3", "sts"], specifier = ">=5.2.2,<6" },
     { name = "pytest", specifier = ">=9.1.0,<10" },
     { name = "pytest-cov", specifier = ">=5.0.0,<6" },
+    { name = "pytest-mock", specifier = ">=3.15.1,<4" },
 ]
 
 [[package]]
