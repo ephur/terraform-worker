@@ -2413,6 +2413,39 @@ class TestStateLocker:
         assert locker._run_id == "run-1"
         assert locker._env() == {"A": "1"}
 
+    def test_lock_timeout_option_ignored_with_locking(self, tmp_path, mocker):
+        from tfworker.custom_types.config_file import LockingOptions
+
+        cmd = make_command(tmp_path, lock_timeout="5m")
+        cmd.app_state.loaded_config.locking = LockingOptions()
+        info = mocker.patch("tfworker.commands.terraform.log.info")
+        assert cmd.state_locker is not None
+        assert "--lock-timeout is ignored" in info.call_args.args[0]
+
+    def test_real_locker_keeps_lease_while_terraform_runs(self, tmp_path, mocker):
+        import os
+
+        from tfworker.custom_types.config_file import LockingOptions
+
+        backend = mock.Mock(lock_inspection=True)
+        backend.get_lock.return_value = None
+        cmd = make_command(tmp_path, run_id="run-1")
+        cmd.app_state.backend = backend
+        cmd.app_state.loaded_config.locking = LockingOptions(wait="2m")
+
+        def run(name, action, lock_deadline=None):
+            lease = backend.put_lease.call_args.args[0]
+            assert lease.definition == "def" and lease.run_id == "run-1"
+            backend.get_lease.return_value = lease
+            backend.delete_lease.assert_not_called()
+            assert 119 <= cmd._lock_timeout(lock_deadline) <= 120
+            assert lease.pid == os.getpid()
+            return "result"
+
+        mocker.patch.object(cmd, "_run", side_effect=run)
+        assert cmd._run_locked("def", TerraformAction.APPLY) == "result"
+        backend.delete_lease.assert_called_once()
+
     def test_lock_held_around_terraform(self, tmp_path, mocker):
         cmd = make_command(tmp_path)
         locker = with_locking(cmd)
