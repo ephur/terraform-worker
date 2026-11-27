@@ -193,6 +193,10 @@ class TestSQSConfigFormats:
         with pytest.raises(ValueError, match="format: cloudevents"):
             SQSConfig(queues=["q"], event_bus="bus")
 
+    def test_legacy_rejects_an_empty_bus(self):
+        with pytest.raises(ValueError, match="format: cloudevents"):
+            SQSConfig(queues=["q"], event_bus="")
+
     def test_cloudevents_needs_a_target(self):
         with pytest.raises(ValueError, match="queues, an event_bus"):
             SQSConfig(format="cloudevents")

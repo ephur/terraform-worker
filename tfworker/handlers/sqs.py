@@ -104,7 +104,7 @@ class SQSConfig(BaseModel):
     @model_validator(mode="after")
     def _targets(self) -> "SQSConfig":
         if self.format == "legacy":
-            if self.event_bus or self.types:
+            if self.event_bus is not None or self.types is not None:
                 raise ValueError("event_bus and types need format: cloudevents")
         elif not self.queues and not self.event_bus:
             raise ValueError("cloudevents needs queues, an event_bus, or both")
