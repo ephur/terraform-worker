@@ -250,19 +250,66 @@ class HandlersCollection(Mapping):
         working_dir: str,
         terraform_options,
     ) -> None:
-        """Call setup() on every ready handler in registration order."""
+        """
+        Call setup() on every ready handler in registration order.
+
+        A failing handler does not stop the others from being set up. Only a
+        HandlerError raised with ``terminate=True`` stops the run; any other
+        exception is logged and the handler is skipped.
+
+        Raises:
+            HandlerError: if a handler raised a terminating HandlerError.
+        """
         for name, handler in self._handlers.items():
             if handler is not None and handler.is_ready():
                 log.trace(f"Calling setup on handler {name}")
-                handler.setup(deployment, definitions, working_dir, terraform_options)
+                try:
+                    handler.setup(
+                        deployment, definitions, working_dir, terraform_options
+                    )
+                except HandlerError as e:
+                    if e.terminate:
+                        raise
+                    log.warn(f"handler {name} setup failed: {e}")
+                except Exception as e:
+                    log.error(
+                        f"handler {name} setup failed with an unexpected error: "
+                        f"{type(e).__name__}: {e}"
+                    )
 
     def exec_teardown(
         self,
         deployment: str,
         working_dir: str,
+        raise_errors: bool = True,
     ) -> None:
-        """Call teardown() on every ready handler in registration order."""
+        """
+        Call teardown() on every ready handler in registration order.
+
+        Every handler is torn down even if an earlier one fails, so that, for
+        example, GitHub checks and the Slack board are always finalized.
+        Failures are logged. Once all handlers are done, the first HandlerError
+        raised with ``terminate=True`` is re-raised, unless ``raise_errors`` is
+        False. Pass False when the run already failed, so a teardown error
+        cannot hide the original one.
+
+        Raises:
+            HandlerError: the first terminating HandlerError, if raise_errors.
+        """
+        fatal: Union[HandlerError, None] = None
         for name, handler in self._handlers.items():
             if handler is not None and handler.is_ready():
                 log.trace(f"Calling teardown on handler {name}")
-                handler.teardown(deployment, working_dir)
+                try:
+                    handler.teardown(deployment, working_dir)
+                except HandlerError as e:
+                    log.error(f"handler {name} teardown failed: {e}")
+                    if e.terminate and fatal is None:
+                        fatal = e
+                except Exception as e:
+                    log.error(
+                        f"handler {name} teardown failed with an unexpected error: "
+                        f"{type(e).__name__}: {e}"
+                    )
+        if fatal is not None and raise_errors:
+            raise fatal

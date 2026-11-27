@@ -261,27 +261,115 @@ class TestExecSetupTeardown:
         h.exec_setup("prod", MagicMock(), "/tmp", MagicMock())
         assert calls == []
 
-    def test_exec_setup_propagates_errors(self):
+    def test_exec_setup_isolates_unexpected_errors(self, mocker):
+        """An unexpected setup error is logged and the next handler still runs (#188)."""
+        calls = []
+
         class BrokenHandler(DummyHandler):
             tag = "b"
 
             def setup(self, deployment, definitions, working_dir, terraform_options):
                 raise RuntimeError("boom")
 
-        h = HandlersCollection({"b": BrokenHandler()})
-        with pytest.raises(RuntimeError, match="boom"):
+        class OkHandler(DummyHandler):
+            tag = "ok"
+
+            def setup(self, deployment, definitions, working_dir, terraform_options):
+                calls.append("ok")
+
+        err = mocker.patch("tfworker.util.log.error")
+        h = HandlersCollection({"b": BrokenHandler(), "ok": OkHandler()})
+        h.exec_setup("prod", MagicMock(), "/tmp", MagicMock())
+        assert calls == ["ok"]
+        assert "boom" in err.call_args.args[0]
+
+    def test_exec_setup_non_terminating_handler_error_continues(self, mocker):
+        calls = []
+
+        class SoftHandler(DummyHandler):
+            tag = "soft"
+
+            def setup(self, deployment, definitions, working_dir, terraform_options):
+                raise HandlerError("optional", terminate=False)
+
+        class OkHandler(DummyHandler):
+            tag = "ok"
+
+            def setup(self, deployment, definitions, working_dir, terraform_options):
+                calls.append("ok")
+
+        warn = mocker.patch("tfworker.util.log.warn")
+        h = HandlersCollection({"soft": SoftHandler(), "ok": OkHandler()})
+        h.exec_setup("prod", MagicMock(), "/tmp", MagicMock())
+        assert calls == ["ok"]
+        warn.assert_called_once()
+
+    def test_exec_setup_terminating_handler_error_raises(self):
+        class FatalHandler(DummyHandler):
+            tag = "f"
+
+            def setup(self, deployment, definitions, working_dir, terraform_options):
+                raise HandlerError("required", terminate=True)
+
+        h = HandlersCollection({"f": FatalHandler()})
+        with pytest.raises(HandlerError, match="required"):
             h.exec_setup("prod", MagicMock(), "/tmp", MagicMock())
 
-    def test_exec_teardown_propagates_errors(self):
+    def test_exec_teardown_runs_every_handler_after_a_failure(self, mocker):
+        """A failing teardown no longer skips the handlers after it (#188)."""
+        calls = []
+
+        class BrokenHandler(DummyHandler):
+            tag = "b"
+
+            def teardown(self, deployment, working_dir):
+                calls.append("b")
+                raise RuntimeError("boom")
+
+        class FatalHandler(DummyHandler):
+            tag = "f"
+
+            def teardown(self, deployment, working_dir):
+                calls.append("f")
+                raise HandlerError("fatal")
+
+        class OkHandler(DummyHandler):
+            tag = "ok"
+
+            def teardown(self, deployment, working_dir):
+                calls.append("ok")
+
+        mocker.patch("tfworker.util.log.error")
+        h = HandlersCollection(
+            {"b": BrokenHandler(), "f": FatalHandler(), "ok": OkHandler()}
+        )
+        with pytest.raises(HandlerError, match="fatal"):
+            h.exec_teardown("prod", "/tmp")
+        assert calls == ["b", "f", "ok"]
+
+    def test_exec_teardown_unexpected_error_is_logged_not_raised(self, mocker):
         class BrokenHandler(DummyHandler):
             tag = "b"
 
             def teardown(self, deployment, working_dir):
                 raise RuntimeError("boom")
 
+        err = mocker.patch("tfworker.util.log.error")
         h = HandlersCollection({"b": BrokenHandler()})
-        with pytest.raises(RuntimeError, match="boom"):
-            h.exec_teardown("prod", "/tmp")
+        h.exec_teardown("prod", "/tmp")
+        assert "boom" in err.call_args.args[0]
+
+    def test_exec_teardown_raise_errors_false_only_logs(self, mocker):
+        class FatalHandler(DummyHandler):
+            tag = "f"
+
+            def teardown(self, deployment, working_dir):
+                raise HandlerError("fatal")
+
+        err = mocker.patch("tfworker.util.log.error")
+        h = HandlersCollection({"f": FatalHandler()})
+        h.exec_teardown("prod", "/tmp", raise_errors=False)
+        err.assert_called_once()
 
     def test_exec_setup_noop_for_base_handler(self):
         h = HandlersCollection({"a": HandlerA()})

@@ -6,6 +6,7 @@ from click.testing import CliRunner
 
 import tfworker.cli as cli
 from tfworker.cli_options import CLIOptionsClean, CLIOptionsRoot, CLIOptionsTerraform
+from tfworker.exceptions import HandlerError
 
 
 class TestCliRoot:
@@ -142,6 +143,60 @@ class TestCliCommands:
         runner.invoke(cli.cli, ["terraform", "dep"])
         assert call_order.index("setup") < call_order.index("prep_providers")
         assert call_order.index("apply_or_destroy") < call_order.index("teardown")
+
+    @staticmethod
+    def _patch_terraform_cli(mocker):
+        mocker.patch("click.get_current_context", click_globals.get_current_context)
+        mocker.patch("tfworker.cli.validate_host")
+        mocker.patch("tfworker.cli.register_plugins")
+        mocker.patch("tfworker.cli.RootCommand")
+        tfc_cls = mocker.patch("tfworker.cli.TerraformCommand")
+        mocker.patch(
+            "tfworker.cli.CLIOptionsRoot.model_validate",
+            return_value=CLIOptionsRoot.model_construct(),
+        )
+        mocker.patch(
+            "tfworker.cli.CLIOptionsTerraform.model_validate",
+            return_value=CLIOptionsTerraform.model_construct(),
+        )
+        mocker.patch("tfworker.cli.tf_util.get_terraform_version", return_value=(1, 0))
+        mocker.patch("tfworker.cli.log_limiter")
+        return tfc_cls.return_value
+
+    def test_terraform_failed_run_keeps_original_error(self, mocker):
+        """A failed run tears down with raise_errors=False, so its error survives (#188)."""
+        tfc = self._patch_terraform_cli(mocker)
+        tfc.terraform_plan.side_effect = RuntimeError("plan exploded")
+
+        result = CliRunner().invoke(cli.cli, ["terraform", "dep"])
+
+        assert isinstance(result.exception, RuntimeError)
+        assert "plan exploded" in str(result.exception)
+        kwargs = tfc.app_state.handlers.exec_teardown.call_args.kwargs
+        assert kwargs["raise_errors"] is False
+
+    def test_terraform_successful_run_teardown_error_exits_1(self, mocker):
+        tfc = self._patch_terraform_cli(mocker)
+        tfc.app_state.handlers.exec_teardown.side_effect = HandlerError("td")
+        err = mocker.patch("tfworker.util.log.error")
+
+        result = CliRunner().invoke(cli.cli, ["terraform", "dep"])
+
+        assert result.exit_code == 1
+        assert tfc.app_state.handlers.exec_teardown.call_args.kwargs["raise_errors"]
+        # exec_teardown logs the failure itself; the CLI must not log it again
+        err.assert_not_called()
+
+    def test_terraform_setup_handler_error_exits_1(self, mocker):
+        tfc = self._patch_terraform_cli(mocker)
+        tfc.app_state.handlers.exec_setup.side_effect = HandlerError("su")
+        mocker.patch("tfworker.util.log.error")
+
+        result = CliRunner().invoke(cli.cli, ["terraform", "dep"])
+
+        assert result.exit_code == 1
+        tfc.prep_providers.assert_not_called()
+        tfc.app_state.handlers.exec_teardown.assert_not_called()
 
     def test_env_runs(self, mocker):
         runner = CliRunner()
