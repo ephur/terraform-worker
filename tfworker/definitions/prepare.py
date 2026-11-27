@@ -195,7 +195,7 @@ class DefinitionPrepare:
 
     def download_modules(self, name: str, stream_output: bool = True) -> None:
         """Download the modules"""
-        from tfworker.commands.terraform import TerraformResult
+        from tfworker.commands.terraform import TerraformResult, terraform_env
 
         definition = self._app_state.definitions[name]
         log.trace(f"downloading modules for definition {name}")
@@ -209,9 +209,12 @@ class DefinitionPrepare:
 
         result: TerraformResult = TerraformResult(
             *pipe_exec_logged(
-                "terraform get",
+                f"{self._app_state.terraform_options.terraform_bin} get",
                 label="terraform get",
                 cwd=definition.get_target_path(self._app_state.working_dir),
+                # same binary and environment as init/plan/apply, so module
+                # sources that need authenticator credentials resolve the same
+                env=terraform_env(self._app_state),
                 stream_output=stream_output,
                 stream_log_level=log.LogLevel.DEBUG,
                 success_level=log.LogLevel.DEBUG,

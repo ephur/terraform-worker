@@ -36,6 +36,8 @@ def def_prepare(tmp_path, mock_app_state):
     # ensure backend and providers exist for tests
     mock_app_state.backend = MagicMock()
     mock_app_state.providers = MagicMock()
+    mock_app_state.terraform_options.terraform_bin = "/usr/bin/terraform"
+    mock_app_state.authenticators = []
     target_dir = Path(mock_app_state.working_dir) / "definitions" / "def1"
     target_dir.mkdir(parents=True, exist_ok=True)
     return DefinitionPrepare(mock_app_state)
@@ -225,6 +227,26 @@ def test_download_modules_success(mocker, def_prepare, definition):
         return_value=SimpleNamespace(exit_code=0, stdout=b"out", stderr=b"err"),
     )
     def_prepare.download_modules("def1", stream_output=False)
+
+
+def test_download_modules_uses_configured_binary_and_env(
+    mocker, def_prepare, definition, monkeypatch
+):
+    """terraform get uses --terraform-bin and the authenticator env (#185)."""
+    monkeypatch.setenv("FROM_OS", "1")
+    def_prepare._app_state.terraform_options.terraform_bin = "/opt/tf/1.9/terraform"
+    auth = MagicMock()
+    auth.env.return_value = {"AWS_ACCESS_KEY_ID": "AKIA-TEST"}
+    def_prepare._app_state.authenticators = [auth]
+    pe = mocker.patch("tfworker.util.system.pipe_exec", return_value=(0, b"out", b""))
+
+    def_prepare.download_modules("def1", stream_output=False)
+
+    assert pe.call_args.args[0] == "/opt/tf/1.9/terraform get"
+    env = pe.call_args.kwargs["env"]
+    assert env["AWS_ACCESS_KEY_ID"] == "AKIA-TEST"
+    assert env["TF_IN_AUTOMATION"] == "1"
+    assert env["FROM_OS"] == "1"
 
 
 def test_download_modules_logs_at_debug(mocker, def_prepare, definition):

@@ -1226,12 +1226,30 @@ class TerraformCommandConfig:
         }[command]
 
     def _get_env(self) -> Dict[str, str]:
-        env = os.environ.copy()
-        # acknowledge that we are using a plugin cache; and compute the lockfile each run
-        env["TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE"] = "1"
-        # reduce non essential terraform output
-        env["TF_IN_AUTOMATION"] = "1"
+        return terraform_env(self._app_state)
 
-        for auth in self._app_state.authenticators:
-            env.update(auth.env())
-        return env
+
+def terraform_env(app_state: "AppState") -> Dict[str, str]:
+    """
+    Build the environment every terraform command runs with.
+
+    Shared by TerraformCommandConfig and definition preparation
+    (``terraform get``), so all terraform invocations see the same
+    authenticator credentials.
+
+    Args:
+        app_state (AppState): The application state.
+
+    Returns:
+        Dict[str, str]: The environment for a terraform subprocess.
+    """
+    env = os.environ.copy()
+    # acknowledge that we are using a plugin cache; and compute the lockfile each run
+    env["TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE"] = "1"
+    # reduce non essential terraform output
+    env["TF_IN_AUTOMATION"] = "1"
+
+    # authenticators is optional on AppState; treat a missing collection as empty
+    for auth in app_state.authenticators or []:
+        env.update(auth.env())
+    return env
