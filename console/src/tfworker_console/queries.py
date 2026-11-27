@@ -566,11 +566,6 @@ def runs(
     return [_run_view(row, scope) for row in session.scalars(query.limit(limit))]
 
 
-def run(session: Session, store: str, record_id: str) -> Optional[dict]:
-    row = session.get(db.Run, (store, record_id))
-    return row.body if row else None
-
-
 def definition(
     session: Session,
     scope: Scope,

@@ -191,15 +191,13 @@ def run(
     principal: Principal = Depends(require_viewer),
 ) -> dict:
     """The full tfworker.run/v1 record."""
-    body = queries.run(session, store, record_id)
-    if body is not None:
-        row = session.get(queries.db.Run, (store, record_id))
-        group = request.app.state.groups.of(store, row.deployment)
-        if not principal.allows("viewer", group):
-            body = None
-    if body is None:
+    row = session.get(queries.db.Run, (store, record_id))
+    # a record in a group the caller can't see is as missing as one that isn't
+    if row is None or not principal.allows(
+        "viewer", request.app.state.groups.of(store, row.deployment)
+    ):
         raise HTTPException(404, f"no run record {record_id} in {store}")
-    return body
+    return row.body
 
 
 @router.get("/tracking/local-modules", response_model=List[queries.WeekShare])

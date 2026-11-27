@@ -1000,5 +1000,10 @@ class TestCli:
         listed = self.run(env, "tokens", "list").output
         assert "backstage\tviewer\texpires 20" in listed
         assert "ci\toperator\texpires never\tlast used never" in listed
+        for bad, message in (("soon", "invalid duration"), ("0", "longer than zero")):
+            refused = self.run(
+                env, "tokens", "create", "x", "--role", "viewer", "--expires-in", bad
+            )
+            assert refused.exit_code == 2 and message in refused.output
         assert self.run(env, "tokens", "revoke", "backstage").exit_code == 0
         assert self.run(env, "tokens", "revoke", "backstage").exit_code
