@@ -69,11 +69,6 @@ class Definition(BaseModel):
 
     # Internals, these should not be set by the user
     ready: bool = False
-    # time.monotonic() deadline for the state lock on this definition's next
-    # command; set by the lock handler, overrides --lock-timeout
-    lock_deadline: Optional[float] = None
-    # a lock still held at the deadline stops the run (lock on_timeout: fail_run)
-    lock_fail_run: bool = False
     needs_apply: bool = False
     plan_failed: bool = False
     # preparation (copy/template/terraform get) or terraform init failed
