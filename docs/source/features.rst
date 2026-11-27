@@ -52,6 +52,15 @@ finishes. The freshness window compares the reader's clock with the time the hol
 clocks within about a minute of each other. ``force_unlock`` relies on this; it also only removes a lock
 that looked stale on two polls, and never the same lock twice.
 
+A lease shows that the worker process is alive, not terraform. If the worker is killed while terraform
+keeps running (for example, only the worker is OOM-killed), its lease stops being refreshed and the lock
+looks stale. Pods normally take terraform down with them; elsewhere, only use ``force_unlock`` where
+terraform cannot outlive the worker. Leases are keyed by host, so two workers on one host share a lease
+key; each removes the lease only if it wrote it.
+
+Each heartbeat rewrites the lease object. On a versioned state bucket, add a lifecycle rule that expires
+noncurrent versions of ``*.tfworker-lease.*`` objects. ``heartbeat`` is either 0 (off) or at least 5s.
+
 If terraform itself gives up on the lock (someone took it between the check and the command), the failure
 is reported as a lock failure, and ``on_timeout: fail_run`` still stops the run. The ``-lock-timeout``
 passed to terraform is whatever is left of ``wait`` when terraform starts. The wait begins after the PRE

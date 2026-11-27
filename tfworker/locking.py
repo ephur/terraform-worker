@@ -49,6 +49,8 @@ class _Heartbeat:
         self._lease = lease
         self._now = now
         self._stop = threading.Event()
+        # held around each write, so no write can land after stop() returns
+        self._write_lock = threading.Lock()
         self._thread = threading.Thread(
             target=self._beat,
             name=f"tfworker-lease-{lease.definition}",
@@ -63,6 +65,8 @@ class _Heartbeat:
         self._stop.set()
         if self._thread.is_alive():
             self._thread.join(timeout=STOP_TIMEOUT)
+        if self._write_lock.acquire(timeout=STOP_TIMEOUT):
+            self._write_lock.release()
 
     def _beat(self) -> None:
         while not self._stop.wait(self._lease.heartbeat_seconds):
@@ -72,14 +76,17 @@ class _Heartbeat:
             self._write()
 
     def _write(self) -> None:
-        # the thread must outlive any error: a lease that stops being refreshed
-        # makes the live lock it covers look stale to other workers
-        try:
-            self._backend.put_lease(self._lease)
-        except Exception as e:
-            log.warn(
-                f"unable to refresh the worker lease for {self._lease.definition}: {e}"
-            )
+        with self._write_lock:
+            if self._stop.is_set():
+                return
+            # the thread must outlive any error: a lease that stops being
+            # refreshed makes the live lock it covers look stale to other workers
+            try:
+                self._backend.put_lease(self._lease)
+            except Exception as e:
+                log.warn(
+                    f"unable to refresh the worker lease for {self._lease.definition}: {e}"
+                )
 
 
 class StateLocker:
@@ -154,7 +161,8 @@ class StateLocker:
                     raise LockUnavailableError(
                         f"{name} state is locked by a stale lock "
                         f"{self._describe(lock, now)}; clear it with "
-                        f"'terraform force-unlock {lock.id}' once nothing holds it"
+                        f"'terraform force-unlock {lock.id}' once nothing holds it",
+                        fail_run=self.fail_run,
                     )
                 if self.options.on_stale == OnStale.FORCE_UNLOCK:
                     # only unlock a lock seen stale on two polls, and only once
@@ -191,6 +199,16 @@ class StateLocker:
             return
         heartbeat.stop()
         try:
+            # another process on this host may have taken the same lease key
+            lease = self.backend.get_lease(name, self._host)
+            if lease is not None and not self._owns(lease):
+                log.debug(
+                    f"leaving the {name} lease another process on this host holds"
+                )
+                return
+        except BackendError:
+            pass
+        try:
             self.backend.delete_lease(name, self._host)
         except BackendError as e:
             log.warn(f"unable to remove the worker lease for {name}: {e}")
@@ -210,6 +228,9 @@ class StateLocker:
             },
             self._run_id,
         )
+
+    def _owns(self, lease: WorkerLease) -> bool:
+        return lease.pid == os.getpid() and lease.run_id == self._run_id
 
     def _read_lock(self, name: str) -> Optional[LockInfo]:
         try:
@@ -246,17 +267,27 @@ class StateLocker:
         log.warn(
             f"force unlocking the stale {name} state lock {self._describe(lock, now)}"
         )
-        exit_code, _, stderr = pipe_exec(
-            f"{self._terraform_bin} force-unlock -force {lock.id}",
-            cwd=target_dir,
-            env=self._env(),
-        )
-        if exit_code:
-            message = (stderr or b"").decode().strip()
-            raise LockUnavailableError(
-                f"unable to force unlock the stale {name} state lock "
-                f"{lock.id}: {message}"
+        try:
+            exit_code, _, stderr = pipe_exec(
+                f"{self._terraform_bin} force-unlock -force {lock.id}",
+                cwd=target_dir,
+                env=self._env(),
             )
+            message = (stderr or b"").decode().strip()
+        except Exception as e:
+            exit_code, message = 1, str(e)
+        if not exit_code:
+            return
+        # another worker may have removed it first, and maybe taken a new lock
+        current = self._read_lock(name)
+        if current is None or current.id != lock.id:
+            log.info(f"the stale {name} state lock {lock.id} was already removed")
+            return
+        raise LockUnavailableError(
+            f"unable to force unlock the stale {name} state lock "
+            f"{lock.id}: {message}",
+            fail_run=self.fail_run,
+        )
 
     def _start_heartbeat(self, action: TerraformAction, name: str) -> None:
         now = self._now()

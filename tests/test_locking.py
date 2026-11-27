@@ -97,6 +97,10 @@ class TestLockingOptions:
         with pytest.raises(Exception):
             config.locking.wait = 1
 
+    def test_heartbeat_off_or_at_least_minimum(self):
+        assert LockingOptions(heartbeat=0).heartbeat == 0
+        assert LockingOptions(heartbeat="5s").heartbeat == 5
+
     def test_defaults(self):
         options = LockingOptions()
         assert options.wait == 600
@@ -118,6 +122,8 @@ class TestLockingOptions:
             ("wait", "soon"),
             ("on_stale", "ignore"),
             ("actions", ["init"]),
+            ("heartbeat", "1s"),
+            ("heartbeat", 0.001),
             ("unknown", 1),
         ],
     )
@@ -293,8 +299,34 @@ class TestStaleLocks:
         mocker.patch("tfworker.locking.pipe_exec", return_value=(1, b"", b"boom\n"))
         with pytest.raises(
             LockUnavailableError, match="unable to force unlock .*: boom"
-        ):
+        ) as error:
+            acquire(
+                make_locker(backend, on_stale="force_unlock", on_timeout="fail_run")
+            )
+        assert error.value.fail_run is True
+
+    def test_force_unlock_error_is_a_lock_failure(self, backend, mocker):
+        backend.get_lock.return_value = _lock(age=3 * 3600)
+        mocker.patch("tfworker.locking.pipe_exec", side_effect=OSError("no binary"))
+        with pytest.raises(LockUnavailableError, match="no binary"):
             acquire(make_locker(backend, on_stale="force_unlock"))
+
+    @pytest.mark.parametrize("after", [None, _lock(age=10)])
+    def test_lost_force_unlock_race_keeps_waiting(self, backend, mocker, after):
+        stale = _lock(age=3 * 3600)
+        other = after.model_copy(update={"id": "lock-2"}) if after else None
+        # two stale polls, the re-read after the failed unlock, then free
+        backend.get_lock.side_effect = [stale, stale, other, None]
+        mocker.patch("tfworker.locking.pipe_exec", return_value=(1, b"", b"gone"))
+        started = []
+        acquire(make_locker(backend, started=started, on_stale="force_unlock"))
+        assert started
+
+    def test_stale_fail_honours_fail_run(self, backend):
+        backend.get_lock.return_value = _lock(age=3 * 3600)
+        with pytest.raises(LockUnavailableError, match="stale") as error:
+            acquire(make_locker(backend, on_timeout="fail_run"))
+        assert error.value.fail_run is True
 
 
 class TestHeartbeat:
@@ -325,6 +357,40 @@ class TestHeartbeat:
         acquire(locker, APPLY)
         backend.delete_lease.assert_called_once_with("def1", "pod-9")
         locker.release("def1")
+
+    def test_release_leaves_another_process_lease(self, backend):
+        locker = make_locker(backend)
+        acquire(locker)
+        backend.get_lease.return_value = _lease(host="pod-9")
+        locker.release("def1")
+        backend.delete_lease.assert_not_called()
+
+    def test_release_removes_own_lease(self, backend):
+        import os
+
+        locker = make_locker(backend)
+        acquire(locker)
+        own = _lease(host="pod-9").model_copy(
+            update={"pid": os.getpid(), "run_id": "run-7"}
+        )
+        backend.get_lease.return_value = own
+        locker.release("def1")
+        backend.delete_lease.assert_called_once_with("def1", "pod-9")
+
+    def test_release_deletes_when_lease_unreadable(self, backend):
+        locker = make_locker(backend)
+        acquire(locker)
+        backend.get_lease.side_effect = BackendError("denied")
+        locker.release("def1")
+        backend.delete_lease.assert_called_once_with("def1", "pod-9")
+
+    def test_no_write_lands_after_stop(self, backend):
+        beat = _Heartbeat(backend, _lease(), lambda: NOW)
+        beat.start()
+        beat.stop()
+        backend.put_lease.reset_mock()
+        beat._write()
+        backend.put_lease.assert_not_called()
 
     def test_release_without_lease_is_noop(self, backend):
         make_locker(backend).release("def1")
