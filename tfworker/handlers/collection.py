@@ -260,7 +260,7 @@ class HandlersCollection(Mapping):
         """
         from tfworker.custom_types import TerraformAction, TerraformStage
 
-        if action not in TerraformAction:
+        if not isinstance(action, TerraformAction):
             raise HandlerError(f"Invalid action {action}")
         for name, handler in self._ordered_handlers(action, TerraformStage.PRE):
             try:
