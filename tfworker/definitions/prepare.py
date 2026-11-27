@@ -1,11 +1,13 @@
 import json
 from os import environ
+from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Union
 
 import jinja2
 
 import tfworker.util.log as log
 from tfworker.constants import (
+    LEGACY_WORKER_TFVARS_FILENAME,
     RESERVED_FILES,
     TF_PROVIDER_DEFAULT_LOCKFILE,
     WORKER_LOCALS_FILENAME,
@@ -156,14 +158,23 @@ class DefinitionPrepare:
         """Create the variable definitions"""
         definition = self._app_state.definitions[name]
         log.trace(f"creating terraform vars for definition {name}")
-        with open(
-            f"{definition.get_target_path(self._app_state.working_dir)}/{WORKER_TFVARS_FILENAME}",
-            "w+",
-        ) as varfile:
-            for k, v in definition.get_terraform_vars(
-                global_vars=self._app_state.loaded_config.global_vars.terraform_vars
-            ).items():
-                varfile.write(f"{k} = {vars_typer(v)}\n")
+        target = definition.get_target_path(self._app_state.working_dir)
+        terraform_vars = definition.get_terraform_vars(
+            global_vars=self._app_state.loaded_config.global_vars.terraform_vars
+        )
+
+        # a reused working dir may still hold the HCL file from an earlier
+        # version; terraform would load both, so remove it
+        legacy = Path(target) / LEGACY_WORKER_TFVARS_FILENAME
+        if legacy.exists():
+            log.debug(f"removing legacy tfvars file {legacy}")
+            legacy.unlink()
+
+        with open(f"{target}/{WORKER_TFVARS_FILENAME}", "w") as varfile:
+            # values keep their YAML types; anything JSON can't represent
+            # (e.g. dates) is written as its string form, as before
+            json.dump(terraform_vars, varfile, indent=2, default=str)
+            varfile.write("\n")
 
     def create_terraform_lockfile(self, name: str) -> None:
         """Create the terraform lockfile"""
@@ -413,39 +424,3 @@ def write_template_file(
 def filter_templates(filename):
     """a small function to filter the list of files down to only j2 templates"""
     return filename.endswith(".tf.j2")
-
-
-def vars_typer(v, inner=False):
-    """
-    vars_typer is used to assemble variables as they are parsed from the yaml configuration
-    into the required format to be used in terraform
-    """
-    if v is True:
-        return "true"
-    elif v is False:
-        return "false"
-    elif isinstance(v, list):
-        rval = []
-        for val in v:
-            result = vars_typer(val, inner=True)
-            try:
-                rval.append(result.strip('"').strip("'"))
-            except AttributeError:
-                rval.append(result)
-        if inner:
-            return rval
-        else:
-            return json.dumps(rval)
-    elif isinstance(v, dict):
-        rval = {}
-        for k, val in v.items():
-            result = vars_typer(val, inner=True)
-            try:
-                rval[k] = result.strip('"').strip("'")
-            except AttributeError:
-                rval[k] = result
-        if inner:
-            return rval
-        else:
-            return json.dumps(rval)
-    return f'"{v}"'

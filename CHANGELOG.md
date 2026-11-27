@@ -6,6 +6,7 @@
   - The Google authenticator and the special-cased `google` / `google-beta` providers are gone. Those providers can still be configured in `providers`; they are now handled like any other provider by the generic provider, without the worker injecting credentials, region or project.
   - The `--gcp-region`, `--gcp-creds-path` and `--gcp-project` root options (and the `GCP_REGION`, `GCP_CREDS_PATH`, `GCP_PROJECT` environment variables) were removed.
   - `google-cloud-storage` is no longer a dependency.
+- `terraform_vars` are now written to `worker_generated.auto.tfvars.json` instead of `worker_generated.auto.tfvars` (#186). Values keep their YAML types and are no longer interpolated by terraform, so quotes, backslashes, `${` and `%{` are passed through as-is. Booleans and numbers inside lists and maps are now real values instead of strings, and a YAML null now leaves the variable unset instead of passing `"None"`. Hooks that parse `TF_VAR_*` lists or maps as JSON will see the same change.
 
 ## Bug fixes
 - Without `--working-dir`, terraform init/plan/apply, plan JSON output and provider mirroring now run in the resolved temporary working directory instead of `<cwd>/None/...`. The temporary directory is created with `mkdtemp`, so it exists for the whole run, and it is removed at exit (#181).

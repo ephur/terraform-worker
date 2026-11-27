@@ -8,6 +8,7 @@ import pytest
 
 import tfworker.util.log as log
 from tfworker.constants import (
+    LEGACY_WORKER_TFVARS_FILENAME,
     RESERVED_FILES,
     TF_PROVIDER_DEFAULT_LOCKFILE,
     WORKER_LOCALS_FILENAME,
@@ -21,7 +22,6 @@ from tfworker.definitions.prepare import (
     filter_templates,
     get_coppier,
     get_jinja_env,
-    vars_typer,
     write_template_file,
 )
 from tfworker.exceptions import TFWorkerException
@@ -115,19 +115,6 @@ def test_filter_templates():
     assert not filter_templates("main.tf")
 
 
-def test_vars_typer_simple_types():
-    assert vars_typer(True) == "true"
-    assert vars_typer(False) == "false"
-    assert vars_typer("foo") == '"foo"'
-
-
-def test_vars_typer_complex():
-    assert vars_typer(["a", "b"]) == json.dumps(["a", "b"])
-    nested = {"a": True, "b": ["c", False]}
-    assert vars_typer(nested) == json.dumps({"a": "true", "b": ["c", "false"]})
-    assert vars_typer(["c", False], inner=True) == ["c", "false"]
-
-
 def test_create_local_vars(mocker, def_prepare, definition):
     mocker.patch.object(
         Definition, "get_remote_vars", return_value={"foo": "bar.outputs.baz"}
@@ -160,7 +147,61 @@ def test_create_terraform_vars(mocker, def_prepare, definition):
         Path(definition.get_target_path(def_prepare._app_state.working_dir))
         / WORKER_TFVARS_FILENAME
     )
-    assert outfile.read_text().strip() == 'a = "1"'
+    assert json.loads(outfile.read_text()) == {"a": 1}
+
+
+def test_create_terraform_vars_escaping(mocker, def_prepare, definition):
+    """
+    Values that broke the old HCL writer round-trip exactly (#186).
+
+    Quotes and backslashes produced invalid HCL, and ${ / %{ were
+    interpolated by terraform as templates.
+    """
+    values = {
+        "quoted": 'say "hi"',
+        "backslash": "C:\\path\\to",
+        "interp": "${not_a_ref}",
+        "directive": "%{ if true }x%{ endif }",
+        "number": 5,
+        "flag": True,
+        "items": ["a", 'b"c', 7, False],
+        "nested": {"k": "${v}", "n": {"deep": "x\\y"}},
+    }
+    mocker.patch.object(Definition, "get_terraform_vars", return_value=values)
+    def_prepare.create_terraform_vars("def1")
+    outfile = (
+        Path(definition.get_target_path(def_prepare._app_state.working_dir))
+        / WORKER_TFVARS_FILENAME
+    )
+    assert json.loads(outfile.read_text()) == values
+
+
+def test_create_terraform_vars_non_json_types(mocker, def_prepare, definition):
+    """Types JSON can't hold (YAML dates) are written as strings, as before."""
+    import datetime
+
+    mocker.patch.object(
+        Definition,
+        "get_terraform_vars",
+        return_value={"when": datetime.date(2026, 11, 27)},
+    )
+    def_prepare.create_terraform_vars("def1")
+    outfile = (
+        Path(definition.get_target_path(def_prepare._app_state.working_dir))
+        / WORKER_TFVARS_FILENAME
+    )
+    assert json.loads(outfile.read_text()) == {"when": "2026-11-27"}
+
+
+def test_create_terraform_vars_removes_legacy_file(mocker, def_prepare, definition):
+    """A leftover HCL tfvars file from an earlier version is removed."""
+    target = Path(definition.get_target_path(def_prepare._app_state.working_dir))
+    legacy = target / LEGACY_WORKER_TFVARS_FILENAME
+    legacy.write_text('a = "old"\n')
+    mocker.patch.object(Definition, "get_terraform_vars", return_value={"a": "new"})
+    def_prepare.create_terraform_vars("def1")
+    assert not legacy.exists()
+    assert json.loads((target / WORKER_TFVARS_FILENAME).read_text()) == {"a": "new"}
 
 
 def test_create_terraform_lockfile_skip(def_prepare, mocker):

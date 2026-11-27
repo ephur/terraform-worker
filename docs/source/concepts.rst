@@ -345,7 +345,9 @@ Terraform Variables
 
 The ``terraform_vars`` field  in a **terraform-worker** configuration is used to express an input
 variables or local variables for a terraform module. Values which appear in this block are passed to
-the underlying terraform operation in a ``worker.auto.tfvars`` file.
+the underlying terraform operation in a ``worker_generated.auto.tfvars.json`` file. Values keep
+their YAML types, and strings are written literally: quotes, backslashes, ``${`` and ``%{`` need no
+escaping.
 
 .. note::
 
@@ -369,9 +371,11 @@ the underlying terraform operation in a ``worker.auto.tfvars`` file.
 
       % pwd
       /tmp/fhgwjxkt/definitions/blue
-      % cat worker.auto.tfvars
-      name = "alpha"
-      tag = "beta"
+      % cat worker_generated.auto.tfvars.json
+      {
+        "name": "alpha",
+        "tag": "beta"
+      }
 
 .. index::
    single: remote_vars
