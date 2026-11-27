@@ -1,10 +1,12 @@
 import base64
+import json
 import shlex
 from unittest import mock
 
 import pytest
 
 import tfworker.util.hooks as hooks
+from tfworker.constants import WORKER_LOCALS_FILENAME
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import HookError
 
@@ -579,6 +581,18 @@ class TestResolveTerraformValue:
         }
         mock_backend.get_state.assert_called_once_with("network1")
 
+    def test_resolve_unparseable_reference_falls_back(self, mocker):
+        """A malformed reference logs a warning and returns the raw value (#183)."""
+        mock_backend = mock.Mock()
+        warn = mocker.patch("tfworker.util.log.warn")
+
+        value = "data.terraform_remote_state.network1.not_outputs"
+        result = hooks._resolve_terraform_value(value, mock_backend, {})
+
+        assert result == value
+        warn.assert_called_once()
+        mock_backend.get_state.assert_not_called()
+
     def test_resolve_plain_string(self):
         """Test that plain strings (non-terraform refs) pass through unchanged."""
         mock_backend = mock.Mock()
@@ -761,6 +775,86 @@ class TestResolveTerraformValue:
 
 class TestPopulateEnvironmentWithNestedRemoteVars:
     """Tests for _populate_environment_with_terraform_remote_vars with nested structures."""
+
+    @staticmethod
+    def _state_backend():
+        backend = mock.Mock()
+        states = {
+            "network1": {
+                "version": 4,
+                "outputs": {
+                    "vpc_id": {"value": "vpc-123", "type": "string"},
+                    "cidr": {"value": "10.0.0.0/16", "type": "string"},
+                },
+            },
+            "network2": {
+                "version": 4,
+                "outputs": {"vpc_id": {"value": "vpc-456", "type": "string"}},
+            },
+        }
+        backend.get_state.side_effect = lambda name: states[name]
+        return backend
+
+    def test_real_hcl2_simple_refs_resolve(self, tmp_path):
+        """
+        python-hcl2 wraps references as "${...}"; they must still resolve.
+
+        Regression for #183: the HCL2 path used to fail on every reference,
+        and only the AttributeError from log.warning pushed it into the regex
+        fallback.
+        """
+        (tmp_path / WORKER_LOCALS_FILENAME).write_text(
+            "locals {\n"
+            "  vpc_id = data.terraform_remote_state.network1.outputs.vpc_id\n"
+            "  cidr = data.terraform_remote_state.network1.outputs.cidr\n"
+            "}\n"
+        )
+        local_env = {}
+        hooks._populate_environment_with_terraform_remote_vars(
+            local_env, str(tmp_path), "terraform", False, self._state_backend()
+        )
+        assert local_env["TF_REMOTE_VPC_ID"] == "vpc-123"
+        assert local_env["TF_REMOTE_CIDR"] == "10.0.0.0/16"
+
+    def test_real_hcl2_matches_regex_fallback(self, tmp_path):
+        """Simple references give the same env as the legacy regex path."""
+        (tmp_path / WORKER_LOCALS_FILENAME).write_text(
+            "locals {\n"
+            "  vpc_id = data.terraform_remote_state.network1.outputs.vpc_id\n"
+            "  other = data.terraform_remote_state.network2.outputs.vpc_id\n"
+            "}\n"
+        )
+        hcl_env = {}
+        hooks._populate_environment_with_terraform_remote_vars(
+            hcl_env, str(tmp_path), "terraform", False, self._state_backend()
+        )
+        regex_env = {}
+        with mock.patch(
+            "tfworker.util.hooks.hcl2.loads", side_effect=Exception("forced")
+        ):
+            hooks._populate_environment_with_terraform_remote_vars(
+                regex_env, str(tmp_path), "terraform", False, self._state_backend()
+            )
+        assert hcl_env == regex_env
+
+    def test_real_hcl2_nested_refs_resolve(self, tmp_path):
+        """Nested references parsed by the real hcl2 parser are resolved."""
+        (tmp_path / WORKER_LOCALS_FILENAME).write_text(
+            "locals {\n"
+            "  vpcs = {\n"
+            '    "platform" = data.terraform_remote_state.network1.outputs.vpc_id\n'
+            '    "payments" = data.terraform_remote_state.network2.outputs.vpc_id\n'
+            "  }\n"
+            "}\n"
+        )
+        local_env = {}
+        hooks._populate_environment_with_terraform_remote_vars(
+            local_env, str(tmp_path), "terraform", False, self._state_backend()
+        )
+        assert json.loads(local_env["TF_REMOTE_VPCS"].strip("'")) == {
+            "platform": "vpc-123",
+            "payments": "vpc-456",
+        }
 
     @mock.patch("builtins.open", new_callable=mock.mock_open)
     @mock.patch("tfworker.util.hooks.os.path.isfile", return_value=True)

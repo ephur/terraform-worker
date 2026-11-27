@@ -447,6 +447,25 @@ def _populate_environment_with_terraform_remote_vars(
             )
 
 
+def _unwrap_interpolation(value: str) -> str:
+    """
+    Strip a single "${...}" wrapper from a string, if it wraps the whole value.
+
+    python-hcl2 renders HCL expressions such as
+    ``data.terraform_remote_state.x.outputs.y`` as
+    ``"${data.terraform_remote_state.x.outputs.y}"``.
+
+    Args:
+        value (str): The string to unwrap.
+
+    Returns:
+        str: The inner expression, or the value unchanged if it is not wrapped.
+    """
+    if value.startswith("${") and value.endswith("}") and value.count("${") == 1:
+        return value[2:-1].strip()
+    return value
+
+
 def _resolve_terraform_value(
     value: Any,
     backend: "BaseBackend",
@@ -475,8 +494,11 @@ def _resolve_terraform_value(
         # Check if it's a terraform_remote_state reference
         if "data.terraform_remote_state" in value:
             try:
+                # python-hcl2 returns expressions wrapped as "${...}"; unwrap
+                # a bare reference so it can be parsed.
+                ref = _unwrap_interpolation(value)
                 # Extract state and output_key from the reference
-                state, output_key = parse_tf_reference(value)
+                state, output_key = parse_tf_reference(ref)
 
                 # Get the state data
                 state_data = _get_or_fetch_state(state, backend, state_cache)
@@ -493,7 +515,7 @@ def _resolve_terraform_value(
                         )
                     return outputs[output_key].get("value")
             except (ValueError, KeyError) as e:
-                log.warning(f"Failed to parse terraform reference '{value}': {e}")
+                log.warn(f"Failed to parse terraform reference '{value}': {e}")
                 return value
         else:
             # Plain string, return as-is
