@@ -66,33 +66,6 @@ be used for the underlying terraform operations.
 .. index::
    triple: worker; options; --aws-profile
 
-\\-\\-gcp-region
-++++++++++++++++
-
-The **\\-\\-gcp-region** option specifies the **REGION** configuration value for the GCP
-region that is to be used for the underlying terraform operations.
-
-.. index::
-   triple: worker; options; --gcp-region
-
-\\-\\-gcp-creds-path
-++++++++++++++++++++
-
-The **\\-\\-gcp-creds-path** option specifies the local filesystem path for the credentials
-that are to be used for the underlying terraform operations.
-
-.. index::
-   triple: worker; options; --gcp-creds-path
-
-\\-\\-gcp-poject
-++++++++++++++++
-
-The **\\-\\-gcp-project** option sepcifies the google project id that is to be used for the
-underlying terraform operations.
-
-.. index::
-   triple: worker; options; --gcp-project
-
 \\-\\-config-file
 +++++++++++++++++
 
@@ -120,7 +93,7 @@ By default, this value is the current working directory.
 +++++++++++++
 
 The **\\-\\-backend** option specifies which type of terraform backend should be used in
-the current operation.  Acceptable values are: ``gcs`` or ``s3``.
+the current operation.  The only acceptable value is ``s3``.
 
 .. index::
    triple: worker; options; --backend

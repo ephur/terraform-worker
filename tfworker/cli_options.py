@@ -64,7 +64,7 @@ class CLIOptionsRoot(FreezableBaseModel):
     backend: Backends = Field(
         Backends.S3.name.lower(),
         json_schema_extra={"env": "WORKER_BACKEND"},
-        description="State/locking provider. One of: s3, gcs",
+        description="State/locking provider. One of: s3",
     )
     backend_bucket: Optional[str] = Field(
         None,
@@ -116,21 +116,6 @@ class CLIOptionsRoot(FreezableBaseModel):
         "TEXT",
         description="The format to use for logging/output",
         json_schema_extra={"env": "LOG_FORMAT"},
-    )
-    gcp_region: str = Field(
-        const.DEFAULT_GCP_REGION,
-        json_schema_extra={"env": "GCP_REGION"},
-        description="Region to build in",
-    )
-    gcp_creds_path: Optional[str] = Field(
-        None,
-        json_schema_extra={"env": "GCP_CREDS_PATH"},
-        description="Relative path to the credentials JSON file for the service account to be used.",
-    )
-    gcp_project: Optional[str] = Field(
-        None,
-        json_schema_extra={"env": "GCP_PROJECT"},
-        description="GCP project name to which work will be applied",
     )
     repository_path: str = Field(
         const.DEFAULT_REPOSITORY_PATH,
@@ -193,28 +178,6 @@ class CLIOptionsRoot(FreezableBaseModel):
                 raise ValueError(f"Config file {fp} is not readable!")
             files.append(fp)
         return files
-
-    @field_validator("gcp_creds_path")
-    @classmethod
-    def validate_gcp_creds_path(cls, fpath: Union[str, None]) -> Union[str, None]:
-        """Validate the GCP credentials path.
-
-        Args:
-            fpath (str): Path to the GCP credentials file.
-
-        Returns:
-            Fully resolved path to the GCP credentials file.
-
-        Raises:
-            ValueError: If the path does not exist or is not a file.
-        """
-        if fpath is None:
-            return
-        if not os.path.isabs(fpath):
-            fpath = os.path.abspath(fpath)
-        if os.path.isfile(fpath):
-            return fpath
-        raise ValueError(f"Path {fpath} is not a file!")
 
     @field_validator("log_level")
     @classmethod

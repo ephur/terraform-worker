@@ -6,7 +6,6 @@ DEFAULT_BACKEND_PREFIX = "terraform/state/{deployment}"
 DEFAULT_REPOSITORY_PATH = _CWD
 DEFAULT_CONFIG = f"{DEFAULT_REPOSITORY_PATH}/worker.yaml"
 DEFAULT_AWS_REGION = "us-east-1"
-DEFAULT_GCP_REGION = "us-east-1a"
 
 TF_PROVIDER_DEFAULT_HOSTNAME = "registry.terraform.io"
 TF_PROVIDER_DEFAULT_NAMESPACE = "hashicorp"

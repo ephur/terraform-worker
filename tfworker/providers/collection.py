@@ -20,10 +20,9 @@ class ProvidersCollection(Mapping):
 
     @classmethod
     def get_named_providers(cls):
-        from .google import GoogleProvider
-        from .google_beta import GoogleBetaProvider
-
-        NAMED_PROVIDERS = [GoogleProvider, GoogleBetaProvider]
+        # Providers that need special handling (e.g. authentication) are
+        # registered here; everything else is handled by GenericProvider.
+        NAMED_PROVIDERS = []
         return NAMED_PROVIDERS
 
     def __new__(cls, *args, **kwargs):

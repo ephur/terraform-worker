@@ -100,26 +100,6 @@ class TestCLIOptionsRoot:
             c.CLIOptionsRoot(config_file=str(config_file))
         config_file.chmod(0o644)
 
-    def test_gcp_creds_path_exists(self, tmp_path):
-        gcp_creds_path = tmp_path / "gcp_creds.json"
-        gcp_creds_path.write_text("gcp_creds")
-        cli_options = c.CLIOptionsRoot(gcp_creds_path=str(gcp_creds_path))
-        assert cli_options.gcp_creds_path == str(gcp_creds_path)
-
-    def test_gcp_creds_path_does_not_exist(self):
-        with pytest.raises(ValueError):
-            c.CLIOptionsRoot(gcp_creds_path="gcp_creds_path")
-
-    def test_gcp_creds_path_is_dir(self, tmp_path):
-        gcp_creds_path = tmp_path / "gcp_creds.json"
-        gcp_creds_path.mkdir()
-        with pytest.raises(ValueError):
-            c.CLIOptionsRoot(gcp_creds_path=str(gcp_creds_path))
-
-    def test_gcp_creds_path_is_none(self):
-        cli_options = c.CLIOptionsRoot(gcp_creds_path=None)
-        assert cli_options.gcp_creds_path is None
-
     def test_validate_backend_prefix_leading_slash(self):
         cli_options = c.CLIOptionsRoot(backend_prefix="/backend_prefix")
         assert cli_options.backend_prefix == "backend_prefix"
