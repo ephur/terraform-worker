@@ -18,6 +18,28 @@
 - `--config-var` values containing `=` no longer crash definition preparation or get dropped from config templates (#187).
 - `terraform get` now runs with `--terraform-bin` and the same authenticator environment as init, plan and apply, instead of the `terraform` on `PATH` with no credentials (#185).
 
+## Features and changes
+These landed after 0.13.0 and are summarized here; see the linked PRs and the docs for details.
+- **Handlers** gained ordering (priority plus declared dependencies) and a shared results registry, so one handler can use another's output.
+  - **GitHub** (new, #180): per-definition check runs with a rollup, a deployment-scoped PR status comment, and plan/apply reporting.
+  - **Slack** (#169, reworked in #180): a single live-updating Block Kit status board per run, with a threaded per-definition table.
+  - **Datadog** (new, #180): change events for plan and apply.
+  - **SQS** (queues validated at startup), **OpenAI** (plan summaries, embedded by the GitHub handler), **Snyk** and **Trivy** scanning, and **Bitbucket** (comments only when a plan has changes).
+  - The **S3** handler stores saved plans in the backend bucket; `--run-id` prefixes those plan files.
+- **Definitions sources** (#180): `definitions_sources` in the config fetch a path or git repo, run a command, and insert the definitions it prints (YAML or JSON) after a named definition. `{{ deployment }}` is available in config templates.
+- **Saved-plan applies**: apply uses a saved plan when one exists and skips definitions without one, consumed plans are removed, and init is skipped for definitions with nothing to apply. `--force-plan` replans over a saved plan (it replaces the unused `--force`).
+- **Init phase options**: `--init-failures` / `--fail-on-init-error` control whether a prepare or init failure stops the run and whether it exits non-zero; `--plan-failures` / `--fail-on-plan-error` do the same for plan errors (#170). `parallel_options` sets the worker pools for preparation and init.
+- **Destroy**: `--plan-destroy` creates a destroy plan, and the `clean` command removes empty state files and DynamoDB lock tables from the backend.
+- **Terraform**: `--target` (validated, applied at plan time), pessimistic (`~>`) provider version constraints, provider aliases, provider locking limited to modules terraform loads, and ANSI codes stripped from captured output.
+- **Remote and hook vars**: one code path builds `TF_VAR_*`, `TF_REMOTE_*` and `TF_EXTRA_*` for hooks, supports nested `remote_vars` and bracket notation, and does not cache failed lookups. `hooks_disable_remotes` on a definition skips remote state lookups for its hooks. `--backend-use-all-remotes` builds remote data sources for every definition in the backend.
+- **AWS**: refreshable boto credentials, and `AWS_PROFILE` is ignored when another credential source is given.
+- **Logging**: `--log-format JSON` for structured logs, and cleaner subprocess output.
+
+## Tooling
+- Packaging and dev tooling moved from Poetry to uv; the version now comes from git tags via hatch-vcs (#202).
+- CI runs lint (black, isort, flake8) and tests on Python 3.11 to 3.14 (#157), and builds and smoke-tests the Docker image (#212).
+- The coverage gate is raised from 60% to 93%, the measured level, and is set once in `pyproject.toml` for CI and `make` (#194).
+
 # Changes 0.12.0 -> 0.13.0 (2024-06...)
 
 ## Notes
@@ -33,6 +55,3 @@ them at random. This was a nightmare to maintain and understand.
 - made significant strides towards consolidating all exceptions / error handling
 - made significant strides in only having the primary cli.py and commands/ actually cause the program to terminate
 - validation of options and inputs is now handled centrally in the pydantic models instead of being spread out *everywhere*
-
-
-- ... @TODO find time to update this :)
