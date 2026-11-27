@@ -5,6 +5,7 @@ import json
 import re
 import socket
 import subprocess
+import threading
 from importlib import metadata
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -168,6 +169,7 @@ def module_sources(target_dir: Path) -> List[ModuleSource]:
 
 
 _generated_run_id: Optional[str] = None
+_run_id_lock = threading.Lock()
 
 
 def current_run_id(app_state) -> Tuple[str, bool]:
@@ -179,9 +181,10 @@ def current_run_id(app_state) -> Tuple[str, bool]:
     given = getattr(app_state.root_options, "run_id", None)
     if given:
         return given, False
-    if _generated_run_id is None:
-        _generated_run_id = new_ulid()
-    return _generated_run_id, True
+    with _run_id_lock:
+        if _generated_run_id is None:
+            _generated_run_id = new_ulid()
+        return _generated_run_id, True
 
 
 def plan_storage(app_state) -> str:

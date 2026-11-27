@@ -260,7 +260,9 @@ class S3Handler(BaseHandler):
             response = self.s3_client.head_object(Bucket=self.bucket, Key=remotefile)
             if response.get("ContentLength", 0) <= 0:
                 return False
-        except botocore.exceptions.ClientError:
+        except botocore.exceptions.ClientError as e:
+            if e.response.get("Error", {}).get("Code") not in ("404", "NoSuchKey"):
+                log.warn(f"unable to check saved plan {remotefile}: {e}")
             return False
 
         try:

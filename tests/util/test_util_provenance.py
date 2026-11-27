@@ -224,3 +224,14 @@ class TestModuleSources:
     )
     def test_classify(self, source, kind):
         assert provenance._classify(source) == kind
+
+
+def test_generated_run_id_is_shared_across_threads(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(provenance, "_generated_run_id", None)
+    state = SimpleNamespace(root_options=SimpleNamespace(run_id=None))
+    with ThreadPoolExecutor(8) as pool:
+        ids = set(pool.map(lambda _: provenance.current_run_id(state)[0], range(32)))
+    assert len(ids) == 1

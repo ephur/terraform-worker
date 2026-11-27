@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from zipfile import ZipFile
 
 import boto3
+import botocore.exceptions
 import pytest
 from moto import mock_aws
 
@@ -213,6 +214,19 @@ class TestHasPlan:
         app_state.terraform_options.require_plan_manifest = True
         s3.put_object(Bucket=BUCKET, Key=KEY, Body=b"legacy")
         assert handler(app_state).has_plan(definition(tmp_path)) is False
+
+    def test_plan_check_error_is_logged(self, env, tmp_path):
+        app_state, _ = env
+        h = handler(app_state)
+        error = botocore.exceptions.ClientError(
+            {"Error": {"Code": "AccessDenied"}}, "HeadObject"
+        )
+        with (
+            patch.object(h.s3_client, "head_object", side_effect=error),
+            patch("tfworker.handlers.s3.log.warn") as warn,
+        ):
+            assert h.has_plan(definition(tmp_path)) is False
+        assert "AccessDenied" in warn.call_args[0][0]
 
     def test_unreadable_manifest(self, env, tmp_path):
         app_state, s3 = env
