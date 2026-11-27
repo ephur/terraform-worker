@@ -243,6 +243,35 @@ class HandlersCollection(Mapping):
                 else:
                     self.add_result(ret)
 
+    def exec_skip(
+        self,
+        action: "TerraformAction",
+        deployment: str,
+        definition: "Definition",
+        reason: str,
+    ) -> None:
+        """
+        Tell every ready handler for the action that a definition was skipped.
+
+        A skip is informational, so a handler that fails to record it is logged
+        and never stops the run.
+        """
+        from tfworker.custom_types import TerraformStage
+
+        for name, handler in self._ordered_handlers(action, TerraformStage.PRE):
+            try:
+                handler.skip(
+                    action=action,
+                    deployment=deployment,
+                    definition=definition,
+                    reason=reason,
+                )
+            except Exception as e:
+                log.error(
+                    f"handler {name} failed to record the skipped {action.value} "
+                    f"of {definition.name}: {e}"
+                )
+
     def exec_setup(
         self,
         deployment: str,

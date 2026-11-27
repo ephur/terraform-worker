@@ -43,6 +43,12 @@ class DefinitionsCollection(Mapping):
                     raise ValueError(
                         f"definition {definition} contains a comma, and commas are not allowed, aborting"
                     )
+                # names starting with an underscore are reserved for worker
+                # metadata stored beside state, such as <prefix>/_tfworker/
+                if definition.startswith("_"):
+                    raise ValueError(
+                        f"definition {definition} starts with an underscore, which is reserved, aborting"
+                    )
                 # validation the definition regardless of inclusion
                 try:
                     log.trace(f"validating definition: {definition}")

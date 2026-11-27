@@ -6,7 +6,7 @@ import pytest
 from moto import mock_aws
 
 import tfworker.util.log as log
-from tfworker.backends.s3 import S3Backend
+from tfworker.backends.s3 import S3Backend, _definition_from_state_key
 from tfworker.exceptions import BackendError
 
 
@@ -242,17 +242,43 @@ class TestS3BackendListBucketFiles:
     def test_list_bucket_files(self, mock_authenticators):
         s3 = boto3.client("s3")
         s3.create_bucket(Bucket="test-bucket")
-        s3.put_object(
-            Bucket="test-bucket", Key="prefix/test-deployment/def1/file1", Body=b"test"
-        )
-        s3.put_object(
-            Bucket="test-bucket", Key="prefix/test-deployment/def2/file2", Body=b"test"
-        )
+        for key in (
+            "prefix/def1/terraform.tfstate",
+            "prefix/def2/terraform.tfstate",
+            # none of these name a definition
+            "prefix/def1/terraform.tfplan",
+            "prefix/run-1/def3/terraform.tfplan",
+            "prefix/_tfworker/runs/2026/11/27/run.json",
+            "prefix/_reserved/terraform.tfstate",
+            "prefix-other/def4/terraform.tfstate",
+        ):
+            s3.put_object(Bucket="test-bucket", Key=key, Body=b"test")
         backend = S3Backend(mock_authenticators, "test-deployment")
         bucket_files = backend._list_bucket_definitions()
-        assert "def1" in bucket_files
-        assert "def2" in bucket_files
+        assert bucket_files == {"def1", "def2"}
         assert sorted(backend.remotes) == sorted(["def1", "def2"])
+
+
+class TestDefinitionFromStateKey:
+    @pytest.mark.parametrize(
+        "key, expected",
+        [
+            ("p/dep/def1/terraform.tfstate", "def1"),
+            ("p/dep/def1/terraform.tfplan", None),
+            ("p/dep/def1/terraform.tfstate.tflock", None),
+            ("p/dep/run/def1/terraform.tfstate", None),
+            ("p/dep/terraform.tfstate", None),
+            ("p/dep//terraform.tfstate", None),
+            ("p/dep/_tfworker/terraform.tfstate", None),
+            ("p/dep2/def1/terraform.tfstate", None),
+            ("other/dep/def1/terraform.tfstate", None),
+        ],
+    )
+    def test_definition_from_state_key(self, key, expected):
+        assert _definition_from_state_key(key, "p/dep") == expected
+
+    def test_trailing_slash_on_prefix(self):
+        assert _definition_from_state_key("p/dep/d/terraform.tfstate", "p/dep/") == "d"
 
 
 class TestS3BackendClean:
