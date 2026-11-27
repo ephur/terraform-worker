@@ -9,6 +9,8 @@ from tfworker.util.duration import parse_duration
 from .freezable_basemodel import FreezableBaseModel
 from .terraform import TerraformAction
 
+# a faster lease refresh only adds load on the state bucket
+MIN_HEARTBEAT = 5.0
 LOCKED_ACTIONS = (TerraformAction.PLAN, TerraformAction.APPLY, TerraformAction.DESTROY)
 
 
@@ -75,6 +77,13 @@ class LockingOptions(FreezableBaseModel):
     def _positive(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("must be greater than zero")
+        return value
+
+    @field_validator("heartbeat")
+    @classmethod
+    def _heartbeat(cls, value: float) -> float:
+        if 0 < value < MIN_HEARTBEAT:
+            raise ValueError(f"must be 0 (off) or at least {MIN_HEARTBEAT:g}s")
         return value
 
     @field_validator("actions", mode="before")
