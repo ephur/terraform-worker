@@ -45,15 +45,22 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:${PYTHON_VERSION}-slim
 
-RUN useradd --system --uid 10001 console
+RUN useradd --system --uid 10001 console \
+    && mkdir /data \
+    && chown 10001 /data
 
 COPY --from=build /opt/venv /opt/venv
 
+# Standalone defaults: SQLite on the /data volume, migrated at startup. Point
+# TFWORKER_CONSOLE_DATABASE_URL at Postgres for anything shared.
 ENV PATH="/opt/venv/bin:${PATH}" \
     TFWORKER_CONSOLE_HOST=0.0.0.0 \
-    TFWORKER_CONSOLE_PORT=8000
+    TFWORKER_CONSOLE_PORT=8000 \
+    TFWORKER_CONSOLE_DATABASE_URL=sqlite:////data/console.db \
+    TFWORKER_CONSOLE_AUTO_MIGRATE=true
 
 USER 10001
+VOLUME /data
 EXPOSE 8000
 ENTRYPOINT ["tfworker-console"]
 CMD ["serve"]

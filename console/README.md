@@ -17,6 +17,47 @@ every screen shows a banner saying so. See [Sign-in and roles](#sign-in-and-role
 Settings come from `TFWORKER_CONSOLE_*` environment variables, for example
 `TFWORKER_CONSOLE_PORT=8080`.
 
+## Try it with Docker
+
+The image runs on its own: it keeps its database in SQLite on the `/data`
+volume (`TFWORKER_CONSOLE_DATABASE_URL=sqlite:////data/console.db`) and
+applies migrations at startup (`TFWORKER_CONSOLE_AUTO_MIGRATE=true`). Build it
+from the repository root:
+
+    docker build -f console/Dockerfile -t tfworker-console .
+
+**With sample data**, no AWS needed. The demo seeds two stores, a week of
+runs, saved plans and locks, so every screen has something on it:
+
+    docker run --rm -p 127.0.0.1:8000:8000 \
+      -e TFWORKER_CONSOLE_AUTH=none \
+      -e TFWORKER_CONSOLE_AUTH_ALLOW_REMOTE_NONE=true \
+      -e TFWORKER_CONSOLE_DEMO=true \
+      tfworker-console
+
+Then open http://127.0.0.1:8000. Development mode only listens on loopback,
+and inside a container the console listens on `0.0.0.0`, so
+`TFWORKER_CONSOLE_AUTH_ALLOW_REMOTE_NONE=true` allows that. Publishing the port
+on `127.0.0.1` keeps it to your machine. The demo seeds only an empty
+database and refuses one with other data in it. It has no stores to read, so
+it doesn't reconcile, and it can't be combined with a stores file. Outside
+Docker, `tfworker-console serve --demo` does the same with any database URL.
+
+**With your own stores**, mount a stores file (and optionally a groups file)
+and give the container AWS credentials. The schedule reconciles them:
+
+    docker run --rm -p 127.0.0.1:8000:8000 \
+      -e TFWORKER_CONSOLE_AUTH=none \
+      -e TFWORKER_CONSOLE_AUTH_ALLOW_REMOTE_NONE=true \
+      -e TFWORKER_CONSOLE_STORES_FILE=/config/stores.yaml \
+      -v "$PWD/stores.yaml:/config/stores.yaml:ro" \
+      -v "$HOME/.aws:/home/console/.aws:ro" -e AWS_PROFILE=readonly \
+      -v tfworker-console:/data \
+      tfworker-console
+
+For anything shared, turn sign-in on (see [Sign-in and roles](#sign-in-and-roles))
+and point `TFWORKER_CONSOLE_DATABASE_URL` at Postgres.
+
 ## Stores and the projection
 
 The console reads the run records, status snapshots, plan manifests and

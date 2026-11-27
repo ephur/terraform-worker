@@ -31,7 +31,12 @@ def main() -> None:
 @click.option("--host", default=None, help="Interface to listen on")
 @click.option("--port", default=None, type=int, help="Port to listen on")
 @click.option("--reload", is_flag=True, help="Reload on code changes (development)")
-def serve(host, port, reload) -> None:
+@click.option(
+    "--demo",
+    is_flag=True,
+    help="Seed sample data into an empty database (TFWORKER_CONSOLE_DEMO)",
+)
+def serve(host, port, reload, demo) -> None:
     """Serve the console over HTTP."""
     # the app reads its settings from the environment, so the options go
     # there too; otherwise its checks would judge the default host
@@ -39,6 +44,8 @@ def serve(host, port, reload) -> None:
         os.environ["TFWORKER_CONSOLE_HOST"] = host
     if port:
         os.environ["TFWORKER_CONSOLE_PORT"] = str(port)
+    if demo:
+        os.environ["TFWORKER_CONSOLE_DEMO"] = "true"
     settings = ConsoleSettings()
     uvicorn.run(
         "tfworker_console.app:create_app",

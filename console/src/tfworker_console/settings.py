@@ -15,6 +15,11 @@ class ConsoleSettings(BaseSettings):
     stores_file: Optional[str] = None
     # a YAML file defining deployment groups (see tfworker_console.groups)
     groups_file: Optional[str] = None
+    # apply pending database migrations at startup (the image turns this on)
+    auto_migrate: bool = False
+    # seed sample data into an empty database, so the console can be tried
+    # without any stores; see tfworker_console.demo
+    demo: bool = False
     # seconds between scheduled reconciles while serving; 0 turns them off
     reconcile_interval: float = 300.0
     # a lock with no fresh worker lease is shown as stale once older than this

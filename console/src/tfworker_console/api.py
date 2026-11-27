@@ -80,7 +80,11 @@ def reconcile(
         raise HTTPException(403, "reconciling needs the admin role on every group")
     reconciler = request.app.state.reconciler
     if reconciler is None:
-        raise HTTPException(503, "the console has no database configured")
+        raise HTTPException(
+            503,
+            "nothing to reconcile: the console has no database, or is showing "
+            "the demo",
+        )
     if store is None:
         return [asdict(summary) for summary in reconciler.reconcile_all()]
     if store not in reconciler.stores:
