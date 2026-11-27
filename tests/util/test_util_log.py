@@ -525,3 +525,15 @@ def test_redact_items_tokenize_performance():
 
 if __name__ == "__main__":
     pytest.main()
+
+
+def test_log_to_stderr(monkeypatch):
+    from unittest import mock
+
+    from tfworker.util import log as logmod
+
+    monkeypatch.setattr(logmod, "log_level", logmod.LogLevel.INFO)
+    monkeypatch.setattr(logmod, "log_to_stderr", True)
+    with mock.patch.object(logmod, "secho") as secho:
+        logmod.info("hello")
+    assert secho.call_args.kwargs["err"] is True

@@ -11,6 +11,7 @@ import pytest
 from click.testing import CliRunner
 from moto import mock_aws
 
+import tfworker.util.log as log
 from tfworker.backends import Backends
 from tfworker.cli import cli
 from tfworker.commands.base import BaseCommand
@@ -19,7 +20,7 @@ from tfworker.exceptions import BackendError
 from tfworker.report import BackendLocation, ChangeSummary, DefinitionStatus
 from tfworker.report.models import RunEvent
 from tfworker.report.plans import PlanManifest
-from tfworker.util.plan_manifest import S3ManifestStore
+from tfworker.util.plan_manifest import S3ManifestStore, move
 
 BUCKET = "plans-bucket"
 PREFIX = "prefix"
@@ -51,6 +52,7 @@ def env():
             backend=backend,
         )
         yield state, s3
+        log.log_to_stderr = False
 
 
 def put_state(s3, name, lineage, serial):
@@ -115,6 +117,12 @@ def exists(s3, key):
 
 
 class TestSetup:
+    def test_logs_go_to_stderr_and_nothing_is_provisioned(self, env):
+        state, _ = env
+        command(state)
+        assert log.log_to_stderr is True
+        assert PlansCommand.backend_options == {"provision": False}
+
     def test_needs_the_s3_backend(self, env):
         state, _ = env
         state.root_options.backend = None
@@ -164,6 +172,12 @@ class TestList:
         assert PlanManifest.model_validate(plans[0]).plan_id == "A"
         assert plans[0]["schema"] == "tfworker.plan/v1"
 
+    def test_expired_pending_plan_is_marked(self, env, capsys):
+        state, s3 = env
+        save(s3, "A", expires_at=NOW - timedelta(minutes=1))
+        command(state).list_plans((), None, False)
+        assert "pending (expired)" in capsys.readouterr().out
+
     def test_empty(self, env, capsys):
         state, _ = env
         command(state).list_plans((), None, False)
@@ -207,6 +221,31 @@ class TestDiscard:
         assert not exists(s3, f"{PREFIX}/_tfworker/pending/def/A")
         assert "discarded A (def)" in capsys.readouterr().out
 
+    def test_gate_refuses_a_discarded_plan(self, env):
+        state, s3 = env
+        key = save(s3, "A")
+        command(state).discard(["A"], "bad change", None)
+        store = S3ManifestStore(s3, BUCKET, PREFIX)
+        assert move(store, key, "applying", NOW, "r2", expect={"pending"}) is None
+
+    def test_duplicate_ids_are_discarded_once(self, env, capsys):
+        state, s3 = env
+        save(s3, "A")
+        command(state).discard(["A", "A"], "why", None)
+        assert capsys.readouterr().out.count("discarded A") == 1
+
+    def test_plan_that_kept_changing(self, env):
+        state, s3 = env
+        save(s3, "A")
+        cmd = command(state)
+        with (
+            mock.patch("tfworker.commands.plans.move", return_value=None),
+            mock.patch("tfworker.commands.plans.log.error") as error,
+        ):
+            with pytest.raises(SystemExit):
+                cmd.discard(["A"], "why", None)
+        assert "kept changing" in error.call_args[0][0]
+
     def test_unknown_plan(self, env):
         state, s3 = env
         key = save(s3, "A")
@@ -232,8 +271,8 @@ class TestDiscard:
 
 
 class TestGc:
-    def gc(self, state, dry_run=False, timeout=None, as_json=False):
-        command(state).gc(dry_run, timeout, as_json)
+    def gc(self, state, dry_run=False, timeout=None, as_json=False, **kwargs):
+        command(state).gc(dry_run, timeout, as_json, **kwargs)
 
     def test_fresh_plan_is_kept(self, env, capsys):
         state, s3 = env
@@ -266,7 +305,18 @@ class TestGc:
         assert not exists(s3, f"{PREFIX}/def/terraform.tfplan")
         assert "retired A (def) as stale" in capsys.readouterr().out
 
-    def test_stale_by_a_recorded_run(self, env):
+    @pytest.mark.parametrize(
+        "applied, reason",
+        [
+            (5, "gc: state changed by run r9"),
+            (
+                4,
+                "gc: state changed outside a recorded run "
+                "(the last recorded apply was run r9)",
+            ),
+        ],
+    )
+    def test_stale_by_a_recorded_run(self, env, applied, reason):
         state, s3 = env
         key = save(s3, "A")
         put_state(s3, "def", "lin", 5)
@@ -277,7 +327,11 @@ class TestGc:
             updated_at=NOW,
             updated_by_run="r9",
             last_apply=RunEvent(
-                run_id="r9", action="apply", status="succeeded", at=NOW
+                run_id="r9",
+                action="apply",
+                status="succeeded",
+                at=NOW,
+                applied_serial=applied,
             ),
         )
         state.backend.read_report.return_value = (
@@ -285,7 +339,7 @@ class TestGc:
             "tag",
         )
         self.gc(state)
-        assert status_of(s3, key).history[-1].reason == "gc: state changed by run r9"
+        assert status_of(s3, key).history[-1].reason == reason
         state.backend.read_report.assert_called_with("status/def.json")
 
     def test_unreadable_run_status(self, env):
@@ -302,13 +356,53 @@ class TestGc:
         self.gc(state)
         assert status_of(s3, key).status == "expired"
 
-    def test_orphaned_by_config(self, env):
+    def test_orphaned_by_config_and_state(self, env):
         state, s3 = env
         key = save(s3, "A", definition="gone")
         self.gc(state)
         manifest = status_of(s3, key)
         assert manifest.status == "discarded"
-        assert "no longer in the configuration" in manifest.history[-1].reason
+        assert "no longer in the configuration and has no state" in (
+            manifest.history[-1].reason
+        )
+
+    def test_unconfigured_plan_with_state_is_kept(self, env):
+        state, s3 = env
+        state.definitions = {"def": object()}
+        key = save(s3, "A", definition="other")
+        self.gc(state)
+        assert status_of(s3, key).status == "pending"
+
+    def test_unconfigured_plan_discarded_on_request(self, env):
+        state, s3 = env
+        state.definitions = {"def": object()}
+        key = save(s3, "A", definition="other")
+        self.gc(state, discard_unconfigured=True)
+        manifest = status_of(s3, key)
+        assert manifest.status == "discarded"
+        assert manifest.history[-1].reason.endswith("no longer in the configuration")
+
+    def test_expiry_is_checked_first(self, env):
+        state, s3 = env
+        key = save(s3, "A", definition="gone", expires_at=NOW - timedelta(minutes=1))
+        self.gc(state)
+        assert status_of(s3, key).status == "expired"
+
+    def test_all_records_finds_plans_outside_the_index(self, env):
+        state, s3 = env
+        key = save(s3, "A", expires_at=NOW - timedelta(minutes=1), storage="preview")
+        self.gc(state)
+        assert status_of(s3, key).status == "pending"
+        self.gc(state, all_records=True)
+        assert status_of(s3, key).status == "expired"
+
+    def test_state_that_is_not_an_object(self, env):
+        state, s3 = env
+        key = save(s3, "A")
+        s3.put_object(Bucket=BUCKET, Key=state_key("def"), Body=b"[]")
+        with pytest.raises(SystemExit):
+            self.gc(state)
+        assert status_of(s3, key).status == "pending"
 
     def test_orphaned_by_state(self, env):
         state, s3 = env
@@ -342,7 +436,8 @@ class TestGc:
         state, s3 = env
         key = save(s3, "A")
         s3.put_object(Bucket=BUCKET, Key=state_key("def"), Body=b"not json")
-        self.gc(state)
+        with pytest.raises(SystemExit):
+            self.gc(state)
         assert status_of(s3, key).status == "pending"
 
     def test_state_check_error_is_skipped(self, env):
@@ -353,7 +448,8 @@ class TestGc:
             {"Error": {"Code": "AccessDenied"}}, "HeadObject"
         )
         with mock.patch.object(cmd._client, "head_object", side_effect=error):
-            cmd.gc(False, None, False)
+            with pytest.raises(SystemExit):
+                cmd.gc(False, None, False)
         assert status_of(s3, key).status == "pending"
 
     def test_dry_run_changes_nothing(self, env, capsys):
@@ -386,7 +482,8 @@ class TestGc:
                 "check": "expired",
                 "status": "expired",
                 "reason": swept[0]["reason"],
-                "done": True,
+                "outcome": "retired",
+                "error": None,
             }
         ]
 
@@ -399,7 +496,7 @@ class TestGc:
         assert "it changed first" in capsys.readouterr().out
         assert status_of(s3, key).status == "pending"
 
-    def test_retire_error_is_logged(self, env):
+    def test_retire_error_is_logged(self, env, capsys):
         state, s3 = env
         save(s3, "A", expires_at=NOW - timedelta(minutes=1))
         cmd = command(state)
@@ -409,8 +506,10 @@ class TestGc:
             ),
             mock.patch("tfworker.commands.plans.log.warn") as warn,
         ):
-            cmd.gc(False, None, False)
+            with pytest.raises(SystemExit):
+                cmd.gc(False, None, True)
         assert "boom" in warn.call_args[0][0]
+        assert json.loads(capsys.readouterr().out)[0]["outcome"] == "error"
 
     def test_index_listing_error_exits(self, env):
         state, _ = env
@@ -494,7 +593,17 @@ class TestCli:
     def test_gc(self, run):
         result, cmd = run("gc", "dep", "--dry-run", "--applying-timeout", "6h")
         assert result.exit_code == 0, result.output
-        cmd.return_value.gc.assert_called_once_with(True, 21600.0, False)
+        cmd.return_value.gc.assert_called_once_with(True, 21600.0, False, False, False)
+
+    def test_gc_flags(self, run):
+        result, cmd = run("gc", "dep", "--all-records", "--discard-unconfigured")
+        assert result.exit_code == 0, result.output
+        cmd.return_value.gc.assert_called_once_with(False, None, False, True, True)
+
+    def test_gc_rejects_a_zero_timeout(self, run):
+        result, _ = run("gc", "dep", "--applying-timeout", "0")
+        assert result.exit_code == 2
+        assert "longer than zero" in result.output
 
     def test_gc_rejects_a_bad_timeout(self, run):
         result, _ = run("gc", "dep", "--applying-timeout", "soon")

@@ -190,9 +190,12 @@ def _duration(ctx, param, value):
     if value is None:
         return None
     try:
-        return parse_duration(value)
+        seconds = parse_duration(value)
     except ValueError as e:
         raise click.BadParameter(str(e))
+    if seconds <= 0:
+        raise click.BadParameter("must be longer than zero")
+    return seconds
 
 
 @plans.command("list")
@@ -233,11 +236,30 @@ def plans_discard(deployment: str, plan_ids, reason, definition):
     callback=_duration,
     help="Also mark plans applying for longer than this (such as 6h) failed",
 )
+@click.option(
+    "--all-records",
+    is_flag=True,
+    help="Check every plan record, not only those in the pending index",
+)
+@click.option(
+    "--discard-unconfigured",
+    is_flag=True,
+    help="Discard plans for definitions missing from the configuration, even when their state exists",
+)
 @click.option("--json", "as_json", is_flag=True, help="Print the result as JSON")
-def plans_gc(deployment: str, dry_run, applying_timeout, as_json):
+def plans_gc(
+    deployment: str,
+    dry_run,
+    applying_timeout,
+    all_records,
+    discard_unconfigured,
+    as_json,
+):
     """Retire saved plans that are stale, expired or orphaned"""
     RootCommand(deployment=deployment)
-    PlansCommand(deployment=deployment).gc(dry_run, applying_timeout, as_json)
+    PlansCommand(deployment=deployment).gc(
+        dry_run, applying_timeout, as_json, all_records, discard_unconfigured
+    )
 
 
 # @TODO: Command to list all definitions in the backend for a given deployment

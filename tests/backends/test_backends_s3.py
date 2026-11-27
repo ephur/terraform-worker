@@ -20,6 +20,17 @@ class TestS3BackendInit:
         assert backend._bucket_files is not None
 
     @mock_aws
+    def test_init_without_provisioning(self, mock_authenticators):
+        with (
+            patch.object(S3Backend, "_ensure_locking_table") as table,
+            patch.object(S3Backend, "_ensure_backend_bucket") as bucket,
+            patch.object(S3Backend, "_list_bucket_definitions", return_value=[]),
+        ):
+            S3Backend(mock_authenticators, "test-deployment", provision=False)
+        table.assert_not_called()
+        bucket.assert_not_called()
+
+    @mock_aws
     def test_init_success_alt_region(
         self, mock_authenticators_backend_west, mocker, mock_click_context_backend_west
     ):

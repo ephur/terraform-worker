@@ -467,23 +467,34 @@ plans gc
 Retires the pending plans that can no longer be applied. It is meant to run as a scheduled job. Each
 pending plan is checked in turn:
 
-- **Orphaned.** The definition is no longer in the configuration, or the plan was made against a state
-  that no longer exists. The plan is marked ``discarded``.
 - **Expired.** The plan is past ``expires_at``. It is marked ``expired``.
+- **Orphaned.** The plan was made against a state that no longer exists, or its definition is missing
+  from the configuration and has no state. The plan is marked ``discarded``. A definition that is
+  missing from the configuration but still has state is only treated as orphaned with
+  ``--discard-unconfigured``, so a job run with the wrong configuration does not throw away good plans.
 - **Stale.** The state moved since the plan was made. When the bucket is versioned and the state's
   version id still matches the one recorded at plan time, nothing more is read; otherwise the state's
-  lineage and serial are compared. A stale plan is marked ``stale``, and the reason names the recorded
-  run that last applied the definition, or says the state changed outside a recorded run.
+  lineage and serial are compared. A stale plan is marked ``stale``. The reason names the run that
+  moved the state when the definition's last recorded apply succeeded and left the state at its current
+  serial, and otherwise says the state changed outside a recorded run.
 
-``--applying-timeout`` (for example ``6h``) also marks plans that have been ``applying`` for longer
-than that ``failed``, which recovers plans left behind by a worker that was killed mid apply. This
-pass reads every plan record that has not changed for that long, so it costs more than the others.
+Pending plans are found through the pending index. ``--all-records`` reads every plan record instead,
+which also finds preview plans and any plan whose index entry was lost, at the cost of reading the
+whole history.
+
+``--applying-timeout`` (for example ``6h``, and more than zero) also marks plans that have been
+``applying`` for longer than that ``failed``, which recovers plans left behind by a worker that was
+killed mid apply. This pass reads every plan record that has not changed for that long.
 
 Every change is appended to the plan's history, and the plan file is removed. ``--dry-run`` reports
 what would be retired and changes nothing. ``--json`` prints a list of objects with ``plan_id``,
 ``definition``, ``plan_key``, ``record_key``, ``check`` (``orphaned``, ``expired``, ``stale`` or
-``applying``), ``status``, ``reason`` and ``done``. ``done`` is false when another run changed the
-plan first.
+``applying``), ``status``, ``reason``, ``outcome`` (``planned`` with ``--dry-run``, ``retired``,
+``changed`` when another run changed the plan first, or ``error``) and ``error``. gc exits non-zero
+when any plan could not be checked or retired.
+
+The ``plans`` commands log to stderr, so their output can be piped, and they never create the backend
+bucket or lock table.
 
 .. code-block:: bash
 

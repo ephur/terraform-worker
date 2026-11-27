@@ -33,13 +33,18 @@ class SweptPlan(BaseModel):
     check: Literal["stale", "expired", "orphaned", "applying"]
     status: PlanStatus
     reason: str
-    done: bool = False
+    outcome: Literal["planned", "retired", "changed", "error"] = "planned"
+    error: Optional[str] = None
 
 
 class PlansCommand(BaseCommand):
     """Work on the saved backend plans of one deployment."""
 
+    backend_options = {"provision": False}
+
     def __init__(self, deployment: str, **kwargs) -> None:
+        # stdout carries the command's output, which may be JSON
+        log.log_to_stderr = True
         super().__init__(deployment=deployment, **kwargs)
         root = self.app_state.root_options
         auth = self.app_state.authenticators.get("aws")
@@ -104,6 +109,8 @@ class PlansCommand(BaseCommand):
             )
             expires = m.expires_at.isoformat() if m.expires_at else "never"
             kind = " destroy" if m.destroy else ""
+            if m.status == "pending" and m.is_expired(self._now()):
+                kind += " (expired)"
             click.echo(
                 f"{m.plan_id}  {m.definition}  {m.status}{kind}  {changes}  "
                 f"created {m.created_at.isoformat()}  expires {expires}  run {m.run_id}"
@@ -119,7 +126,7 @@ class PlansCommand(BaseCommand):
         }
         now = self._now()
         failed = False
-        for plan_id in plan_ids:
+        for plan_id in dict.fromkeys(plan_ids):
             key = keys.get(plan_id)
             if key is None:
                 log.error(f"no saved plan {plan_id}")
@@ -143,9 +150,12 @@ class PlansCommand(BaseCommand):
                 continue
             if discarded is None:
                 status = record[0].status if record and record[0] else "unreadable"
-                log.error(
-                    f"plan {plan_id} is {status}; only a pending plan can be discarded"
-                )
+                if status == "pending":
+                    log.error(f"plan {plan_id} kept changing while discarding it")
+                else:
+                    log.error(
+                        f"plan {plan_id} is {status}; only a pending plan can be discarded"
+                    )
                 failed = True
                 continue
             self.store.retire(key, discarded)
@@ -158,22 +168,22 @@ class PlansCommand(BaseCommand):
         dry_run: bool,
         applying_timeout: Optional[float],
         as_json: bool,
+        all_records: bool = False,
+        discard_unconfigured: bool = False,
     ) -> None:
         """Retire pending plans that can no longer be applied."""
         now = self._now()
+        self._discard_unconfigured = discard_unconfigured
         swept: List[SweptPlan] = []
-        try:
-            pending = list(self.store.keys_for(None, prune=not dry_run))
-        except BackendError as e:
-            log.error(str(e))
-            self.ctx.exit(1)
-        for key, manifest in self._manifests(pending):
+        errors = 0
+        for key, manifest in self._candidates(dry_run, all_records):
             if manifest.status != "pending":
                 continue
             try:
                 verdict = self._verdict(manifest, now)
             except BackendError as e:
                 log.warn(f"unable to check saved plan {manifest.plan_id}: {e}")
+                errors += 1
                 continue
             if verdict is not None:
                 check, status, reason = verdict
@@ -181,21 +191,47 @@ class PlansCommand(BaseCommand):
         if applying_timeout is not None:
             swept.extend(self._stuck(now, applying_timeout))
 
-        for plan in swept:
-            if not dry_run:
-                plan.done = self._retire(plan, now)
+        if not dry_run:
+            for plan in swept:
+                self._retire(plan, now)
+                errors += plan.outcome == "error"
 
         if as_json:
             click.echo(json.dumps([p.model_dump(mode="json") for p in swept], indent=2))
-            return
+        else:
+            self._report(swept, dry_run)
+        if errors:
+            log.error(f"{errors} saved plan(s) could not be checked or retired")
+            self.ctx.exit(1)
+
+    @staticmethod
+    def _report(swept: List[SweptPlan], dry_run: bool) -> None:
+        notes = {
+            "changed": " (it changed first; left alone)",
+            "error": " (failed)",
+        }
         verb = "would retire" if dry_run else "retired"
         for p in swept:
-            note = "" if dry_run or p.done else " (it changed first; left alone)"
+            note = notes.get(p.outcome, "")
             click.echo(
                 f"{verb} {p.plan_id} ({p.definition}) as {p.status}: {p.reason}{note}"
             )
         if not swept:
             click.echo("no saved plans to retire")
+
+    def _candidates(
+        self, dry_run: bool, all_records: bool
+    ) -> List[Tuple[str, PlanManifest]]:
+        """Pending plans from the index, or from every record with `all_records`."""
+        try:
+            if all_records:
+                keys = [key for key, _ in self.store.records()]
+            else:
+                keys = list(self.store.keys_for(None, prune=not dry_run))
+        except BackendError as e:
+            log.error(str(e))
+            self.ctx.exit(1)
+        return self._manifests(keys)
 
     @staticmethod
     def _swept(key, manifest, check, status, reason) -> SweptPlan:
@@ -209,7 +245,7 @@ class PlansCommand(BaseCommand):
             reason=reason,
         )
 
-    def _retire(self, plan: SweptPlan, now: datetime) -> bool:
+    def _retire(self, plan: SweptPlan, now: datetime) -> None:
         expect = {"applying"} if plan.check == "applying" else {"pending"}
         try:
             moved = move(
@@ -224,28 +260,38 @@ class PlansCommand(BaseCommand):
             )
         except BackendError as e:
             log.warn(f"unable to retire saved plan {plan.plan_id}: {e}")
-            return False
+            plan.outcome, plan.error = "error", str(e)
+            return
         if moved is None:
-            return False
+            plan.outcome = "changed"
+            return
         self.store.retire(plan.record_key, moved)
-        return True
+        plan.outcome = "retired"
 
     def _verdict(
         self, manifest: PlanManifest, now: datetime
     ) -> Optional[Tuple[str, str, str]]:
         """Why a pending plan should be retired: (check, status, reason), or None."""
-        if manifest.definition not in self.app_state.definitions:
+        if manifest.is_expired(now):
+            return "expired", "expired", f"expired at {manifest.expires_at.isoformat()}"
+        configured = manifest.definition in self.app_state.definitions
+        if not configured and self._discard_unconfigured:
             return (
                 "orphaned",
                 "discarded",
                 f"orphaned: {manifest.definition} is no longer in the configuration",
             )
-        if manifest.is_expired(now):
-            return "expired", "expired", f"expired at {manifest.expires_at.isoformat()}"
 
         bucket, key = self._state_location(manifest)
         head = self._head(bucket, key)
         if head is None:
+            if not configured:
+                return (
+                    "orphaned",
+                    "discarded",
+                    f"orphaned: {manifest.definition} is no longer in the "
+                    "configuration and has no state",
+                )
             if manifest.base_lineage:
                 return "orphaned", "discarded", "orphaned: its state no longer exists"
             return None
@@ -255,7 +301,7 @@ class PlansCommand(BaseCommand):
         lineage, serial = self._state_base(bucket, key)
         if (lineage, serial) == (manifest.base_lineage, manifest.base_serial):
             return None
-        return "stale", "stale", self._why_changed(manifest)
+        return "stale", "stale", self._why_changed(manifest, serial)
 
     def _stuck(self, now: datetime, timeout: float) -> List[SweptPlan]:
         """Plans left applying longer than `timeout` seconds, marked failed."""
@@ -304,10 +350,12 @@ class PlansCommand(BaseCommand):
             ValueError,
         ) as e:
             raise BackendError(f"unable to read state {key}: {e}") from e
+        if not isinstance(state, dict):
+            raise BackendError(f"state {key} is not a terraform state")
         return state.get("lineage") or None, state.get("serial")
 
-    def _why_changed(self, manifest: PlanManifest) -> str:
-        """Name the recorded run that moved the state, if there is one."""
+    def _why_changed(self, manifest: PlanManifest, serial: Optional[int]) -> str:
+        """Name the recorded run that moved the state to `serial`, if there is one."""
         try:
             found = self.app_state.backend.read_report(
                 f"status/{manifest.definition}.json"
@@ -317,6 +365,11 @@ class PlansCommand(BaseCommand):
             log.debug(f"no run status for {manifest.definition}: {e}")
             status = None
         last = status.last_apply if status else None
-        if last is not None and last.at >= manifest.created_at:
+        if last is None or last.at < manifest.created_at:
+            return "state changed outside a recorded run"
+        if last.status == "succeeded" and last.applied_serial == serial:
             return f"state changed by run {last.run_id}"
-        return "state changed outside a recorded run"
+        return (
+            "state changed outside a recorded run "
+            f"(the last recorded apply was run {last.run_id})"
+        )

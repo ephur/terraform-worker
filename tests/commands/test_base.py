@@ -114,6 +114,11 @@ class TestInitFunctions:
         assert b._select_backend(backend, "dep", "auth") == "ok"
         backend.value.assert_called_with("auth", deployment="dep")
 
+    def test_select_backend_passes_options(self):
+        backend = mock.Mock()
+        b._select_backend(backend, "dep", "auth", provision=False)
+        backend.value.assert_called_with("auth", deployment="dep", provision=False)
+
     def test_select_backend_error(self, mocker):
         backend = mock.Mock()
         backend.value.side_effect = b.BackendError("fail", help="h")
