@@ -265,7 +265,7 @@ or destroy. **\\-\\-no-fail-on-apply-error** reports the failures and lets the r
 By default, the **\\-\\-fail-on-apply-error** option is active.
 
 \\-\\-lock-timeout
-++++++++++++++++
+++++++++++++++++++
 
 .. index::
    triple: terraform; options; --lock-timeout
