@@ -14,6 +14,7 @@
   - Definitions carry `apply_failed` (attempted and failed) and `apply_skipped` (had a plan, but a halt stopped the phase before it). A definition with nothing to apply has neither.
   - A failed apply or destroy hook now exits with code 1, like every other phase failure, instead of 2.
 
+## Bug fixes
 - Without `--working-dir`, terraform init/plan/apply, plan JSON output and provider mirroring now run in the resolved temporary working directory instead of `<cwd>/None/...`. The temporary directory is created with `mkdtemp`, so it exists for the whole run, and it is removed at exit (#181).
 - A `.tf` and `.tf.j2` file with the same name now raises the intended "already exists" error instead of `UnboundLocalError` (#182).
 - A failing handler setup or teardown no longer stops the other handlers. Every handler is torn down, a teardown error no longer replaces the run's original failure, and a terminating `HandlerError` in setup or teardown exits with code 1 instead of a traceback. An unexpected (non-`HandlerError`) exception in setup is now logged and the run continues (#188).
