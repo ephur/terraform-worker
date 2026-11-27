@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Callable, Dict, Optional, Union
 import click
 from pydantic import BaseModel, ConfigDict, Field
 
+import tfworker.report.events as events
 import tfworker.util.log as log
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import BackendError, ReportConflictError
@@ -49,6 +50,7 @@ from tfworker.report import (
     RunRecord,
     new_ulid,
 )
+from tfworker.report.events import RUN_EVENT, STATUS_EVENT
 from tfworker.report.models import LOCAL_MODULE_TAG, STATUS_SCHEMA
 from tfworker.report.status import merge_status
 from tfworker.util.provenance import current_run_id, module_sources, run_provenance
@@ -361,8 +363,11 @@ class ReportHandler(BaseHandler):
             log.info(f"run record written: {path}")
         except ReportConflictError:
             log.warn(f"run record {path} already exists; not replaced")
+            return
         except BackendError as e:
             log.warn(f"unable to write the run record {path}: {e}")
+            return
+        events.publish(RUN_EVENT, record.deployment, None, record, record.run_id)
 
     def _write_status(self, record: RunRecord, result: DefinitionResult) -> None:
         path = f"status/{result.definition}.json"
@@ -391,6 +396,13 @@ class ReportHandler(BaseHandler):
                     status.model_dump_json(by_alias=True),
                     if_match=etag,
                     create_only=found is None,
+                )
+                events.publish(
+                    STATUS_EVENT,
+                    status.deployment,
+                    status.definition,
+                    status,
+                    record.run_id,
                 )
                 return
             except ReportConflictError:

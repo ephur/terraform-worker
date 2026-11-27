@@ -178,6 +178,47 @@ lifecycle rule, for example:
       ]
     }
 
+Streaming events
+----------------
+
+The records can also be pushed as `CloudEvents <https://cloudevents.io>`_ 1.0, for dashboards, Argo Events
+sensors or alerting that should not poll the bucket. Set ``format: cloudevents`` on the ``sqs`` handler and
+give it queues, an EventBridge bus, or both:
+
+.. code-block:: yaml
+
+    handlers:
+      sqs:
+        format: cloudevents
+        queues:
+          https://sqs.us-east-1.amazonaws.com/123456789012/all-events: {}
+          https://sqs.us-east-1.amazonaws.com/123456789012/plans:
+            types: ["io.tfworker.plan.*"]
+        event_bus: tfworker
+        types: ["io.tfworker.run.v1", "io.tfworker.status.v1"]
+
+Each event's ``data`` is exactly what was written to the bucket, and an event is only sent after that
+write succeeded, so the bucket stays the source of truth and a consumer that missed events can reconcile
+from it. The event types are:
+
+- ``io.tfworker.run.v1``: a ``tfworker.run/v1`` record, once per run.
+- ``io.tfworker.status.v1``: a ``tfworker.status/v1`` snapshot, after each update. The ``subject`` is the
+  definition.
+- ``io.tfworker.plan.v1``: a ``tfworker.plan/v1`` manifest, each time it is written or changes status.
+- ``io.tfworker.lock.waiting``: the ``lock`` handler started waiting for a held state lock. ``data`` has
+  the deployment, definition, the lock's details and how long the handler will wait.
+
+Every event has ``source`` ``urn:tfworker:deployment:<deployment>`` and a ``tfworkerrunid`` extension
+attribute naming the run that caused it. ``types`` (shell-style patterns) filters which events go to the
+bus and to list-form queues, and a queue rule's own ``types`` overrides it for that queue. On the bus,
+events are sent with ``Source`` ``tfworker`` (``event_source`` changes it) and the event type as
+``DetailType``, with the whole envelope as ``Detail``.
+
+A failure to publish is logged and never fails the run. SQS and EventBridge both limit a message to 256 KiB,
+so a very large run record may be rejected; it is still in the bucket. Without ``format: cloudevents``,
+the ``sqs`` handler keeps sending its original per-stage messages. Publishing needs ``sqs:SendMessage``
+on the queues, ``sqs:ListQueues``, and ``events:PutEvents`` and ``events:DescribeEventBus`` on the bus.
+
 IAM
 ---
 

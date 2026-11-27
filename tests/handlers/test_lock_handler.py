@@ -472,3 +472,21 @@ class TestThroughHandlersCollection:
 
         cmd = make_command(tmp_path)
         assert 119 <= cmd._lock_timeout(definition) <= 120
+
+
+class TestLockWaitingEvent:
+    def test_announced_once_per_wait(self, backend, definition):
+        import tfworker.report.events as events
+
+        seen = []
+        events.subscribe(SimpleNamespace(send=seen.append))
+        backend.get_lock.side_effect = [_lock(), _lock(), None]
+        handler = make_handler(backend, wait=600, poll_interval=10)
+        pre(handler, definition, APPLY)
+        (event,) = seen
+        assert event["type"] == "io.tfworker.lock.waiting"
+        assert event["subject"] == "def1"
+        assert event["source"] == "urn:tfworker:deployment:dep"
+        assert event["tfworkerrunid"] == "run-7"
+        assert event["data"]["lock"]["who"] == "runner@pod-1"
+        assert event["data"]["wait_seconds"] == 600

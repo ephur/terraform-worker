@@ -21,9 +21,11 @@ from zipfile import BadZipFile, ZipFile
 
 import botocore.exceptions
 
+import tfworker.report.events as events
 import tfworker.util.log as log
 from tfworker.exceptions import BackendError, ReportConflictError
 from tfworker.report import ChangeSummary, new_ulid
+from tfworker.report.events import PLAN_EVENT
 from tfworker.report.plans import PlanManifest
 
 MANIFEST_SUFFIX = ".manifest.json"
@@ -66,6 +68,18 @@ def plan_changes(planfile: Path) -> Optional[ChangeSummary]:
     except (OSError, ValueError) as e:
         log.debug(f"unable to read plan changes from {jsonfile}: {e}")
         return None
+
+
+def publish_manifest(manifest: PlanManifest) -> None:
+    """Announce a manifest that was just written."""
+    changed_by = manifest.history[-1].run_id if manifest.history else None
+    events.publish(
+        PLAN_EVENT,
+        manifest.deployment,
+        manifest.definition,
+        manifest,
+        changed_by or manifest.run_id,
+    )
 
 
 def new_manifest(
@@ -269,6 +283,7 @@ class S3ManifestStore(ManifestStore):
         except botocore.exceptions.BotoCoreError as e:
             raise BackendError(f"unable to write plan manifest {key}: {e}") from e
         self._update_index(key, manifest)
+        publish_manifest(manifest)
 
     def keys_for(self, definition, prune=True):
         """
@@ -378,6 +393,7 @@ class LocalManifestStore(ManifestStore):
                 os.replace(tmp, path)
             except OSError as e:
                 raise BackendError(f"unable to write plan manifest {key}: {e}") from e
+        publish_manifest(manifest)
 
 
 def move(

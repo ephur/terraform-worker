@@ -5,6 +5,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
+import tfworker.report.events as events
 from tfworker.commands.terraform import TerraformResult
 from tfworker.custom_types import TerraformAction, TerraformStage
 from tfworker.definitions import Definition
@@ -175,3 +176,173 @@ class TestSQSHandlerExecute:
         body = json.loads(resp["Messages"][0]["Body"])
         assert body["definition"] == "def"
         assert body["exit_code"] == 0
+
+
+class TestSQSConfigFormats:
+    def test_legacy_needs_queues(self):
+        with pytest.raises(ValueError, match="queues are required"):
+            SQSConfig()
+
+    def test_legacy_rejects_cloudevents_options(self):
+        with pytest.raises(ValueError, match="format: cloudevents"):
+            SQSConfig(queues=["q"], event_bus="bus")
+
+    def test_cloudevents_needs_a_target(self):
+        with pytest.raises(ValueError, match="queues, an event_bus"):
+            SQSConfig(format="cloudevents")
+
+    def test_cloudevents_with_only_a_bus(self):
+        assert SQSConfig(format="cloudevents", event_bus="bus").queues == []
+
+
+def _event(event_type="io.tfworker.run.v1"):
+    return {"specversion": "1.0", "id": "1", "type": event_type, "data": {}}
+
+
+@pytest.fixture
+def aws_events():
+    with mock_aws():
+        session = boto3.Session(region_name="us-east-1")
+        sqs = session.client("sqs")
+        bridge = session.client("events")
+        app_state = MagicMock()
+        app_state.authenticators = {"aws": MagicMock(session=session)}
+        ctx = MagicMock(obj=app_state)
+        with patch("click.get_current_context", return_value=ctx):
+            yield sqs, bridge
+
+
+def _messages(sqs, url):
+    found = sqs.receive_message(QueueUrl=url, MaxNumberOfMessages=10)
+    return [json.loads(m["Body"]) for m in found.get("Messages", [])]
+
+
+class TestSQSHandlerCloudEvents:
+    def test_subscribes_and_publishes_to_every_queue(self, aws_events):
+        sqs, _ = aws_events
+        url = sqs.create_queue(QueueName="all")["QueueUrl"]
+        SQSHandler(SQSConfig(format="cloudevents", queues=[url]))
+        events.publish(events.RUN_EVENT, "dep", None, {"a": 1}, "R")
+        (body,) = _messages(sqs, url)
+        assert body["type"] == "io.tfworker.run.v1"
+        assert body["data"] == {"a": 1}
+        assert body["tfworkerrunid"] == "R"
+
+    def test_legacy_format_does_not_subscribe(self, aws_events):
+        sqs, _ = aws_events
+        url = sqs.create_queue(QueueName="legacy")["QueueUrl"]
+        SQSHandler(SQSConfig(queues=[url]))
+        assert events.subscribed() is False
+
+    def test_cloudevents_format_sends_no_stage_messages(self, aws_events):
+        sqs, _ = aws_events
+        url = sqs.create_queue(QueueName="quiet")["QueueUrl"]
+        handler = SQSHandler(SQSConfig(format="cloudevents", queues=[url]))
+        handler.execute(
+            TerraformAction.APPLY,
+            TerraformStage.POST,
+            "dep",
+            Definition(name="def", path="path"),
+            ".",
+            TerraformResult(0, b"", b""),
+        )
+        assert _messages(sqs, url) == []
+
+    def test_routing_by_type(self, aws_events):
+        sqs, _ = aws_events
+        plans = sqs.create_queue(QueueName="plans")["QueueUrl"]
+        runs = sqs.create_queue(QueueName="runs")["QueueUrl"]
+        handler = SQSHandler(
+            SQSConfig(
+                format="cloudevents",
+                queues={plans: QueueRule(types=["io.tfworker.plan.*"]), runs: {}},
+                types=["io.tfworker.run.v1"],
+            )
+        )
+        handler.send(_event("io.tfworker.plan.v1"))
+        handler.send(_event("io.tfworker.run.v1"))
+        handler.send(_event("io.tfworker.lock.waiting"))
+        assert [m["type"] for m in _messages(sqs, plans)] == ["io.tfworker.plan.v1"]
+        assert [m["type"] for m in _messages(sqs, runs)] == ["io.tfworker.run.v1"]
+
+    def test_list_queues_filtered_by_type(self, aws_events):
+        sqs, _ = aws_events
+        url = sqs.create_queue(QueueName="filtered")["QueueUrl"]
+        handler = SQSHandler(
+            SQSConfig(format="cloudevents", queues=[url], types=["io.tfworker.lock.*"])
+        )
+        handler.send(_event("io.tfworker.run.v1"))
+        handler.send(_event("io.tfworker.lock.waiting"))
+        assert [m["type"] for m in _messages(sqs, url)] == ["io.tfworker.lock.waiting"]
+
+    def test_queue_failure_is_logged(self, aws_events):
+        sqs, _ = aws_events
+        url = sqs.create_queue(QueueName="gone")["QueueUrl"]
+        handler = SQSHandler(SQSConfig(format="cloudevents", queues=[url]))
+        sqs.delete_queue(QueueUrl=url)
+        with patch("tfworker.handlers.sqs.log.error") as error:
+            handler.send(_event())
+        assert "Failed to send io.tfworker.run.v1 event" in error.call_args[0][0]
+
+    def test_event_bridge(self, aws_events):
+        _, bridge = aws_events
+        bridge.create_event_bus(Name="tfworker")
+        handler = SQSHandler(
+            SQSConfig(
+                format="cloudevents",
+                event_bus="tfworker",
+                types=["io.tfworker.status.*"],
+            )
+        )
+        with patch.object(
+            handler.events_client,
+            "put_events",
+            wraps=handler.events_client.put_events,
+        ) as put:
+            handler.send(_event("io.tfworker.status.v1"))
+            handler.send(_event("io.tfworker.run.v1"))
+        (entry,) = put.call_args.kwargs["Entries"]
+        assert put.call_count == 1
+        assert entry["Source"] == "tfworker"
+        assert entry["DetailType"] == "io.tfworker.status.v1"
+        assert entry["EventBusName"] == "tfworker"
+        assert json.loads(entry["Detail"])["type"] == "io.tfworker.status.v1"
+
+    def test_missing_event_bus(self, aws_events):
+        with pytest.raises(HandlerError, match="EventBridge bus nope"):
+            SQSHandler(SQSConfig(format="cloudevents", event_bus="nope"))
+
+    def test_rejected_entry_is_logged(self, aws_events):
+        _, bridge = aws_events
+        bridge.create_event_bus(Name="tfworker")
+        handler = SQSHandler(SQSConfig(format="cloudevents", event_bus="tfworker"))
+        rejected = {
+            "FailedEntryCount": 1,
+            "Entries": [{"ErrorCode": "Throttled", "ErrorMessage": "slow down"}],
+        }
+        with (
+            patch.object(handler.events_client, "put_events", return_value=rejected),
+            patch("tfworker.handlers.sqs.log.error") as error,
+        ):
+            handler.send(_event())
+        assert "Throttled slow down" in error.call_args[0][0]
+
+    def test_put_failure_is_logged(self, aws_events):
+        _, bridge = aws_events
+        bridge.create_event_bus(Name="tfworker")
+        handler = SQSHandler(SQSConfig(format="cloudevents", event_bus="tfworker"))
+        with (
+            patch.object(
+                handler.events_client, "put_events", side_effect=RuntimeError("down")
+            ),
+            patch("tfworker.handlers.sqs.log.error") as error,
+        ):
+            handler.send(_event())
+        assert "down" in error.call_args[0][0]
+
+    def test_events_client_needs_aws(self):
+        handler = SQSHandler.__new__(SQSHandler)
+        handler._events_client = None
+        handler._app_state = MagicMock(authenticators={})
+        with pytest.raises(ValueError, match="AWS authenticator"):
+            _ = handler.events_client

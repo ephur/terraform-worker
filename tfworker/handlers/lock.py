@@ -48,11 +48,14 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set, Union
 import click
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+import tfworker.report.events as events
 import tfworker.util.log as log
 from tfworker.backends.lock import LockInfo, WorkerLease
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import BackendError, LockUnavailableError
+from tfworker.report.events import LOCK_WAITING_EVENT
 from tfworker.util.duration import format_duration, parse_duration
+from tfworker.util.provenance import current_run_id
 from tfworker.util.system import pipe_exec
 
 from .base import BaseHandler
@@ -172,6 +175,7 @@ class LockHandler(BaseHandler):
     def __init__(self, config: LockConfig):
         self.config = config
         self._app_state = None
+        self._deployment: Optional[str] = None
         self._heartbeats: Dict[str, _Heartbeat] = {}
         self._host = socket.gethostname()
         self._now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
@@ -211,6 +215,7 @@ class LockHandler(BaseHandler):
         if action not in self.config.actions:
             return
         if stage == TerraformStage.PRE:
+            self._deployment = deployment
             self._acquire(action, definition, working_dir)
         else:
             self._clear(definition)
@@ -287,9 +292,30 @@ class LockHandler(BaseHandler):
                 f"{definition.name} state is locked {self._describe(lock, now)}; "
                 f"waiting up to {format_duration(remaining)} more"
             )
+            if attempt == 0:
+                self._announce_wait(definition, lock, remaining)
             delay = min(self._poll_delay(attempt), remaining)
             attempt += 1
             self._sleep(delay)
+
+    def _announce_wait(
+        self, definition: "Definition", lock: LockInfo, remaining: float
+    ) -> None:
+        if not events.subscribed():
+            return
+        deployment = self._deployment
+        events.publish(
+            LOCK_WAITING_EVENT,
+            deployment,
+            definition.name,
+            {
+                "deployment": deployment,
+                "definition": definition.name,
+                "lock": lock.model_dump(mode="json"),
+                "wait_seconds": round(remaining, 3),
+            },
+            current_run_id(self.app_state)[0],
+        )
 
     def _read_lock(self, name: str) -> Optional[LockInfo]:
         try:

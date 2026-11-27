@@ -539,3 +539,37 @@ class TestReadiness:
         phase = handler._results["def1"].phases["destroy"]
         assert phase.status == "failed"
         assert phase.duration_seconds == 1
+
+
+class TestEvents:
+    def test_run_and_status_events(self, backend, tmp_path):
+        import tfworker.report.events as events
+
+        seen = []
+        events.subscribe(SimpleNamespace(send=seen.append))
+        handler = make_handler(backend, tmp_path, run_id="ev")
+        run_phase(handler, PLAN, make_definition(tmp_path), tmp_path)
+        handler.teardown("test-deployment", str(tmp_path))
+        assert [e["type"] for e in seen] == [
+            "io.tfworker.run.v1",
+            "io.tfworker.status.v1",
+        ]
+        assert seen[0]["data"] == json.loads(
+            backend.read_report(
+                f"runs/{seen[0]['data']['started_at'][:10].replace('-', '/')}/"
+                f"{seen[0]['data']['record_id']}.json"
+            )[0]
+        )
+        assert seen[1]["subject"] == "def1"
+        assert all(e["tfworkerrunid"] == "ev" for e in seen)
+
+    def test_nothing_is_published_when_the_write_fails(self, backend, tmp_path, mocker):
+        import tfworker.report.events as events
+
+        seen = []
+        events.subscribe(SimpleNamespace(send=seen.append))
+        handler = make_handler(backend, tmp_path, run_id="ev2")
+        run_phase(handler, PLAN, make_definition(tmp_path), tmp_path)
+        mocker.patch.object(backend, "write_report", side_effect=BackendError("no"))
+        handler.teardown("test-deployment", str(tmp_path))
+        assert seen == []

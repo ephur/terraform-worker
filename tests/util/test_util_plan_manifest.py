@@ -502,3 +502,31 @@ class TestMarkPendingStale:
                 raise BackendError("no")
 
         assert mark_pending_stale(Broken(None, 0), "net", T0, "r", "x") == 0
+
+
+def test_written_manifests_are_published(tmp_path):
+    from types import SimpleNamespace
+
+    import tfworker.report.events as events
+    from tfworker.report.plans import PlanManifest
+    from tfworker.util.plan_manifest import LocalManifestStore
+
+    seen = []
+    events.subscribe(SimpleNamespace(send=seen.append))
+    manifest = PlanManifest(
+        plan_id="P",
+        run_id="planner",
+        deployment="dep",
+        definition="def",
+        plan_key="k",
+        sha256="0" * 64,
+        size=1,
+        created_at=datetime(2026, 11, 27, tzinfo=timezone.utc),
+    )
+    store = LocalManifestStore()
+    key = str(tmp_path / "def.tfplan.manifest.json")
+    store.write(key, manifest)
+    store.write(key, manifest.moved("applying", run_id="applier"))
+    assert [e["tfworkerrunid"] for e in seen] == ["planner", "applier"]
+    assert seen[1]["type"] == "io.tfworker.plan.v1"
+    assert seen[1]["data"]["status"] == "applying"
