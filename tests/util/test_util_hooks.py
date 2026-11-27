@@ -1,4 +1,5 @@
 import base64
+import json
 import shlex
 from unittest import mock
 
@@ -189,6 +190,53 @@ class TestParseTfvarsFile:
         # Warning should be logged
         mock_log_warn.assert_called_once()
         assert "Failed to parse" in mock_log_warn.call_args[0][0]
+
+    def test_parse_tfvars_json_file(self, tmp_path):
+        """The worker's .auto.tfvars.json file is read with json (#186)."""
+        path = tmp_path / "worker_generated.auto.tfvars.json"
+        values = {
+            "s": 'a "b" ${c}',
+            "n": 5,
+            "b": True,
+            "l": ["x", 1],
+            "m": {"k": "v"},
+        }
+        path.write_text(json.dumps(values))
+        assert hooks._parse_tfvars_file(str(path)) == values
+
+    def test_tfvars_json_hook_env_matches_legacy(self, tmp_path):
+        """
+        Hooks see the same TF_VAR_* values for strings, bools, numbers and
+        string lists/maps as they did with the old HCL file.
+        """
+        legacy = tmp_path / "legacy.auto.tfvars"
+        legacy.write_text(
+            'name = "alpha"\n'
+            'count = "5"\n'
+            "enabled = true\n"
+            'zones = ["a", "b"]\n'
+            'tags = {"team": "infra"}\n'
+        )
+        new = tmp_path / "worker_generated.auto.tfvars.json"
+        new.write_text(
+            json.dumps(
+                {
+                    "name": "alpha",
+                    "count": 5,
+                    "enabled": True,
+                    "zones": ["a", "b"],
+                    "tags": {"team": "infra"},
+                }
+            )
+        )
+
+        def env_for(path):
+            env = {}
+            for k, v in hooks._parse_tfvars_file(str(path)).items():
+                hooks._set_hook_env_var(env, hooks.TFHookVarType.VAR, k, v)
+            return env
+
+        assert env_for(new) == env_for(legacy)
 
     @mock.patch("builtins.open", side_effect=FileNotFoundError)
     def test_parse_tfvars_file_not_found(self, mock_open):

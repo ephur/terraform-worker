@@ -301,10 +301,11 @@ def _prepare_environment(env: Dict[str, str], terraform_path: str) -> Dict[str, 
 
 def _parse_tfvars_file(tfvars_path: str) -> Dict[str, Any]:
     """
-    Parse a .tfvars file into a dictionary of native Python types.
+    Parse a .tfvars or .tfvars.json file into a dictionary of native Python types.
 
-    Uses python-hcl2 to properly parse HCL syntax, ensuring booleans,
-    numbers, strings, lists, and maps are correctly typed.
+    The worker writes ``worker_generated.auto.tfvars.json``, which is read with
+    json. Other files are parsed with python-hcl2, ensuring booleans, numbers,
+    strings, lists, and maps are correctly typed.
 
     Args:
         tfvars_path: Path to the .tfvars file
@@ -315,6 +316,10 @@ def _parse_tfvars_file(tfvars_path: str) -> Dict[str, Any]:
     Raises:
         FileNotFoundError: If the file doesn't exist
     """
+    if tfvars_path.endswith(".json"):
+        with open(tfvars_path, "r") as f:
+            return json.load(f)
+
     try:
         with open(tfvars_path, "r") as f:
             parsed = hcl2.load(f)
