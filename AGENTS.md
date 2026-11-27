@@ -20,7 +20,7 @@
 
 ## Testing Guidelines
 - Frameworks: `pytest` organized with `unittest.TestCase` classes; mock using `pytest-mock` or `unittest.mock`.
-- Coverage: >98% for new/changed code, >90% overall (enforced via `pytest-cov`).
+- Coverage: >98% for new/changed code. The overall floor is `fail_under` in `[tool.coverage.report]` (`pyproject.toml`), enforced by `make test` and CI; raise it when coverage goes up, never lower it.
 - Structure: mirror `tfworker/` in `tests/`; test files named `test_<module>.py`.
 - Run locally with `make test` or `uv run pytest`. Write fast, isolated tests and use dependency injection for seams.
 
