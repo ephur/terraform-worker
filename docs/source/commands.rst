@@ -276,7 +276,7 @@ another process holds. It takes seconds or a duration such as ``90s``, ``10m`` o
 ``lock`` handler is configured, it sets the timeout instead; see :ref:`state-locks`.
 
 \\-\\-intent
-++++++++++
+++++++++++++
 
 .. index::
    triple: terraform; options; --intent
