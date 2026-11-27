@@ -36,6 +36,17 @@ class DummyAppState:
         self.root_options = mock.Mock(log_level="INFO")
 
 
+class TestTerraformEnv:
+    def test_terraform_env_without_authenticators(self, monkeypatch):
+        """A missing authenticators collection is treated as empty."""
+        from tfworker.commands.terraform import terraform_env
+
+        monkeypatch.setenv("FROM_OS", "1")
+        env = terraform_env(SimpleNamespace(authenticators=None))
+        assert env["FROM_OS"] == "1"
+        assert env["TF_IN_AUTOMATION"] == "1"
+
+
 class TestTerraformCommandConfig:
     def test_get_params_apply(self):
         cfg = TerraformCommandConfig(DummyAppState())

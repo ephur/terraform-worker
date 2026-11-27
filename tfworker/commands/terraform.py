@@ -1253,6 +1253,7 @@ def terraform_env(app_state: "AppState") -> Dict[str, str]:
     # reduce non essential terraform output
     env["TF_IN_AUTOMATION"] = "1"
 
-    for auth in app_state.authenticators:
+    # authenticators is optional on AppState; treat a missing collection as empty
+    for auth in app_state.authenticators or []:
         env.update(auth.env())
     return env
