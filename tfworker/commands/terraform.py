@@ -21,6 +21,7 @@ from tfworker.exceptions import (
     LockUnavailableError,
     TFWorkerException,
 )
+from tfworker.locking import StateLocker
 from tfworker.util.duration import parse_duration
 from tfworker.util.system import pipe_exec, pipe_exec_logged
 from tfworker.util.terraform import quote_index_brackets
@@ -893,8 +894,6 @@ class TerraformCommand(BaseCommand):
                 definition=definition,
                 working_dir=self.app_state.working_dir,
             )
-        except LockUnavailableError as e:
-            return self._lock_unavailable(name, action, e, exit_on_error)
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
@@ -906,7 +905,10 @@ class TerraformCommand(BaseCommand):
             return self._hook_failure(name, action, TerraformStage.PRE, exit_on_error)
 
         log.trace(f"running terraform {action.value} for definition {name}")
-        result = self._run(name, action)
+        try:
+            result = self._run_locked(name, action)
+        except LockUnavailableError as e:
+            return self._lock_unavailable(name, action, e, exit_on_error)
         if result.exit_code:
             log.error(f"error running terraform {action.value} for {name}")
             # If stream_output was disabled, show the captured output at error level
@@ -1007,9 +1009,6 @@ class TerraformCommand(BaseCommand):
                 definition=definition,
                 working_dir=self.app_state.working_dir,
             )
-        except LockUnavailableError as e:
-            self._lock_unavailable(name, TerraformAction.PLAN, e, exit_on_error=False)
-            return False
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
@@ -1039,7 +1038,11 @@ class TerraformCommand(BaseCommand):
                 f"targeting resources: {', '.join(self._app_state.terraform_options.target)}"
             )
 
-        result = self._run(name, TerraformAction.PLAN)
+        try:
+            result = self._run_locked(name, TerraformAction.PLAN)
+        except LockUnavailableError as e:
+            self._lock_unavailable(name, TerraformAction.PLAN, e, exit_on_error=False)
+            return
 
         if result.exit_code == 0:
             if definition.always_apply:
@@ -1118,15 +1121,55 @@ class TerraformCommand(BaseCommand):
         log.trace(f"writing json plan file {jsonfile}")
         result.log_file(jsonfile.resolve())
 
-    def _lock_timeout(self, definition: Definition) -> Optional[float]:
+    @property
+    def state_locker(self) -> Optional[StateLocker]:
+        """The state locker when `locking` is configured, else None."""
+        if not hasattr(self, "_state_locker"):
+            options = getattr(self.app_state.loaded_config, "locking", None)
+            self._state_locker = None
+            if options is not None:
+                self._state_locker = StateLocker(
+                    options,
+                    self.app_state.backend,
+                    self.app_state.terraform_options.terraform_bin,
+                    env=lambda: terraform_env(self.app_state),
+                    run_id=getattr(self.app_state.root_options, "run_id", None),
+                )
+        return self._state_locker
+
+    def _run_locked(self, name: str, action: TerraformAction) -> "TerraformResult":
+        """
+        Run terraform once the definition's state lock is free, keeping the
+        worker lease while it runs.
+
+        Raises:
+            LockUnavailableError: the state lock could not be acquired
+        """
+        locker = self.state_locker
+        if locker is None or not locker.covers(action):
+            return self._run(name, action)
+        definition: Definition = self.app_state.definitions[name]
+        started = time.monotonic()
+        try:
+            deadline = locker.acquire(
+                action, name, definition.get_target_path(self.app_state.working_dir)
+            )
+        finally:
+            definition.lock_wait_seconds = time.monotonic() - started
+        try:
+            return self._run(name, action, lock_deadline=deadline)
+        finally:
+            locker.release(name)
+
+    def _lock_timeout(self, lock_deadline: Optional[float]) -> Optional[float]:
         """
         Seconds terraform may wait for the state lock, or None for terraform's default.
 
-        The lock handler sets a deadline on the definition, so time spent in
-        PRE hooks counts against its wait; otherwise `--lock-timeout` applies.
+        With locking configured, whatever is left of its wait applies;
+        otherwise `--lock-timeout` does.
         """
-        if definition.lock_deadline is not None:
-            return max(definition.lock_deadline - time.monotonic(), 0.0)
+        if lock_deadline is not None:
+            return max(lock_deadline - time.monotonic(), 0.0)
         option = getattr(self.app_state.terraform_options, "lock_timeout", None)
         if option is None:
             return None
@@ -1136,6 +1179,7 @@ class TerraformCommand(BaseCommand):
         self,
         definition_name: str,
         action: TerraformAction,
+        lock_deadline: Optional[float] = None,
     ) -> "TerraformResult":
         """
         run terraform
@@ -1145,7 +1189,7 @@ class TerraformCommand(BaseCommand):
         params: str = self.terraform_config.get_params(
             action,
             plan_file=definition.plan_file,
-            lock_timeout=self._lock_timeout(definition),
+            lock_timeout=self._lock_timeout(lock_deadline),
         )
 
         working_dir: str = definition.get_target_path(self.app_state.working_dir)
@@ -1271,12 +1315,11 @@ class TerraformCommand(BaseCommand):
         output = (result.stderr or b"") + (result.stdout or b"")
         if LOCK_ERROR_MARKER not in output:
             return False
-        definition: Definition = self.app_state.definitions[name]
         log.error(
             f"state lock unavailable for definition {name}: terraform could not "
             "acquire the lock before -lock-timeout ran out"
         )
-        return definition.lock_fail_run
+        return self.state_locker is not None and self.state_locker.fail_run
 
     def _lock_unavailable(
         self,
@@ -1289,8 +1332,8 @@ class TerraformCommand(BaseCommand):
         Record that a definition's state lock could not be acquired.
 
         It counts as a failure of that definition's plan, apply or destroy and
-        follows the phase's failure options, like a failing hook, unless the
-        lock handler asked for the whole run to stop.
+        follows the phase's failure options, like a failing hook, unless
+        locking is set to stop the whole run.
         """
         definition: Definition = self.app_state.definitions[name]
         log.error(f"state lock unavailable for definition {name}: {error.message}")

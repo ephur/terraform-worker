@@ -100,7 +100,7 @@ class ReportConflictError(BackendError):
     """A conditional report write lost to a concurrent writer."""
 
 
-class LockUnavailableError(HandlerError):
+class LockUnavailableError(TFWorkerException):
     """
     A definition's state lock could not be acquired: it was held past the
     wait deadline, or it is stale and the stale policy is to fail.
@@ -110,7 +110,8 @@ class LockUnavailableError(HandlerError):
     """
 
     def __init__(self, message: str, fail_run: bool = False) -> None:
-        super().__init__(message, terminate=False)
+        super().__init__(message)
+        self.message = message
         self.fail_run = fail_run
 
 

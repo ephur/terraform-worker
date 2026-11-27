@@ -69,12 +69,7 @@ class Definition(BaseModel):
 
     # Internals, these should not be set by the user
     ready: bool = False
-    # time.monotonic() deadline for the state lock on this definition's next
-    # command; set by the lock handler, overrides --lock-timeout
-    lock_deadline: Optional[float] = None
-    # a lock still held at the deadline stops the run (lock on_timeout: fail_run)
-    lock_fail_run: bool = False
-    # seconds the lock handler spent waiting for the state lock this action
+    # seconds spent waiting for the state lock this action (see tfworker.locking)
     lock_wait_seconds: Optional[float] = None
     needs_apply: bool = False
     plan_failed: bool = False

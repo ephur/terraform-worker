@@ -21,12 +21,13 @@ Execution hooks for handling operations outside of terraform.
 
 State locks
 -----------
-The ``lock`` handler waits for a held state lock instead of failing at once. Before each plan, apply and
-destroy it reads the definition's lock (the ``.tflock`` object with ``use_lockfile``, or the DynamoDB item
+With a top-level ``locking`` block in the config file, the worker waits for a held state lock instead of
+failing at once. Locking is off when the block is absent. Right before each plan, apply and destroy the
+worker reads the definition's lock (the ``.tflock`` object with ``use_lockfile``, or the DynamoDB item
 before Terraform 1.12):
 
 - No lock: terraform runs, with whatever is left of ``wait`` passed as ``-lock-timeout``.
-- A live lock: the handler polls, backing off from ``poll_interval`` up to four times it, and logs the
+- A live lock: the worker polls, backing off from ``poll_interval`` up to four times it, and logs the
   holder, operation and age on each poll until the lock is released. If it is still held when ``wait``
   runs out, that definition fails, and the phase's failure options (such as ``--apply-failures``) decide
   whether the run continues. ``on_timeout: fail_run`` stops the run instead.
@@ -34,7 +35,7 @@ before Terraform 1.12):
   force-unlock, ``wait`` treats it as live, and ``force_unlock`` runs ``terraform force-unlock -force``
   and carries on.
 
-While terraform runs, the handler writes a lease next to the state
+While terraform runs, the worker writes a lease next to the state
 (``<prefix>/<definition>/terraform.tfstate.tfworker-lease.<host>``) and refreshes it every ``heartbeat``.
 The lease decides whether a lock is stale:
 
@@ -53,25 +54,25 @@ that looked stale on two polls, and never the same lock twice.
 
 If terraform itself gives up on the lock (someone took it between the check and the command), the failure
 is reported as a lock failure, and ``on_timeout: fail_run`` still stops the run. The ``-lock-timeout``
-passed to terraform is whatever is left of ``wait`` when terraform starts, so time spent in PRE hooks
-counts against it.
+passed to terraform is whatever is left of ``wait`` when terraform starts. The wait begins after the PRE
+hooks and handlers have run, so they do not count against it.
 
-On a backend that cannot read locks, the handler logs a warning once and only passes ``wait`` as
+On a backend that cannot read locks, the worker logs a warning once and only passes ``wait`` as
 ``-lock-timeout``.
 
 .. code-block:: yaml
 
-    handlers:
-      lock:
-        wait: 10m
-        poll_interval: 15s
-        stale_after: 2h
-        on_stale: fail                # fail | wait | force_unlock
-        on_timeout: fail_definition   # or fail_run
-        heartbeat: 30s                # 0 turns the lease off
-        actions: [plan, apply, destroy]
+    locking:
+      wait: 10m
+      poll_interval: 15s
+      stale_after: 2h
+      on_stale: fail                # fail | wait | force_unlock
+      on_timeout: fail_definition   # or fail_run
+      heartbeat: 30s                # 0 turns the lease off
+      actions: [plan, apply, destroy]
 
-All fields are optional and the values above are the defaults. The handler needs the S3 backend. Besides
+All fields are optional and the values above are the defaults, so ``locking: {}`` turns locking on with
+them. Reading locks needs the S3 backend. Besides
 what terraform already needs, the backend credentials need:
 
 - ``s3:GetObject`` on ``<state key>.tflock`` (Terraform 1.12 and later), or ``dynamodb:GetItem`` on the
