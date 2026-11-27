@@ -432,3 +432,21 @@ class TestExecSkip:
     def test_default_skip_is_a_no_op(self):
         handler = HandlerA()
         assert handler.skip(TerraformAction.PLAN, "dep", DummyDef(), "reason") is None
+
+    def test_invalid_action_is_rejected(self):
+        h = HandlersCollection({"skip": SkipRecorder()})
+        with pytest.raises(HandlerError):
+            h.exec_skip("not-an-action", "dep", DummyDef(), "reason")
+
+    def test_click_exit_from_a_handler_is_not_swallowed(self):
+        import click
+
+        class Exiter(DummyHandler):
+            tag = "exiter"
+
+            def skip(self, action, deployment, definition, reason):
+                raise click.exceptions.Exit(3)
+
+        h = HandlersCollection({"exiter": Exiter()})
+        with pytest.raises(click.exceptions.Exit):
+            h.exec_skip(TerraformAction.PLAN, "dep", DummyDef(), "reason")
