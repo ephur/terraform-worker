@@ -9,7 +9,7 @@
   {% for h in fleet.exceptions %}
   <tr>
     <td class="health h-{{ h.health }}">{{ h.health }}{% if h.locked and h.health != 'locked' %} · locked{% endif %}</td>
-    <td><a href="/definitions/{{ h.definition | urlencode }}">{{ h.definition }}</a></td>
+    <td><a href="/definitions/{{ h.definition | urlencode }}{% if scope_query %}?{{ scope_query }}{% endif %}">{{ h.definition }}</a></td>
     <td>{{ h.deployment }}</td><td>{{ h.store }}</td>
     <td>{{ event(h.last_apply) }}</td><td>{{ event(h.last_failure) }}</td><td>{{ event(h.pending_plan) }}</td>
   </tr>

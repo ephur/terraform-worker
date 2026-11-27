@@ -63,19 +63,37 @@ def reconcile(request: Request, store: Optional[str] = None) -> List[dict]:
 
 
 @router.get("/fleet", response_model=queries.Fleet)
-def fleet(session: Session = Depends(get_session), scope: Scope = Depends(get_scope)):
+def fleet(
+    session: Session = Depends(get_session),
+    scope: Scope = Depends(get_scope),
+    now: datetime = Depends(get_now),
+):
     """Health counts, and every definition that is not ok, exceptions first."""
-    return queries.fleet(session, scope)
+    return queries.fleet(session, scope, now)
 
 
 @router.get("/deployments", response_model=List[queries.DeploymentSummary])
 def deployments(
-    session: Session = Depends(get_session), scope: Scope = Depends(get_scope)
+    session: Session = Depends(get_session),
+    scope: Scope = Depends(get_scope),
+    now: datetime = Depends(get_now),
 ):
-    return queries.deployments(session, scope)
+    return queries.deployments(session, scope, now)
 
 
-@router.get("/definitions/{name}", response_model=queries.DefinitionView)
+@router.get(
+    "/definitions/{name:path}/timeline", response_model=List[queries.TimelineEntry]
+)
+def timeline(
+    name: str,
+    limit: int = Query(200, ge=1, le=1000),
+    session: Session = Depends(get_session),
+    scope: Scope = Depends(get_scope),
+):
+    return queries.timeline(session, scope, name, limit)
+
+
+@router.get("/definitions/{name:path}", response_model=queries.DefinitionView)
 def definition(
     name: str,
     session: Session = Depends(get_session),
@@ -90,16 +108,6 @@ def definition(
     return view
 
 
-@router.get("/definitions/{name}/timeline", response_model=List[queries.TimelineEntry])
-def timeline(
-    name: str,
-    limit: int = Query(200, ge=1, le=1000),
-    session: Session = Depends(get_session),
-    scope: Scope = Depends(get_scope),
-):
-    return queries.timeline(session, scope, name, limit)
-
-
 @router.get("/plans", response_model=List[queries.PlanView])
 def plans(
     status: Optional[str] = None,
@@ -107,8 +115,9 @@ def plans(
     limit: int = Query(200, ge=1, le=1000),
     session: Session = Depends(get_session),
     scope: Scope = Depends(get_scope),
+    now: datetime = Depends(get_now),
 ):
-    return queries.plans(session, scope, status, definition, limit)
+    return queries.plans(session, scope, now, status, definition, limit)
 
 
 @router.get("/locks", response_model=List[queries.LockView])

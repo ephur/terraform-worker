@@ -6,14 +6,16 @@ any time. A state's identity is store + deployment + definition, where the
 deployment is the prefix segment its state lives under.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (
     JSON,
     DateTime,
     ForeignKeyConstraint,
+    Index,
     String,
+    TypeDecorator,
     create_engine,
     event,
 )
@@ -21,8 +23,36 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
+class UTCDateTime(TypeDecorator):
+    """
+    A timestamp stored and returned in UTC on every database.
+
+    SQLite keeps no offset, so values are converted to UTC before they are
+    written and marked UTC when read; Postgres values are moved to UTC too, so
+    ordering, filtering and the API's output never depend on the backend.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        value = value.astimezone(timezone.utc)
+        return value.replace(tzinfo=None) if dialect.name == "sqlite" else value
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+
 class Base(DeclarativeBase):
-    type_annotation_map = {datetime: DateTime(timezone=True), dict: JSON}
+    type_annotation_map = {datetime: UTCDateTime(), dict: JSON}
 
 
 class Store(Base):
@@ -80,6 +110,32 @@ class Run(Base):
     started_at: Mapped[datetime] = mapped_column(index=True)
     finished_at: Mapped[Optional[datetime]]
     body: Mapped[dict]
+
+
+class RunDefinition(Base):
+    """One definition's part of a run record, so views can filter in SQL."""
+
+    __tablename__ = "run_definitions"
+    __table_args__ = (
+        Index(
+            "ix_run_definitions_lookup",
+            "store",
+            "definition",
+            "deployment",
+            "started_at",
+        ),
+    )
+
+    store: Mapped[str] = mapped_column(String(128), primary_key=True)
+    record_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    definition: Mapped[str] = mapped_column(String(255), primary_key=True)
+    deployment: Mapped[str] = mapped_column(String(255))
+    started_at: Mapped[datetime] = mapped_column(index=True)
+    # the DefinitionResult's phases, module_sources and tags
+    phases: Mapped[dict]
+    module_sources: Mapped[Optional[list]] = mapped_column(JSON)
+    tags: Mapped[Optional[list]] = mapped_column(JSON)
+    local_modules: Mapped[bool]
 
 
 class Status(Base):

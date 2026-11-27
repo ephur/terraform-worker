@@ -2,10 +2,11 @@
 {% block title %}Locks · tfworker console{% endblock %}
 {% block content %}
 <h1>Locks</h1>
+<p class="muted">Live or stale as of the last reconcile that saw each lock.</p>
 <table>
   <tr><th>Definition</th><th>Deployment</th><th>State</th><th>Held by</th><th>Operation</th><th>Age</th><th>Lease</th></tr>
   {% for l in locks %}
-  <tr><td><a href="/definitions/{{ l.definition | urlencode }}">{{ l.definition }}</a></td><td>{{ l.deployment }}</td>
+  <tr><td><a href="/definitions/{{ l.definition | urlencode }}{% if scope_query %}?{{ scope_query }}{% endif %}">{{ l.definition }}</a></td><td>{{ l.deployment }}</td>
       <td class="health h-{{ l.state }}">{{ l.state }}</td><td>{{ l.who }}</td><td>{{ l.operation }}</td>
       <td>{{ (l.age_seconds // 60)|int }}m</td><td class="muted">{{ 'heartbeat ' ~ l.lease.heartbeat_at if l.lease else 'none' }}</td></tr>
   {% else %}<tr><td colspan="7" class="muted">No locks held.</td></tr>{% endfor %}

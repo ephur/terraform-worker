@@ -32,6 +32,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 from tfworker.backends.lock import LockInfo, WorkerLease
 from tfworker.report import DefinitionStatus, PlanManifest, RunRecord
+from tfworker.report.models import LOCAL_MODULE_TAG
 
 from . import db
 from .stores import StoreConfig, list_keys, list_segments
@@ -44,7 +45,15 @@ LEASE_SUFFIX = ".tfworker-lease."
 REPORT_DIR = "_tfworker/"
 KINDS = {"runs": "run", "status": "status", "plans": "plan"}
 # every table keyed by store and deployment, children before parents
-PROJECTED = (db.Definition, db.Lock, db.Run, db.Status, db.Plan, db.SeenObject)
+PROJECTED = (
+    db.Definition,
+    db.Lock,
+    db.RunDefinition,
+    db.Run,
+    db.Status,
+    db.Plan,
+    db.SeenObject,
+)
 
 
 @dataclass
@@ -334,9 +343,34 @@ class Reconciler:
                     body=record.model_dump(mode="json", by_alias=True),
                 )
             )
+            session.execute(
+                delete(db.RunDefinition).where(
+                    db.RunDefinition.store == store,
+                    db.RunDefinition.record_id == record.record_id,
+                )
+            )
             for result in record.definitions:
                 self._definition(
                     session, store, deployment, result.definition, None, now
+                )
+                session.merge(
+                    db.RunDefinition(
+                        store=store,
+                        record_id=record.record_id,
+                        definition=result.definition,
+                        deployment=deployment,
+                        started_at=record.started_at,
+                        phases={
+                            action: phase.model_dump(mode="json")
+                            for action, phase in result.phases.items()
+                        },
+                        module_sources=[
+                            source.model_dump(mode="json")
+                            for source in result.module_sources
+                        ],
+                        tags=list(result.tags),
+                        local_modules=LOCAL_MODULE_TAG in result.tags,
+                    )
                 )
             return record.record_id
         if kind == "status":
@@ -372,6 +406,13 @@ class Reconciler:
             "status": (db.Status, (seen.store, seen.deployment, seen.ref)),
             "plan": (db.Plan, (seen.store, seen.ref)),
         }[seen.kind]
+        if seen.kind == "run":
+            session.execute(
+                delete(db.RunDefinition).where(
+                    db.RunDefinition.store == seen.store,
+                    db.RunDefinition.record_id == seen.ref,
+                )
+            )
         row = session.get(model, key)
         if row is not None:
             session.delete(row)

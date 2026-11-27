@@ -77,6 +77,12 @@ screen sets them, and htmx swaps the content in place.
 | `/runs` | `GET /api/v1/runs`, `GET /api/v1/runs/{store}/{record_id}` | run records, and the full record |
 | `/tracking/local-modules` | `GET /api/v1/tracking/local-modules` | the weekly share of applies that used a module from a local path |
 
+Health is worst first. A definition is *failing* when its newest failure is
+newer than its newest successful plan or apply, *drifted* while a drift check
+found changes, and *pending* while a saved plan is pending and unexpired. Lock
+state is judged as of the reconcile that saw it, and each lock shows how long
+ago that was. Times are stored and returned in UTC on every database.
+
 `POST /api/v1/reconcile[?store=NAME]` reconciles now instead of waiting for
 the schedule and returns each store's summary. Until roles arrive (#237) the
 console has no access control, so serve it only where everyone who can reach

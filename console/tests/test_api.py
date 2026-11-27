@@ -8,24 +8,25 @@ from tfworker.report import (
     BackendLocation,
     ChangeSummary,
     DefinitionResult,
-    DefinitionStatus,
     ModuleSource,
     PhaseResult,
     PlanManifest,
     Provenance,
     RunRecord,
 )
-from tfworker.report.models import LOCAL_MODULE_TAG, RunEvent
+from tfworker.report.models import LOCAL_MODULE_TAG
+from tfworker.report.status import merge_status
 
 from tfworker_console import db, queries
 from tfworker_console.app import create_app
 from tfworker_console.migrate import upgrade
 from tfworker_console.queries import Scope
-from tfworker_console.reconcile import StoreSummary
+from tfworker_console.reconcile import Reconciler, StoreSummary
 from tfworker_console.settings import ConsoleSettings
 
 NOW = datetime(2026, 11, 27, 12, 0, tzinfo=timezone.utc)
 HOUR = timedelta(hours=1)
+MINUTE = timedelta(minutes=1)
 
 
 def _json(model) -> dict:
@@ -38,89 +39,181 @@ def _state(prefix, definition):
     )
 
 
-def _event(run_id, action, at, status="succeeded", add=0, reason=None):
-    return RunEvent(
-        run_id=run_id,
+def phase(action, status, at, reason=None):
+    return PhaseResult(
         action=action,
         status=status,
-        at=at,
-        changes=ChangeSummary(add=add),
+        started_at=at,
+        finished_at=at + timedelta(minutes=1),
         reason=reason,
     )
 
 
-def _status(store, deployment, definition, **events):
-    body = DefinitionStatus(
-        deployment=deployment,
-        definition=definition,
-        state=_state(deployment, definition),
-        updated_at=NOW,
-        updated_by_run="run-1",
-        **events,
-    )
-    return db.Status(
-        store=store,
-        deployment=deployment,
-        definition=definition,
-        updated_at=NOW,
-        body=_json(body),
-    )
-
-
-def _result(definition, apply_status, ref, tags=(), started=NOW - HOUR):
+def result(definition, phases, ref="v1", changes=None, tags=()):
     return DefinitionResult(
         definition=definition,
         state=_state("p", definition),
-        phases={
-            "plan": PhaseResult(
-                action="plan",
-                status="succeeded",
-                started_at=started,
-                finished_at=started + timedelta(minutes=1),
-            ),
-            "apply": PhaseResult(
-                action="apply",
-                status=apply_status,
-                started_at=started + timedelta(minutes=1),
-                finished_at=started + timedelta(minutes=2),
-                reason="exit 1" if apply_status == "failed" else None,
-            ),
-        },
-        module_sources=[
-            ModuleSource(
-                key="vpc",
-                source="git::https://example.com/modules.git",
-                kind="git",
-                ref=ref,
-                sha=ref * 8,
-            )
-        ],
+        phases={p.action: p for p in phases},
+        changes=changes,
+        module_sources=(
+            [
+                ModuleSource(
+                    key="vpc",
+                    source="git::https://example.com/modules.git",
+                    kind="git",
+                    ref=ref,
+                    sha=ref * 8,
+                )
+            ]
+            if ref
+            else []
+        ),
         tags=list(tags),
     )
 
 
-def _run(store, deployment, record_id, started, results, status="succeeded"):
-    body = RunRecord(
+def record(deployment, record_id, started, results, intent="deploy"):
+    failed = any(p.status == "failed" for r in results for p in r.phases.values())
+    return RunRecord(
         record_id=record_id,
         run_id=f"run-{record_id}",
         deployment=deployment,
         started_at=started,
         finished_at=started + timedelta(minutes=5),
-        status=status,
+        status="failed" if failed else "succeeded",
         actions=["plan", "apply"],
-        provenance=Provenance(intent="deploy"),
+        provenance=Provenance(intent=intent, plan_storage="backend"),
         definitions=results,
     )
-    return db.Run(
-        store=store,
-        record_id=record_id,
-        run_id=body.run_id,
-        deployment=deployment,
-        status=status,
-        started_at=started,
-        finished_at=body.finished_at,
-        body=_json(body),
-    )
+
+
+def runs_for_seed():
+    """(store, record) pairs, oldest first, as a worker would write them."""
+    t0, t_fail, t_drift = NOW - 30 * HOUR, NOW - HOUR, NOW - 90 * MINUTE
+    t_beta, t_sandbox = NOW - 2 * HOUR, NOW - 3 * HOUR
+    add2 = ChangeSummary(add=2, destroy=1)
+    return [
+        (
+            "prod",
+            record(
+                "alpha",
+                "R0",
+                t0,
+                [
+                    result(
+                        "net",
+                        [
+                            phase("plan", "succeeded", t0),
+                            phase("apply", "succeeded", t0 + MINUTE),
+                        ],
+                        changes=add2,
+                    ),
+                ],
+            ),
+        ),
+        (
+            "prod",
+            record(
+                "beta-us",
+                "R6",
+                t0,
+                [
+                    result(
+                        "dns",
+                        [
+                            phase("plan", "succeeded", t0),
+                            phase("apply", "failed", t0 + MINUTE, "exit 1"),
+                        ],
+                        ref=None,
+                        changes=add2,
+                    ),
+                ],
+            ),
+        ),
+        (
+            "dev",
+            record(
+                "sandbox",
+                "R3",
+                t_sandbox,
+                [
+                    result(
+                        "net",
+                        [
+                            phase("plan", "succeeded", t_sandbox),
+                            phase("apply", "skipped", t_sandbox),
+                        ],
+                        ref="v2",
+                        changes=ChangeSummary(),
+                    ),
+                ],
+            ),
+        ),
+        (
+            "prod",
+            record(
+                "beta-us",
+                "R2",
+                t_beta,
+                [
+                    result(
+                        "net",
+                        [
+                            phase("plan", "succeeded", t_beta),
+                            phase("apply", "skipped", t_beta),
+                        ],
+                        ref="v2",
+                        changes=add2,
+                    ),
+                    result(
+                        "dns",
+                        [
+                            phase("plan", "succeeded", t_beta),
+                            phase("apply", "succeeded", t_beta + MINUTE),
+                        ],
+                        ref=None,
+                        changes=add2,
+                    ),
+                ],
+            ),
+        ),
+        (
+            "prod",
+            record(
+                "alpha",
+                "R5",
+                t_drift,
+                [
+                    result(
+                        "dns",
+                        [phase("plan", "succeeded", t_drift)],
+                        ref=None,
+                        changes=ChangeSummary(add=1),
+                    ),
+                ],
+                intent="drift",
+            ),
+        ),
+        (
+            "prod",
+            record(
+                "alpha",
+                "R1",
+                t_fail,
+                [
+                    result(
+                        "net",
+                        [
+                            phase("plan", "succeeded", t_fail),
+                            phase("apply", "failed", t_fail + MINUTE, "exit 1"),
+                        ],
+                        changes=add2,
+                        tags=[LOCAL_MODULE_TAG],
+                    ),
+                ],
+            ),
+        ),
+    ]
 
 
 def _plan(store, deployment, plan_id, status="pending", storage="backend", at=NOW):
@@ -212,60 +305,27 @@ def seed(session):
                 last_seen=NOW,
             )
         )
+    reconciler = Reconciler([], None, now=lambda: NOW)
+    statuses = {}
+    for store, run in runs_for_seed():
+        reconciler._project(
+            session, store, run.deployment, "run", run.model_dump_json(by_alias=True)
+        )
+        for item in run.definitions:
+            key = (store, run.deployment, item.definition)
+            statuses[key] = merge_status(statuses.get(key), run, item, NOW)
+    for (store, deployment, definition), status in statuses.items():
+        session.add(
+            db.Status(
+                store=store,
+                deployment=deployment,
+                definition=definition,
+                updated_at=status.updated_at,
+                body=_json(status),
+            )
+        )
     session.add_all(
         [
-            # failing: the failure is newer than the last apply
-            _status(
-                "prod",
-                "alpha",
-                "net",
-                last_apply=_event("run-R0", "apply", NOW - 30 * HOUR),
-                last_failure=_event(
-                    "run-R1", "apply", NOW - HOUR, "failed", reason="exit 1"
-                ),
-            ),
-            _status(
-                "prod",
-                "alpha",
-                "dns",
-                drift=_event("run-R1", "plan", NOW - HOUR, add=1),
-            ),
-            _status(
-                "prod",
-                "beta-us",
-                "net",
-                pending_plan=_event("run-R2", "plan", NOW - 2 * HOUR, add=2),
-            ),
-            # a failure an apply has since recovered from is ok
-            _status(
-                "prod",
-                "beta-us",
-                "dns",
-                last_failure=_event("run-R0", "apply", NOW - 30 * HOUR, "failed"),
-                last_apply=_event("run-R2", "apply", NOW - 2 * HOUR, add=3),
-            ),
-            _run(
-                "prod",
-                "alpha",
-                "R1",
-                NOW - HOUR,
-                [_result("net", "failed", "v1", tags=[LOCAL_MODULE_TAG])],
-                status="failed",
-            ),
-            _run(
-                "prod",
-                "beta-us",
-                "R2",
-                NOW - 2 * HOUR,
-                [_result("net", "succeeded", "v2", started=NOW - 2 * HOUR)],
-            ),
-            _run(
-                "dev",
-                "sandbox",
-                "R3",
-                NOW - 3 * HOUR,
-                [_result("net", "skipped", "v2", started=NOW - 3 * HOUR)],
-            ),
             _plan("prod", "beta-us", "P1", at=NOW - 2 * HOUR),
             _plan("prod", "alpha", "P2", storage="preview", at=NOW - HOUR),
             _plan("dev", "sandbox", "P3", status="discarded", at=NOW - 3 * HOUR),
@@ -399,7 +459,10 @@ class TestDefinition:
         assert by[("prod", "beta-us")]["lock"]["state"] == "stale"
         assert [p["plan_id"] for p in by[("prod", "alpha")]["previews"]] == ["P2"]
         assert by[("prod", "alpha")]["pending_plan"] is None
-        assert [r["record_id"] for r in by[("prod", "alpha")]["recent_runs"]] == ["R1"]
+        assert [r["record_id"] for r in by[("prod", "alpha")]["recent_runs"]] == [
+            "R1",
+            "R0",
+        ]
         (vpc,) = body["modules"]
         assert vpc["key"] == "vpc" and vpc["skewed"] is True
         assert sorted(v["ref"] for v in vpc["versions"]) == ["v1", "v2", "v2"]
@@ -417,9 +480,25 @@ class TestDefinition:
         assert ("sandbox", "plan", "plan P3", "discarded") in kinds
         assert len(client.get("/api/v1/definitions/net/timeline?limit=2").json()) == 2
 
-    def test_module_sources_skip_runs_without_them(self, sessions):
+    def test_no_module_sources_recorded(self, client):
+        assert client.get("/api/v1/definitions/dns").json()["modules"] == []
+
+    def test_definition_names_with_slashes(self, client, sessions):
         with sessions() as session:
-            assert queries._module_sources(session, "prod", "alpha", "dns") == []
+            session.add(
+                db.Definition(
+                    store="dev",
+                    deployment="sandbox",
+                    name="team/net",
+                    state_key=None,
+                    last_seen=NOW,
+                )
+            )
+            session.commit()
+        body = client.get("/api/v1/definitions/team/net").json()
+        assert body["definition"] == "team/net"
+        assert client.get("/api/v1/definitions/team/net/timeline").json() == []
+        assert client.get("/definitions/team/net").status_code == 200
 
 
 class TestLists:
@@ -444,11 +523,13 @@ class TestLists:
 
     def test_runs(self, client):
         rows = client.get("/api/v1/runs").json()
-        assert [r["record_id"] for r in rows] == ["R1", "R2", "R3"]
+        assert [r["record_id"] for r in rows] == ["R1", "R5", "R2", "R3", "R6", "R0"]
         assert rows[0]["intent"] == "deploy" and rows[0]["definitions"] == ["net"]
         failed = client.get("/api/v1/runs?status=failed").json()
-        assert [r["record_id"] for r in failed] == ["R1"]
-        assert client.get("/api/v1/runs?definition=dns").json() == []
+        assert [r["record_id"] for r in failed] == ["R1", "R6"]
+        dns = client.get("/api/v1/runs?definition=dns&store=prod").json()
+        assert [r["record_id"] for r in dns] == ["R5", "R2", "R6"]
+        assert client.get("/api/v1/runs?definition=nope").json() == []
         assert len(client.get("/api/v1/runs?limit=1").json()) == 1
 
     def test_run_record(self, client):
@@ -461,38 +542,123 @@ class TestLists:
         assert [w["week"] for w in weeks] == ["2026-W46", "2026-W47", "2026-W48"]
         assert weeks[-1] == {
             "week": "2026-W48",
-            "applies": 2,
+            "applies": 4,
             "local": 1,
-            "share": 0.5,
+            "share": 0.25,
         }
         assert weeks[0]["share"] == 0.0
 
 
-def test_naive_run_times_count_as_utc(sessions):
+def test_times_are_stored_and_returned_in_utc(sessions):
+    pacific = timezone(timedelta(hours=-8))
+    run = record(
+        "sandbox",
+        "R9",
+        (NOW - 30 * MINUTE).astimezone(pacific),
+        [result("net", [phase("apply", "succeeded", NOW)])],
+    )
     with sessions() as session:
-        row = session.get(db.Run, ("prod", "R1"))
-        row.started_at = row.started_at.replace(tzinfo=None)
-        weeks = queries.local_module_applies(session, Scope(), NOW, 1)
-    assert weeks[-1].applies == 2
+        Reconciler([], None)._project(
+            session, "dev", "sandbox", "run", run.model_dump_json(by_alias=True)
+        )
+        session.commit()
+    with sessions() as session:
+        row = session.get(db.Run, ("dev", "R9"))
+        assert row.started_at == NOW - 30 * MINUTE
+        assert row.started_at.utcoffset() == timedelta(0)
+        newest = queries.runs(session, Scope(["dev"]), limit=1)
+        assert [r.record_id for r in newest] == ["R9"]
 
 
-def test_locked_is_the_last_exception():
-    assert queries._health({}, True) == "locked"
-    assert queries._health({}, False) == "ok"
+class TestHealth:
+    def status(self, *runs):
+        status = None
+        for run in runs:
+            status = merge_status(status, run, run.definitions[0], NOW)
+        return _json(status)
+
+    def test_a_first_apply_that_fails_is_failing(self):
+        run = record("d", "A", NOW, [result("net", [phase("apply", "failed", NOW)])])
+        assert queries._health(self.status(run), False, False) == "failing"
+
+    def test_a_clean_plan_after_a_failed_plan_recovers(self):
+        failed = record(
+            "d", "A", NOW - HOUR, [result("net", [phase("plan", "failed", NOW - HOUR)])]
+        )
+        clean = record(
+            "d",
+            "B",
+            NOW,
+            [result("net", [phase("plan", "succeeded", NOW)], changes=ChangeSummary())],
+        )
+        assert queries._health(self.status(failed), False, False) == "failing"
+        assert queries._health(self.status(failed, clean), False, False) == "ok"
+
+    def test_times_are_compared_as_times(self):
+        body = {
+            "last_apply": {
+                "run_id": "a",
+                "at": "2026-11-27T10:00:00Z",
+                "status": "succeeded",
+            },
+            "last_failure": {
+                "run_id": "b",
+                "at": "2026-11-27T10:00:00.500000Z",
+                "status": "failed",
+            },
+        }
+        assert queries._health(body, False, False) == "failing"
+        body["last_failure"]["at"] = "2026-11-27T07:00:00-05:00"
+        assert queries._health(body, False, False) == "failing"
+        body["last_apply"]["at"] = "2026-11-27T07:30:00-05:00"
+        assert queries._health(body, False, False) == "ok"
+
+    def test_locked_is_the_last_exception(self):
+        assert queries._health({}, True, False) == "locked"
+        assert queries._health({}, False, False) == "ok"
+
+    def test_a_discarded_plan_is_no_longer_pending(self, client, sessions):
+        with sessions() as session:
+            row = session.get(db.Plan, ("prod", "P1"))
+            row.status = "discarded"
+            session.commit()
+        net = client.get("/api/v1/definitions/net").json()
+        beta = [d for d in net["deployments"] if d["health"]["deployment"] == "beta-us"]
+        assert beta[0]["health"]["health"] == "locked"
+        assert beta[0]["health"]["pending_plan"] is None
+
+    def test_an_expired_plan_is_no_longer_pending(self, client):
+        client.app.state.clock = lambda: NOW + 30 * HOUR
+        plans = {p["plan_id"]: p for p in client.get("/api/v1/plans").json()}
+        assert plans["P1"]["expired"] is True and plans["P3"]["expired"] is False
+        fleet = client.get("/api/v1/fleet").json()
+        assert fleet["counts"]["pending"] == 0
+        net = client.get("/api/v1/definitions/net").json()
+        assert all(d["pending_plan"] is None for d in net["deployments"])
+
+
+def test_a_live_lock_stays_live_between_reconciles(client):
+    client.app.state.clock = lambda: NOW + 5 * MINUTE
+    (lock,) = client.get("/api/v1/locks?state=live").json()
+    assert lock["definition"] == "vpc"
+    assert lock["observed_seconds_ago"] == 300.0
+    assert lock["age_seconds"] == 900.0
 
 
 def test_timeline_skips_other_definitions_and_untimed_phases(sessions):
-    result = _result("net", "succeeded", "v3")
-    result.phases["plan"] = PhaseResult(action="plan", status="skipped")
+    untimed = PhaseResult(action="plan", status="skipped")
+    run = record(
+        "sandbox",
+        "R4",
+        NOW,
+        [
+            result("dns", [phase("apply", "succeeded", NOW)]),
+            result("net", [untimed, phase("apply", "succeeded", NOW)]),
+        ],
+    )
     with sessions() as session:
-        session.add(
-            _run(
-                "dev",
-                "sandbox",
-                "R4",
-                NOW,
-                [_result("dns", "succeeded", "v3"), result],
-            )
+        Reconciler([], None)._project(
+            session, "dev", "sandbox", "run", run.model_dump_json(by_alias=True)
         )
         session.commit()
         entries = queries.timeline(session, Scope(["dev"]), "net")
@@ -521,6 +687,27 @@ class TestScreens:
         assert expected in response.text
         assert response.text.startswith("<!doctype html>")
         assert "option selected>prod" not in response.text
+
+    def test_the_scope_follows_navigation(self, client):
+        page = client.get("/runs?store=prod&deployment=alpha").text
+        assert 'hx-get="/runs"' in page
+        assert 'href="/plans?store=prod&amp;deployment=alpha"' in page
+        assert "/definitions/net?store=prod" not in page  # runs link records
+        fleet = client.get("/?store=prod").text
+        assert 'href="/definitions/net?store=prod"' in fleet
+        assert 'href="/locks"' in client.get("/").text
+
+    def test_partials_vary_and_history_restores_get_the_page(self, client):
+        partial = client.get("/", headers={"HX-Request": "true"})
+        assert partial.headers["Vary"] == "HX-Request"
+        restore = client.get(
+            "/",
+            headers={"HX-Request": "true", "HX-History-Restore-Request": "true"},
+        )
+        assert restore.text.startswith("<!doctype html>")
+
+    def test_htmx_is_pinned_with_integrity(self, client):
+        assert 'integrity="sha384-' in client.get("/").text
 
     def test_htmx_swaps_only_the_content(self, client):
         response = client.get("/?store=prod", headers={"HX-Request": "true"})
@@ -585,3 +772,18 @@ class TestReconcileEndpoint:
 
     def test_reads_are_not_writes(self, client):
         assert client.get("/api/v1/reconcile").status_code == 405
+
+
+def test_utc_datetime_type():
+    from sqlalchemy.dialects import postgresql, sqlite
+
+    column = db.UTCDateTime()
+    pg, lite = postgresql.dialect(), sqlite.dialect()
+    eastern = datetime(2026, 11, 27, 7, 0, tzinfo=timezone(timedelta(hours=-5)))
+    assert column.process_bind_param(None, pg) is None
+    assert column.process_result_value(None, pg) is None
+    assert column.process_bind_param(eastern, pg) == NOW
+    assert column.process_bind_param(eastern, lite) == NOW.replace(tzinfo=None)
+    assert column.process_bind_param(NOW.replace(tzinfo=None), pg) == NOW
+    assert column.process_result_value(eastern, pg).tzinfo == timezone.utc
+    assert column.process_result_value(NOW.replace(tzinfo=None), lite) == NOW

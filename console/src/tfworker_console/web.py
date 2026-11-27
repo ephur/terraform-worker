@@ -3,6 +3,7 @@
 from datetime import datetime
 from importlib import resources
 from typing import Optional
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -26,9 +27,13 @@ def _render(request: Request, name: str, session: Session, scope: Scope, **conte
             db.Deployment.store, db.Deployment.name
         )
     ).all()
-    # htmx swaps only the content when the picker or a filter changes
-    partial = request.headers.get("HX-Request") == "true"
-    return templates.TemplateResponse(
+    # htmx swaps only the content when the picker or a filter changes, but a
+    # history restore needs the whole page back
+    partial = (
+        request.headers.get("HX-Request") == "true"
+        and request.headers.get("HX-History-Restore-Request") != "true"
+    )
+    response = templates.TemplateResponse(
         request,
         name,
         {
@@ -36,10 +41,16 @@ def _render(request: Request, name: str, session: Session, scope: Scope, **conte
             "scope": scope,
             "stores": sorted({store for store, _ in deployments}),
             "all_deployments": sorted({name for _, name in deployments}),
-            "query": str(request.query_params),
+            # appended to links so the scope follows navigation
+            "scope_query": urlencode(
+                [("store", s) for s in scope.stores]
+                + [("deployment", d) for d in scope.deployments]
+            ),
             **context,
         },
     )
+    response.headers["Vary"] = "HX-Request"
+    return response
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -47,9 +58,10 @@ def fleet_page(
     request: Request,
     session: Session = Depends(get_session),
     scope: Scope = Depends(get_scope),
+    now: datetime = Depends(get_now),
 ):
     return _render(
-        request, "fleet.html", session, scope, fleet=queries.fleet(session, scope)
+        request, "fleet.html", session, scope, fleet=queries.fleet(session, scope, now)
     )
 
 
@@ -58,17 +70,18 @@ def deployments_page(
     request: Request,
     session: Session = Depends(get_session),
     scope: Scope = Depends(get_scope),
+    now: datetime = Depends(get_now),
 ):
     return _render(
         request,
         "deployments.html",
         session,
         scope,
-        deployments=queries.deployments(session, scope),
+        deployments=queries.deployments(session, scope, now),
     )
 
 
-@router.get("/definitions/{name}", response_class=HTMLResponse)
+@router.get("/definitions/{name:path}", response_class=HTMLResponse)
 def definition_page(
     name: str,
     request: Request,
@@ -96,6 +109,7 @@ def plans_page(
     status: Optional[str] = None,
     session: Session = Depends(get_session),
     scope: Scope = Depends(get_scope),
+    now: datetime = Depends(get_now),
 ):
     return _render(
         request,
@@ -103,7 +117,7 @@ def plans_page(
         session,
         scope,
         status=status,
-        plans=queries.plans(session, scope, status or None),
+        plans=queries.plans(session, scope, now, status or None),
     )
 
 

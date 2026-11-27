@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}tfworker console{% endblock %}</title>
-  <script src="https://unpkg.com/htmx.org@1.9.12" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js" integrity="sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2XoQrxeTUQyRjrOnlCoYta87iKBWq3EsdM2" crossorigin="anonymous"></script>
   <style>
     :root { --fg: #1d2330; --muted: #5d6677; --line: #dde1e8; --bg: #fff; --accent: #2f5bd3;
             --failing: #b42318; --drifted: #b54708; --pending: #175cd3; --locked: #6941c6; --ok: #067647; }
@@ -28,9 +28,9 @@
 <body>
 <header>
   <strong>tfworker console</strong>
-  <a href="/">Fleet</a><a href="/deployments">Deployments</a><a href="/plans">Plans</a>
-  <a href="/locks">Locks</a><a href="/runs">Runs</a><a href="/tracking/local-modules">Local modules</a>
-  <form class="picker" hx-get="" hx-target="main" hx-push-url="true" hx-trigger="change">
+  <a href="/{% if scope_query %}?{{ scope_query }}{% endif %}">Fleet</a><a href="/deployments{% if scope_query %}?{{ scope_query }}{% endif %}">Deployments</a><a href="/plans{% if scope_query %}?{{ scope_query }}{% endif %}">Plans</a>
+  <a href="/locks{% if scope_query %}?{{ scope_query }}{% endif %}">Locks</a><a href="/runs{% if scope_query %}?{{ scope_query }}{% endif %}">Runs</a><a href="/tracking/local-modules{% if scope_query %}?{{ scope_query }}{% endif %}">Local modules</a>
+  <form class="picker" hx-get="{{ request.url.path }}" hx-target="main" hx-push-url="true" hx-trigger="change">
     <select name="store" aria-label="Store">
       <option value="">All stores</option>
       {% for store in stores %}<option {% if store in scope.stores %}selected{% endif %}>{{ store }}</option>{% endfor %}
