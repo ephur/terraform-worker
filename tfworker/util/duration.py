@@ -1,5 +1,6 @@
 """Parse human readable durations such as ``90s``, ``20m`` or ``1h30m``."""
 
+import math
 import re
 from typing import Union
 
@@ -33,6 +34,8 @@ def parse_duration(value: Union[str, int, float]) -> float:
             seconds = sum(
                 float(number) * _UNITS[unit] for number, unit in _PART.findall(text)
             )
+    if not math.isfinite(seconds):
+        raise ValueError(f"invalid duration: {value!r}; it must be finite")
     if seconds < 0:
         raise ValueError(f"invalid duration: {value!r}; it cannot be negative")
     return seconds
