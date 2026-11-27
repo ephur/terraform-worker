@@ -98,6 +98,11 @@ markers = [
     "performance: mark a test as a performance test"
 ]
 
+[tool.coverage.report]
+fail_under = 93
+show_missing = true
+skip_empty = true
+
 [tool.mypy]
 python_version = "3.11"
 show_error_codes = true

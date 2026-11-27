@@ -16,7 +16,7 @@ format: init-dev
 
 test: init-dev
 	uv run pytest -p no:warnings --disable-socket
-	uv run coverage report --fail-under=60 -m --skip-empty
+	uv run coverage report
 
 ci-test: init-dev
 	uv run pytest --disable-socket --junitxml=reports/junit.xml
@@ -24,7 +24,7 @@ ci-test: init-dev
 
 dep-test: init-dev
 	uv run pytest --disable-socket
-	uv run coverage report --fail-under=60 -m --skip-empty
+	uv run coverage report
 
 typecheck: init-dev
 	uv run mypy -p tfworker

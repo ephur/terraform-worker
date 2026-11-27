@@ -57,4 +57,4 @@ jobs:
         run: uv run pytest -p no:warnings --disable-socket
 
       - name: Check coverage
-        run: uv run coverage report --fail-under=60 -m --skip-empty
+        run: uv run coverage report
