@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from . import db
 from .auth import AuthError, Principal, local_login, pkce_pair
-from .security import identify, remember, sign_out_everywhere
+from .security import _sessions, identify, remember, sign_out_everywhere
 
 router = APIRouter(include_in_schema=False)
 
@@ -72,7 +72,7 @@ def login(
     if settings.auth == "none":
         return RedirectResponse("/", status_code=303)
     try:
-        with request.app.state.sessions() as session:
+        with _sessions(request)() as session:
             principal = local_login(
                 session,
                 username,
@@ -150,7 +150,7 @@ def auth_callback(
     if len(name) > 255 or len(subject) > 1024:
         return _page(request, "the sign-in names an identity that is too long", 403)
     now = _now(request)
-    with request.app.state.sessions() as session:
+    with _sessions(request)() as session:
         # the row belongs to the provider's subject; the name it was first
         # recorded under stays its name, so attribution does not move
         user = session.scalar(select(db.User).where(db.User.subject == subject))
@@ -180,7 +180,7 @@ def logout(request: Request):
     if principal is not None and principal.kind == "user":
         # the cookie is the session, so signing out ends every session of
         # the account rather than trusting the browser to forget this one
-        with request.app.state.sessions() as session:
+        with _sessions(request)() as session:
             sign_out_everywhere(session, principal.name)
             session.commit()
     request.session.clear()

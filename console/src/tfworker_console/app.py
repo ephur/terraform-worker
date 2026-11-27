@@ -62,6 +62,11 @@ def _check_auth(settings: ConsoleSettings) -> None:
         return
     if not settings.secret_key:
         raise ValueError("set TFWORKER_CONSOLE_SECRET_KEY to sign session cookies")
+    if not settings.database_url:
+        raise ValueError(
+            "sign-in keeps accounts in the database; set "
+            "TFWORKER_CONSOLE_DATABASE_URL, or TFWORKER_CONSOLE_AUTH=none to develop"
+        )
     if settings.auth == "oidc" and not (
         settings.oidc_issuer and settings.oidc_client_id and settings.public_url
     ):

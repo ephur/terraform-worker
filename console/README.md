@@ -149,7 +149,7 @@ groups some grant names. `GET /api/v1/me` shows the caller and their grants.
 | `none` | nobody: everyone is an admin. For development only |
 
 Every mode but `none` needs `TFWORKER_CONSOLE_SECRET_KEY`, a long random
-string that signs the session cookie. Sessions last
+string that signs the session cookie, and a database for the accounts. Sessions last
 `TFWORKER_CONSOLE_SESSION_MAX_AGE` seconds (8 hours). The cookie is sent only
 over HTTPS unless `TFWORKER_CONSOLE_SECURE_COOKIES=false`, which plain-HTTP
 testing needs.

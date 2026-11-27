@@ -129,13 +129,18 @@ class TestSettings:
     def test_sign_in_needs_a_secret_and_an_issuer(self):
         with pytest.raises(ValueError, match="SECRET_KEY"):
             create_app(ConsoleSettings(auth="local"))
+        with pytest.raises(ValueError, match="DATABASE_URL"):
+            create_app(ConsoleSettings(auth="local", secret_key="x"))
         with pytest.raises(ValueError, match="OIDC_ISSUER"):
-            create_app(ConsoleSettings(auth="oidc", secret_key="x"))
+            create_app(
+                ConsoleSettings(auth="oidc", secret_key="x", database_url="sqlite://")
+            )
         with pytest.raises(ValueError, match="PUBLIC_URL"):
             create_app(
                 ConsoleSettings(
                     auth="oidc",
                     secret_key="x",
+                    database_url="sqlite://",
                     oidc_issuer=ISSUER,
                     oidc_client_id=CLIENT_ID,
                 )
@@ -461,6 +466,7 @@ class TestTokens:
         client.app.state.sessions = None
         headers = {"Authorization": "Bearer tfw_anything"}
         assert client.get("/api/v1/me", headers=headers).status_code == 503
+        assert sign_in(client, "ana").status_code == 503
 
 
 class StubProvider:
