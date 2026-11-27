@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -32,12 +33,18 @@ def main() -> None:
 @click.option("--reload", is_flag=True, help="Reload on code changes (development)")
 def serve(host, port, reload) -> None:
     """Serve the console over HTTP."""
+    # the app reads its settings from the environment, so the options go
+    # there too; otherwise its checks would judge the default host
+    if host:
+        os.environ["TFWORKER_CONSOLE_HOST"] = host
+    if port:
+        os.environ["TFWORKER_CONSOLE_PORT"] = str(port)
     settings = ConsoleSettings()
     uvicorn.run(
         "tfworker_console.app:create_app",
         factory=True,
-        host=host or settings.host,
-        port=port or settings.port,
+        host=settings.host,
+        port=settings.port,
         reload=reload,
     )
 
