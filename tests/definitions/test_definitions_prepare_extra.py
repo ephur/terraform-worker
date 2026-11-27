@@ -24,6 +24,7 @@ from tfworker.definitions.prepare import (
     get_jinja_env,
     write_template_file,
 )
+from tfworker.exceptions import TFWorkerException
 
 
 @pytest.fixture
@@ -92,8 +93,10 @@ def test_write_template_file_already_exists(tmp_path):
     tpl.write_text("foo")
     (tpl_dir / "dup.tf").write_text("exists")
     env = get_jinja_env(str(tpl_dir), {})
-    with pytest.raises(Exception):
+    # regression for #182: this used to surface as UnboundLocalError
+    with pytest.raises(TFWorkerException, match="already exists"):
         write_template_file(env, str(tpl_dir), "dup.tf.j2")
+    assert (tpl_dir / "dup.tf").read_text() == "exists"
 
 
 def test_write_template_file_render_error(tmp_path):
@@ -382,6 +385,15 @@ def test_get_template_vars(mocker, def_prepare, definition, monkeypatch):
     assert result["var"]["foo"] == "bar"
     assert result["var"]["baz"] == "qux"
     assert result["env"]["EXAMPLE"] == "value"
+
+
+def test_get_template_vars_value_with_equals(mocker, def_prepare, definition):
+    """A config var whose value contains '=' must not crash (#187)."""
+    mocker.patch.object(Definition, "get_template_vars", return_value={})
+    def_prepare._app_state.root_options.config_var = ["b64=YWJj==", "url=x?a=1&b=2"]
+    result = def_prepare._get_template_vars("def1")
+    assert result["var"]["b64"] == "YWJj=="
+    assert result["var"]["url"] == "x?a=1&b=2"
 
 
 # ===== Tests for nested remote_vars structures =====

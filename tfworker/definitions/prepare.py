@@ -309,7 +309,7 @@ class DefinitionPrepare:
         ).copy()
 
         for item in self._app_state.root_options.config_var:
-            k, v = item.split("=")
+            k, v = item.split("=", 1)
             template_vars[k] = v
 
         return {
@@ -401,23 +401,21 @@ def write_template_file(
     template_target = f"{template_path}/{'.'.join(template_file.split('.')[:-1])}"
 
     try:
-        f = open(template_target, "x")
-        try:
-            f.writelines(jinja_env.get_template(template_file).generate())
-            log.debug(f"rendered {template_file} into {template_target}")
-        except (
-            jinja2.exceptions.UndefinedError,
-            jinja2.exceptions.TemplateSyntaxError,
-        ) as e:
-            raise TFWorkerException(
-                f"{template_path}/{template_file} could not be rendered: {e}"
-            ) from e
+        with open(template_target, "x") as f:
+            try:
+                f.writelines(jinja_env.get_template(template_file).generate())
+                log.debug(f"rendered {template_file} into {template_target}")
+            except (
+                jinja2.exceptions.UndefinedError,
+                jinja2.exceptions.TemplateSyntaxError,
+            ) as e:
+                raise TFWorkerException(
+                    f"{template_path}/{template_file} could not be rendered: {e}"
+                ) from e
     except FileExistsError as e:
         raise TFWorkerException(
             f"{template_target} already exists! Make sure there's not a .tf and .tf.j2 copy of this file"
         ) from e
-    finally:
-        f.close()
 
 
 def filter_templates(filename):
