@@ -56,9 +56,9 @@ class TestLockInspectionDefaults:
         assert backend.lock_inspection is False
         for call in (
             lambda: backend.get_lock("d"),
-            lambda: backend.get_lease("d"),
+            lambda: backend.get_lease("d", "h"),
             lambda: backend.put_lease(None),
-            lambda: backend.delete_lease("d"),
+            lambda: backend.delete_lease("d", "h"),
         ):
             with pytest.raises(NotImplementedError):
                 call()

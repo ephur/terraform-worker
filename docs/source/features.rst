@@ -35,18 +35,29 @@ before Terraform 1.12):
   and carries on.
 
 While terraform runs, the handler writes a lease next to the state
-(``<prefix>/<definition>/terraform.tfstate.tfworker-lease``) and refreshes it every ``heartbeat``. The
-lease decides whether a lock is stale:
+(``<prefix>/<definition>/terraform.tfstate.tfworker-lease.<host>``) and refreshes it every ``heartbeat``.
+The lease decides whether a lock is stale:
 
-- A lock held by a worker whose lease is fresh (refreshed within two heartbeats) is live at any age, so a
-  long apply is never mistaken for a dead one.
-- A lock held by a worker whose lease stopped being refreshed is stale at once, so a killed pod's lock
-  goes stale within a minute or two.
+- A lock held by a worker whose lease is fresh is live at any age, so a long apply is never mistaken for a
+  dead one. A lease is fresh while it was refreshed within three heartbeats plus one minute.
+- A lock held by a worker whose lease stopped being refreshed is stale once that window passes, so a
+  killed pod's lock goes stale within a few minutes.
 - A lock with no lease from its holder, such as one taken by a person running terraform, is stale once it
   is older than ``stale_after``.
 
-The lease is matched to the lock by host (the part of terraform's ``Who`` after ``@``, which is the pod
-name in Kubernetes), and it is removed when the action finishes.
+The lease is found by the host in terraform's lock (the part of ``Who`` after ``@``, which is the pod name
+in Kubernetes). Each host writes and removes only its own lease, and it is removed when the action
+finishes. The freshness window compares the reader's clock with the time the holder wrote, so hosts need
+clocks within about a minute of each other. ``force_unlock`` relies on this; it also only removes a lock
+that looked stale on two polls, and never the same lock twice.
+
+If terraform itself gives up on the lock (someone took it between the check and the command), the failure
+is reported as a lock failure, and ``on_timeout: fail_run`` still stops the run. The ``-lock-timeout``
+passed to terraform is whatever is left of ``wait`` when terraform starts, so time spent in PRE hooks
+counts against it.
+
+On a backend that cannot read locks, the handler logs a warning once and only passes ``wait`` as
+``-lock-timeout``.
 
 .. code-block:: yaml
 
@@ -65,4 +76,6 @@ what terraform already needs, the backend credentials need:
 
 - ``s3:GetObject`` on ``<state key>.tflock`` (Terraform 1.12 and later), or ``dynamodb:GetItem`` on the
   ``terraform-<deployment>`` table (earlier versions).
-- ``s3:GetObject``, ``s3:PutObject`` and ``s3:DeleteObject`` on ``<state key>.tfworker-lease``.
+- ``s3:GetObject``, ``s3:PutObject`` and ``s3:DeleteObject`` on ``<state key>.tfworker-lease.*``.
+- With ``on_stale: force_unlock``, terraform's own unlock rights: ``s3:DeleteObject`` on the
+  ``.tflock`` object, or ``dynamodb:DeleteItem`` on the table.

@@ -2,6 +2,7 @@ import json
 import os
 from contextlib import closing
 from typing import TYPE_CHECKING, Generator, Optional, Union
+from urllib.parse import quote
 
 import boto3.dynamodb
 import botocore
@@ -225,12 +226,14 @@ class S3Backend(BaseBackend):
             obj = self._s3_client.get_object(
                 Bucket=self._app_state.root_options.backend_bucket, Key=key
             )
+            with closing(obj["Body"]) as body:
+                return body.read().decode()
         except botocore.exceptions.ClientError as e:
             if e.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
                 return None
             raise BackendError(f"unable to read s3 object {key}: {e}") from e
-        with closing(obj["Body"]) as body:
-            return body.read().decode()
+        except botocore.exceptions.BotoCoreError as e:
+            raise BackendError(f"unable to read s3 object {key}: {e}") from e
 
     def get_lock(self, definition: str) -> Optional[LockInfo]:
         state_key = self._state_key(definition)
@@ -246,9 +249,11 @@ class S3Backend(BaseBackend):
                     Key={"LockID": {"S": f"{bucket}/{state_key}"}},
                     ConsistentRead=True,
                 ).get("Item")
-            except botocore.exceptions.ClientError as e:
+            except (
+                botocore.exceptions.ClientError,
+                botocore.exceptions.BotoCoreError,
+            ) as e:
                 raise BackendError(f"unable to read {source}: {e}") from e
-            # the item exists without Info between terraform's digest writes
             text = (item or {}).get("Info", {}).get("S")
         if not text:
             return None
@@ -257,8 +262,11 @@ class S3Backend(BaseBackend):
         except ValueError as e:
             raise BackendError(f"unable to parse {source}: {e}") from e
 
-    def get_lease(self, definition: str) -> Optional[WorkerLease]:
-        key = f"{self._state_key(definition)}{LEASE_SUFFIX}"
+    def _lease_key(self, definition: str, host: str) -> str:
+        return f"{self._state_key(definition)}{LEASE_SUFFIX}.{quote(host, safe='')}"
+
+    def get_lease(self, definition: str, host: str) -> Optional[WorkerLease]:
+        key = self._lease_key(definition, host)
         text = self._get_object_text(key)
         if not text:
             return None
@@ -269,7 +277,7 @@ class S3Backend(BaseBackend):
             return None
 
     def put_lease(self, lease: WorkerLease) -> None:
-        key = f"{self._state_key(lease.definition)}{LEASE_SUFFIX}"
+        key = self._lease_key(lease.definition, lease.host)
         try:
             self._s3_client.put_object(
                 Bucket=self._app_state.root_options.backend_bucket,
@@ -277,16 +285,22 @@ class S3Backend(BaseBackend):
                 Body=lease.model_dump_json().encode(),
                 ContentType="application/json",
             )
-        except botocore.exceptions.ClientError as e:
+        except (
+            botocore.exceptions.ClientError,
+            botocore.exceptions.BotoCoreError,
+        ) as e:
             raise BackendError(f"unable to write worker lease {key}: {e}") from e
 
-    def delete_lease(self, definition: str) -> None:
-        key = f"{self._state_key(definition)}{LEASE_SUFFIX}"
+    def delete_lease(self, definition: str, host: str) -> None:
+        key = self._lease_key(definition, host)
         try:
             self._s3_client.delete_object(
                 Bucket=self._app_state.root_options.backend_bucket, Key=key
             )
-        except botocore.exceptions.ClientError as e:
+        except (
+            botocore.exceptions.ClientError,
+            botocore.exceptions.BotoCoreError,
+        ) as e:
             raise BackendError(f"unable to delete worker lease {key}: {e}") from e
 
     @staticmethod
@@ -386,6 +400,11 @@ class S3Backend(BaseBackend):
         bucket = self._app_state.root_options.backend_bucket
 
         for s3_object in self.filter_keys(s3_paginator, bucket, prefix):
+            if LEASE_SUFFIX in s3_object.rsplit("/", 1)[-1]:
+                # a lease left by a worker that was killed; not a state
+                self._delete_with_versions(s3_object)
+                log.info(f"worker lease removed: {s3_object}")
+                continue
             backend_file = self._s3_client.get_object(Bucket=bucket, Key=s3_object)
             body = backend_file["Body"]
             with closing(backend_file["Body"]):

@@ -59,6 +59,11 @@ class LockInfo(BaseModel):
         return (now - self.created).total_seconds()
 
 
+# a lease missing this many heartbeats, plus the skew allowance, is dead
+FRESH_INTERVALS = 3
+CLOCK_SKEW_SECONDS = 60.0
+
+
 class WorkerLease(BaseModel):
     """
     A heartbeat the worker keeps beside the state while terraform runs.
@@ -85,9 +90,12 @@ class WorkerLease(BaseModel):
         return _aware(value)
 
     def is_fresh(self, now: datetime) -> bool:
-        """True while the lease was refreshed within two heartbeat intervals."""
+        """
+        True while the lease was refreshed within the freshness window: three
+        heartbeat intervals plus an allowance for clock skew between hosts.
+        """
         age = (now - self.heartbeat_at).total_seconds()
-        return age <= 2 * self.heartbeat_seconds
+        return age <= FRESH_INTERVALS * self.heartbeat_seconds + CLOCK_SKEW_SECONDS
 
     def holds(self, lock: LockInfo) -> bool:
         """

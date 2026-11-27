@@ -118,16 +118,16 @@ class BaseBackend(metaclass=ABCMeta):
         """
         raise NotImplementedError
 
-    def get_lease(self, definition: str) -> Optional[WorkerLease]:
-        """Return the worker lease beside a definition's state, or None."""
+    def get_lease(self, definition: str, host: str) -> Optional[WorkerLease]:
+        """Return the lease a worker on `host` keeps beside a definition's state, or None."""
         raise NotImplementedError
 
     def put_lease(self, lease: WorkerLease) -> None:
-        """Write or refresh the worker lease for `lease.definition`."""
+        """Write or refresh this worker's lease for `lease.definition`."""
         raise NotImplementedError
 
-    def delete_lease(self, definition: str) -> None:
-        """Remove the worker lease beside a definition's state, if any."""
+    def delete_lease(self, definition: str, host: str) -> None:
+        """Remove the lease a worker on `host` keeps beside a definition's state, if any."""
         raise NotImplementedError
 
 

@@ -30,6 +30,10 @@ if TYPE_CHECKING:
     from tfworker.definitions.plan import DefinitionPlan
 
 
+# terraform prints this when it gives up waiting for a held state lock
+LOCK_ERROR_MARKER = b"Error acquiring the state lock"
+
+
 class TerraformCommand(BaseCommand):
     """
     The TerraformCommand class is called by the top level CLI
@@ -918,12 +922,13 @@ class TerraformCommand(BaseCommand):
                     for line in result.stderr.decode().strip().split("\n"):
                         if line.strip():
                             log.error(f"[{name}] stderr: {line}")
+            fail_run = self._lock_held_failure(name, result)
             if action in (TerraformAction.APPLY, TerraformAction.DESTROY):
                 self._record_apply_failure(
                     name, f"terraform {action.value} exited {result.exit_code}"
                 )
             self._exec_error_handlers(name, action, result)
-            if exit_on_error:
+            if exit_on_error or fail_run:
                 self.ctx.exit(1)
             return result
 
@@ -1050,10 +1055,13 @@ class TerraformCommand(BaseCommand):
         if result.exit_code == 1:
             log.error(f"error running terraform plan for {name}")
             definition.plan_failed = True
+            fail_run = self._lock_held_failure(name, result)
             # dispatch the ERROR stage so handlers see the failure; the plan
             # loop decides whether to halt and the exit code is governed by
             # fail_on_plan_error. POST success handlers/hooks are skipped.
             self._exec_error_handlers(name, TerraformAction.PLAN, result)
+            if fail_run:
+                self.ctx.exit(1)
             return
 
         if result.exit_code == 2:
@@ -1114,11 +1122,11 @@ class TerraformCommand(BaseCommand):
         """
         Seconds terraform may wait for the state lock, or None for terraform's default.
 
-        The lock handler sets the time left of its wait on the definition;
-        otherwise `--lock-timeout` applies.
+        The lock handler sets a deadline on the definition, so time spent in
+        PRE hooks counts against its wait; otherwise `--lock-timeout` applies.
         """
-        if definition.lock_timeout is not None:
-            return definition.lock_timeout
+        if definition.lock_deadline is not None:
+            return max(definition.lock_deadline - time.monotonic(), 0.0)
         option = getattr(self.app_state.terraform_options, "lock_timeout", None)
         if option is None:
             return None
@@ -1254,6 +1262,21 @@ class TerraformCommand(BaseCommand):
             log.error(f"hook execution error on definition {definition.name}: \n{e}")
             return False
         return True
+
+    def _lock_held_failure(self, name: str, result: "TerraformResult") -> bool:
+        """
+        Log a terraform failure caused by a state lock that was still held when
+        -lock-timeout ran out, and return whether it should stop the run.
+        """
+        output = (result.stderr or b"") + (result.stdout or b"")
+        if LOCK_ERROR_MARKER not in output:
+            return False
+        definition: Definition = self.app_state.definitions[name]
+        log.error(
+            f"state lock unavailable for definition {name}: terraform could not "
+            "acquire the lock before -lock-timeout ran out"
+        )
+        return definition.lock_fail_run
 
     def _lock_unavailable(
         self,

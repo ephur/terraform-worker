@@ -2356,12 +2356,15 @@ class TestLockTimeout:
         cfg = config_class(DummyAppState())
         assert "-lock-timeout" not in cfg.get_params(TerraformAction.INIT, "", 30)
 
-    def test_definition_value_overrides_option(self, tmp_path):
+    def test_definition_value_overrides_option(self, tmp_path, mocker):
         cmd = make_command(tmp_path, lock_timeout="5m")
         definition = cmd.app_state.definitions["def"]
         assert cmd._lock_timeout(definition) == 300
-        definition.lock_timeout = 42.0
+        mocker.patch("tfworker.commands.terraform.time.monotonic", return_value=100.0)
+        definition.lock_deadline = 142.0
         assert cmd._lock_timeout(definition) == 42.0
+        definition.lock_deadline = 90.0
+        assert cmd._lock_timeout(definition) == 0.0
 
     def test_no_timeout_by_default(self, tmp_path):
         cmd = make_command(tmp_path)
@@ -2429,6 +2432,44 @@ class TestLockUnavailable:
         with pytest.raises(SystemExit):
             cmd._exec_terraform_pre_plan("def")
         cmd.ctx.exit.assert_called_once_with(1)
+
+    LOCK_STDERR = b"Error: Error acquiring the state lock\n\nLock Info: ..."
+
+    @pytest.mark.parametrize("fail_run", [True, False])
+    def test_terraform_lock_error_on_apply(self, tmp_path, mocker, fail_run):
+        cmd = make_command(tmp_path)
+        cmd.app_state.definitions["def"].lock_fail_run = fail_run
+        mocker.patch.object(cmd, "_exec_hook", return_value=True)
+        mocker.patch.object(
+            cmd, "_run", return_value=TerraformResult(1, b"", self.LOCK_STDERR)
+        )
+        if fail_run:
+            with pytest.raises(SystemExit):
+                cmd._exec_terraform_action(
+                    "def", TerraformAction.APPLY, exit_on_error=False
+                )
+        else:
+            cmd._exec_terraform_action(
+                "def", TerraformAction.APPLY, exit_on_error=False
+            )
+            cmd.ctx.exit.assert_not_called()
+
+    def test_terraform_lock_error_on_plan_fails_run(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        definition = cmd.app_state.definitions["def"]
+        definition.lock_fail_run = True
+        definition.plan_file = tmp_path / "def.tfplan"
+        mocker.patch.object(
+            cmd, "_run", return_value=TerraformResult(1, b"", self.LOCK_STDERR)
+        )
+        with pytest.raises(SystemExit):
+            cmd._exec_terraform_plan("def")
+        assert definition.plan_failed is True
+
+    def test_other_failures_are_not_lock_errors(self, tmp_path):
+        cmd = make_command(tmp_path)
+        cmd.app_state.definitions["def"].lock_fail_run = True
+        assert not cmd._lock_held_failure("def", TerraformResult(1, b"", b"boom"))
 
     def test_apply_lock_without_exit(self, tmp_path, mocker):
         cmd = make_command(tmp_path)

@@ -59,9 +59,11 @@ class TestLockInfo:
 
 
 class TestWorkerLease:
-    def test_fresh_within_two_intervals(self):
+    def test_fresh_within_window(self):
         assert _lease().is_fresh(NOW)
-        assert not _lease(heartbeat_at=NOW - timedelta(seconds=61)).is_fresh(NOW)
+        # three intervals plus a minute of clock skew
+        assert _lease(heartbeat_at=NOW - timedelta(seconds=150)).is_fresh(NOW)
+        assert not _lease(heartbeat_at=NOW - timedelta(seconds=151)).is_fresh(NOW)
 
     def test_naive_times_are_utc(self):
         lease = _lease(heartbeat_at=datetime(2026, 11, 27, 11, 59, 30))

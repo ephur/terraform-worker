@@ -67,7 +67,8 @@ def backend():
 def definition():
     return SimpleNamespace(
         name="def1",
-        lock_timeout=None,
+        lock_deadline=None,
+        lock_fail_run=False,
         get_target_path=lambda working_dir: f"{working_dir}/definitions/def1",
     )
 
@@ -125,10 +126,21 @@ class TestLockConfig:
 
 
 class TestReadiness:
-    def test_ready_when_backend_inspects_locks(self, backend):
+    def test_ready_with_any_backend(self, backend):
         assert make_handler(backend).is_ready()
         backend.lock_inspection = False
-        assert not make_handler(backend).is_ready()
+        assert make_handler(backend).is_ready()
+
+    def test_backend_without_inspection_only_sets_deadline(self, backend, definition):
+        backend.lock_inspection = False
+        started = []
+        handler = make_handler(backend, started=started, wait=90)
+        pre(handler, definition)
+        pre(handler, definition)
+        assert definition.lock_deadline == 1090
+        backend.get_lock.assert_not_called()
+        assert started == []
+        assert handler._warned_no_inspection
 
     def test_not_ready_without_backend(self):
         handler = LockHandler(LockConfig())
@@ -147,7 +159,7 @@ class TestAcquire:
         handler = make_handler(backend, started=started, wait=300)
         pre(handler, definition)
         assert started == [(PLAN, "def1")]
-        assert definition.lock_timeout == 300
+        assert definition.lock_deadline == 1300
 
     def test_waits_for_live_lock(self, backend, definition):
         backend.get_lock.side_effect = [_lock(), _lock(), None]
@@ -160,7 +172,7 @@ class TestAcquire:
         assert len(clock.sleeps) == 2
         assert 8 <= clock.sleeps[0] <= 12
         assert 16 <= clock.sleeps[1] <= 24
-        assert definition.lock_timeout == pytest.approx(600 - sum(clock.sleeps))
+        assert definition.lock_deadline == 1600
         assert started == [(APPLY, "def1")]
 
     def test_backoff_is_capped(self, backend, definition):
@@ -176,7 +188,7 @@ class TestAcquire:
         ):
             pre(handler, definition)
         assert sum(clock.sleeps) == pytest.approx(60)
-        assert definition.lock_timeout is None
+        assert definition.lock_deadline is None
 
     def test_on_timeout_fail_run(self, backend, definition):
         backend.get_lock.return_value = _lock()
@@ -269,7 +281,8 @@ class TestStaleLocks:
         assert started
 
     def test_on_stale_force_unlock(self, backend, definition, mocker):
-        backend.get_lock.side_effect = [_lock(age=3 * 3600), None]
+        # the lock must look stale on two polls before it is removed
+        backend.get_lock.side_effect = [_lock(age=3 * 3600), _lock(age=3 * 3600), None]
         pipe = mocker.patch(
             "tfworker.handlers.lock.pipe_exec", return_value=(0, b"", b"")
         )
@@ -285,6 +298,29 @@ class TestStaleLocks:
             env={"A": "1"},
         )
         assert started
+
+    def test_force_unlock_once_per_lock(self, backend, definition, mocker):
+        backend.get_lock.return_value = _lock(age=3 * 3600)
+        pipe = mocker.patch(
+            "tfworker.handlers.lock.pipe_exec", return_value=(0, b"", b"")
+        )
+        mocker.patch("tfworker.commands.terraform.terraform_env", return_value={})
+        handler = make_handler(backend, on_stale="force_unlock", wait=120)
+        with pytest.raises(LockUnavailableError, match="still locked"):
+            pre(handler, definition)
+        pipe.assert_called_once()
+
+    def test_lock_without_host_uses_age(self, backend, definition):
+        backend.get_lock.return_value = _lock(age=3 * 3600, who="")
+        with pytest.raises(LockUnavailableError, match="stale"):
+            pre(make_handler(backend), definition)
+        backend.get_lease.assert_not_called()
+
+    def test_lease_is_read_for_the_lock_host(self, backend, definition):
+        backend.get_lock.side_effect = [_lock(age=3 * 3600), None]
+        backend.get_lease.return_value = _lease()
+        pre(make_handler(backend, started=[]), definition)
+        backend.get_lease.assert_called_once_with("def1", "pod-1")
 
     def test_force_unlock_failure(self, backend, definition, mocker):
         backend.get_lock.return_value = _lock(age=3 * 3600)
@@ -311,15 +347,16 @@ class TestHeartbeat:
         assert lease.run_id == "run-7"
         assert lease.heartbeat_seconds == 30
         handler.execute(APPLY, TerraformStage.POST, "dep", definition, "/work")
-        backend.delete_lease.assert_called_once_with("def1")
-        assert definition.lock_timeout is None
+        backend.delete_lease.assert_called_once_with("def1", "pod-9")
+        assert definition.lock_deadline is None
+        assert definition.lock_fail_run is False
         assert handler._heartbeats == {}
 
     def test_heartbeat_zero_keeps_no_lease(self, backend, definition):
         handler = make_handler(backend, heartbeat=0, wait=30)
         pre(handler, definition)
         backend.put_lease.assert_not_called()
-        assert definition.lock_timeout == 30
+        assert definition.lock_deadline == 1030
         handler.execute(PLAN, TerraformStage.POST, "dep", definition, "/work")
         backend.delete_lease.assert_not_called()
 
@@ -337,7 +374,7 @@ class TestHeartbeat:
         handler = make_handler(backend)
         pre(handler, definition, PLAN)
         pre(handler, definition, APPLY)
-        backend.delete_lease.assert_called_once_with("def1")
+        backend.delete_lease.assert_called_once_with("def1", "pod-9")
         handler.teardown("dep", "/work")
 
     def test_release_without_lease_is_noop(self, backend, definition):
@@ -357,9 +394,32 @@ class TestHeartbeat:
         beat = _Heartbeat(backend, lease, lambda: NOW)
         beat._stop = MagicMock()
         beat._stop.wait.side_effect = [False, False, True]
+        beat._stop.is_set.return_value = False
         beat._beat()
         assert backend.put_lease.call_count == 2
         assert backend.put_lease.call_args.args[0].heartbeat_at == NOW
+
+    def test_no_write_after_stop(self, backend):
+        beat = _Heartbeat(backend, _lease(), lambda: NOW)
+        beat._stop = MagicMock()
+        beat._stop.wait.return_value = False
+        beat._stop.is_set.return_value = True
+        beat._beat()
+        backend.put_lease.assert_not_called()
+
+    def test_beat_survives_unexpected_errors(self, backend):
+        backend.put_lease.side_effect = [RuntimeError("socket"), None]
+        beat = _Heartbeat(backend, _lease(), lambda: NOW)
+        beat._stop = MagicMock()
+        beat._stop.wait.side_effect = [False, False, True]
+        beat._stop.is_set.return_value = False
+        beat._beat()
+        assert backend.put_lease.call_count == 2
+
+    def test_fail_run_flag_set_for_terraform(self, backend, definition):
+        handler = make_handler(backend, on_timeout="fail_run", started=[])
+        pre(handler, definition)
+        assert definition.lock_fail_run is True
 
     def test_write_error_is_logged(self, backend):
         backend.put_lease.side_effect = BackendError("denied")
@@ -371,3 +431,44 @@ class TestHeartbeat:
     def test_user_fallback(self, mocker):
         mocker.patch("getpass.getuser", side_effect=KeyError("uid"))
         assert LockHandler._user() == "unknown"
+
+
+class TestThroughHandlersCollection:
+    @pytest.fixture
+    def collection(self, backend):
+        from tfworker.handlers.collection import HandlersCollection
+
+        HandlersCollection._instance = None
+        yield lambda handler: HandlersCollection({"lock": handler})
+        HandlersCollection._instance = None
+
+    def test_timeout_propagates_and_deadline_reaches_command(
+        self, backend, definition, collection, tmp_path
+    ):
+        clock = Clock()
+        handler = make_handler(backend, clock=clock, started=[], wait=0)
+        handlers = collection(handler)
+        backend.get_lock.return_value = _lock()
+        with pytest.raises(LockUnavailableError):
+            handlers.exec_handlers(
+                action=APPLY,
+                stage=TerraformStage.PRE,
+                deployment="dep",
+                definition=definition,
+                working_dir="/work",
+            )
+
+        backend.get_lock.return_value = None
+        handler._monotonic = __import__("time").monotonic
+        handler.config.wait = 120
+        handlers.exec_handlers(
+            action=APPLY,
+            stage=TerraformStage.PRE,
+            deployment="dep",
+            definition=definition,
+            working_dir="/work",
+        )
+        from tests.commands.test_terraform import make_command
+
+        cmd = make_command(tmp_path)
+        assert 119 <= cmd._lock_timeout(definition) <= 120

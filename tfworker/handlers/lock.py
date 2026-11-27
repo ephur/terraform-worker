@@ -7,9 +7,14 @@ released or the wait runs out. A stale lock follows ``on_stale``.
 While terraform runs, the handler keeps a worker lease beside the state and
 refreshes it every ``heartbeat``. Another worker that finds the lock can then
 tell a long-running command from one whose process died with the lock held:
-a lock whose lease is fresh is live at any age, a lock whose lease stopped
-being refreshed is stale at once, and a lock with no lease (taken outside the
-worker, or with the heartbeat off) is stale once older than ``stale_after``.
+a lock whose lease is fresh is live at any age, a lock whose lease missed
+three heartbeats (plus a minute for clock skew) is stale, and a lock with no
+lease (taken outside the worker, or with the heartbeat off) is stale once
+older than ``stale_after``. Each host keeps its own lease, so workers never
+overwrite or remove each other's.
+
+``force_unlock`` removes a lock only after it looked stale on two polls, and
+never removes the same lock twice.
 
 Example configuration::
 
@@ -38,7 +43,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set, Union
 
 import click
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -56,6 +61,9 @@ from .registry import HandlerRegistry
 if TYPE_CHECKING:  # pragma: no cover
     from tfworker.commands.terraform import TerraformResult
     from tfworker.definitions.model import Definition
+
+# seconds to wait for a heartbeat thread to finish an in-flight write
+STOP_TIMEOUT = 10.0
 
 LOCKED_ACTIONS = (TerraformAction.PLAN, TerraformAction.APPLY, TerraformAction.DESTROY)
 
@@ -133,17 +141,21 @@ class _Heartbeat:
     def stop(self) -> None:
         self._stop.set()
         if self._thread.is_alive():
-            self._thread.join(timeout=self._lease.heartbeat_seconds)
+            self._thread.join(timeout=STOP_TIMEOUT)
 
     def _beat(self) -> None:
         while not self._stop.wait(self._lease.heartbeat_seconds):
             self._lease = self._lease.model_copy(update={"heartbeat_at": self._now()})
+            if self._stop.is_set():
+                return
             self._write()
 
     def _write(self) -> None:
+        # the thread must outlive any error: a lease that stops being refreshed
+        # makes the live lock it covers look stale to other workers
         try:
             self._backend.put_lease(self._lease)
-        except BackendError as e:
+        except Exception as e:
             log.warn(
                 f"unable to refresh the worker lease for {self._lease.definition}: {e}"
             )
@@ -165,6 +177,10 @@ class LockHandler(BaseHandler):
         self._now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
         self._sleep: Callable[[float], None] = time.sleep
         self._monotonic: Callable[[], float] = time.monotonic
+        self._warned_no_inspection = False
+        # lock ids seen stale on an earlier poll, and ids already force-unlocked
+        self._stale_seen: Set[str] = set()
+        self._forced: Set[str] = set()
 
     @property
     def app_state(self):
@@ -177,8 +193,11 @@ class LockHandler(BaseHandler):
         return self.app_state.backend
 
     def is_ready(self) -> bool:
-        backend = getattr(self.app_state, "backend", None)
-        return bool(getattr(backend, "lock_inspection", False))
+        return getattr(self.app_state, "backend", None) is not None
+
+    @property
+    def _inspects_locks(self) -> bool:
+        return bool(getattr(self.backend, "lock_inspection", False))
 
     def execute(
         self,
@@ -194,12 +213,17 @@ class LockHandler(BaseHandler):
         if stage == TerraformStage.PRE:
             self._acquire(action, definition, working_dir)
         else:
-            definition.lock_timeout = None
+            self._clear(definition)
             self._release(definition.name)
 
     def skip(self, action, deployment, definition, reason) -> None:
-        definition.lock_timeout = None
+        self._clear(definition)
         self._release(definition.name)
+
+    @staticmethod
+    def _clear(definition: "Definition") -> None:
+        definition.lock_deadline = None
+        definition.lock_fail_run = False
 
     def teardown(self, deployment: str, working_dir: str) -> None:
         for name in list(self._heartbeats):
@@ -210,6 +234,16 @@ class LockHandler(BaseHandler):
     ) -> None:
         self._release(definition.name)
         deadline = self._monotonic() + self.config.wait
+        definition.lock_fail_run = self.config.on_timeout == OnTimeout.FAIL_RUN
+        if not self._inspects_locks:
+            if not self._warned_no_inspection:
+                log.warn(
+                    "the backend cannot read state locks; the lock handler only "
+                    f"passes -lock-timeout={format_duration(self.config.wait)}"
+                )
+                self._warned_no_inspection = True
+            definition.lock_deadline = deadline
+            return
         attempt = 0
         while True:
             lock = self._read_lock(definition.name)
@@ -224,14 +258,18 @@ class LockHandler(BaseHandler):
                         f"'terraform force-unlock {lock.id}' once nothing holds it"
                     )
                 if self.config.on_stale == OnStale.FORCE_UNLOCK:
-                    self._force_unlock(definition, working_dir, lock, now)
-                    continue
+                    # only unlock a lock seen stale on two polls, and only once
+                    if lock.id in self._stale_seen and lock.id not in self._forced:
+                        self._forced.add(lock.id)
+                        self._force_unlock(definition, working_dir, lock, now)
+                        continue
+                    self._stale_seen.add(lock.id)
             remaining = deadline - self._monotonic()
             if remaining <= 0:
                 raise LockUnavailableError(
                     f"{definition.name} state is still locked after waiting "
                     f"{format_duration(self.config.wait)}: {self._describe(lock, now)}",
-                    fail_run=self.config.on_timeout == OnTimeout.FAIL_RUN,
+                    fail_run=definition.lock_fail_run,
                 )
             log.info(
                 f"{definition.name} state is locked {self._describe(lock, now)}; "
@@ -241,7 +279,7 @@ class LockHandler(BaseHandler):
             attempt += 1
             self._sleep(delay)
 
-        definition.lock_timeout = max(deadline - self._monotonic(), 0.0)
+        definition.lock_deadline = deadline
         if self.config.heartbeat > 0:
             self._start_heartbeat(action, definition)
 
@@ -259,8 +297,10 @@ class LockHandler(BaseHandler):
         A lock held by a worker is stale once its lease stops being refreshed,
         whatever its age. Any other lock is stale once older than stale_after.
         """
+        if not lock.host:
+            return lock.age(now) > self.config.stale_after
         try:
-            lease = self.backend.get_lease(name)
+            lease = self.backend.get_lease(name, lock.host)
         except BackendError as e:
             log.warn(f"unable to read the worker lease for {name}: {e}")
             return False
@@ -318,7 +358,7 @@ class LockHandler(BaseHandler):
             return
         heartbeat.stop()
         try:
-            self.backend.delete_lease(name)
+            self.backend.delete_lease(name, self._host)
         except BackendError as e:
             log.warn(f"unable to remove the worker lease for {name}: {e}")
 
