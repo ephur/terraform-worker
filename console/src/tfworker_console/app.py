@@ -1,6 +1,7 @@
 import ipaddress
 import logging
 import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
@@ -11,12 +12,13 @@ from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import api, demo, login, probes, version, web
+from . import api, demo, login, metrics, probes, version, web
 from .actions import Actions
 from .auth import OIDCClient, load_roles
 from .db import engine_for, session_factory
 from .groups import load_groups
 from .ingest import EventConsumer, EventIngest
+from .metrics import Metrics, MetricsListener
 from .migrate import upgrade
 from .reconcile import Reconciler
 from .scheduler import ReconcileScheduler
@@ -138,7 +140,9 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         workers = [
-            app_state[name] for name in ("scheduler", "events") if name in app_state
+            app_state[name]
+            for name in ("scheduler", "events", "metrics")
+            if name in app_state
         ]
         for worker in workers:
             worker.start()
@@ -222,6 +226,27 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
                 region=settings.events_region,
             )
 
+    app.state.metrics = None
+    if settings.metrics != "off":
+        if settings.metrics == "token" and not settings.database_url:
+            raise ValueError(
+                "TFWORKER_CONSOLE_METRICS=token checks API tokens, which needs "
+                "TFWORKER_CONSOLE_DATABASE_URL"
+            )
+        app.state.metrics = Metrics(
+            app.state.sessions,
+            app.state.groups,
+            settings.lock_stale_after,
+            definition_label=settings.metrics_definition_label,
+        )
+        if app.state.reconciler is not None:
+            app.state.reconciler.observers.append(app.state.metrics.observe_reconcile)
+        if "events" in app_state:
+            app_state["events"].observers.append(app.state.metrics.observe_event)
+        if settings.metrics == "port":
+            app_state["metrics"] = MetricsListener(
+                app.state.metrics, settings.metrics_host, settings.metrics_port
+            )
     app.state.readiness = probes.Readiness(engine)
     app.state.roles = load_roles(settings.roles_file)
     for mapping in app.state.roles.role_mappings:
@@ -263,6 +288,22 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
         response.headers.setdefault("Referrer-Policy", "same-origin")
         return response
 
+    if app.state.metrics is not None:
+        observe = app.state.metrics.observe_request
+
+        @app.middleware("http")
+        async def measure(request: Request, call_next):
+            started = time.perf_counter()
+            status = 500
+            try:
+                response = await call_next(request)
+                status = response.status_code
+                return response
+            finally:
+                # the route template, so ids in paths never become labels
+                route = getattr(request.scope.get("route"), "path", "unmatched")
+                observe(route, request.method, status, time.perf_counter() - started)
+
     @app.exception_handler(LoginRequired)
     async def login_required(request: Request, exc: LoginRequired):
         if request.url.path.startswith("/api/"):
@@ -297,6 +338,7 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
         return PlainTextResponse(str(exc), status_code=403)
 
     app.include_router(probes.router)
+    app.include_router(metrics.router)
     app.include_router(api.router)
     app.include_router(login.router)
     app.include_router(web.router)

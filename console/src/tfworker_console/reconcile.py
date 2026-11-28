@@ -24,6 +24,7 @@ and the rest still land.
 
 import logging
 import threading
+import time
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -116,6 +117,9 @@ class Reconciler:
         self.groups = groups or Groups()
         self.sessions = sessions
         self.now = now
+        # told of each store's summary and how many seconds it took, such as
+        # by the metrics; an observer's error never reaches the reconcile
+        self.observers: List[Callable[[StoreSummary, float], None]] = []
         # one reconcile or event of a store at a time in this process; across
         # replicas the store's row lock does the same
         self._turns: Dict[str, threading.Lock] = defaultdict(threading.Lock)
@@ -156,8 +160,15 @@ class Reconciler:
         The store's row is locked for the transaction, so two reconcilers of
         the same store (the schedule and the CLI, or two replicas) take turns.
         """
+        started = time.monotonic()
         with self.turn(name):
-            return self._reconcile(name)
+            summary = self._reconcile(name)
+        for observer in self.observers:
+            try:
+                observer(summary, time.monotonic() - started)
+            except Exception as e:
+                log.warning(f"a reconcile observer failed: {e}")
+        return summary
 
     def _reconcile(self, name: str) -> StoreSummary:
         store = self.stores[name]

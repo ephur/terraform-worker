@@ -29,6 +29,14 @@ class ConsoleSettings(BaseSettings):
     events_role_arn: Optional[str] = None
     # the queue's region, when its URL does not name one
     events_region: Optional[str] = None
+    # GET /metrics: off; token, on this port for a bearer token with the
+    # metrics role; or port, without auth on its own listener (see
+    # tfworker_console.metrics)
+    metrics: Literal["off", "token", "port"] = "off"
+    metrics_host: str = "0.0.0.0"
+    metrics_port: int = 9090
+    # label per-definition metrics by definition; turn off for very large fleets
+    metrics_definition_label: bool = True
     # a lock with no fresh worker lease is shown as stale once older than this
     lock_stale_after: float = 7200.0
 
