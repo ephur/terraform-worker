@@ -1,8 +1,10 @@
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from shlex import quote as shlex_quote
-from typing import TYPE_CHECKING, Dict, List, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, Union
 
 import click
 
@@ -60,6 +62,13 @@ class TerraformCommand(BaseCommand):
         if not hasattr(self, "_apply_errors"):
             self._apply_errors: Dict[str, str] = {}
         return self._apply_errors
+
+    @property
+    def skips_notified(self) -> Set[Tuple[str, TerraformAction]]:
+        """The (definition, action) pairs handlers were told were skipped."""
+        if not hasattr(self, "_skips_notified"):
+            self._skips_notified: Set[Tuple[str, TerraformAction]] = set()
+        return self._skips_notified
 
     def prep_providers(self) -> None:
         """
@@ -337,20 +346,24 @@ class TerraformCommand(BaseCommand):
             )
             return
 
-        for name in self.app_state.definitions.keys():
+        names = list(self.app_state.definitions.keys())
+        for index, name in enumerate(names):
             if self._init_incomplete(name):
                 log.warn(
                     f"skipping plan for definition: {name}; it was not initialized"
                 )
+                self._notify_skip(name, TerraformAction.PLAN, "not initialized")
                 continue
             log.info(f"running pre-plan for definition: {name}")
             if not self._exec_terraform_pre_plan(name=name):
                 if self.app_state.terraform_options.plan_failures:
+                    self._notify_halted(names[index + 1 :], TerraformAction.PLAN)
                     break
                 continue
             needed, reason = def_plan.needs_plan(self.app_state.definitions[name])
             if not needed:
                 log.info(f"Plan not needed for definition: {name}, reason: {reason}")
+                self._notify_skip(name, TerraformAction.PLAN, reason)
                 continue
             log.info(f"definition {name} needs a plan: {reason}")
             self._exec_terraform_plan(name=name)
@@ -358,6 +371,7 @@ class TerraformCommand(BaseCommand):
                 self.app_state.definitions[name].plan_failed
                 and self.app_state.terraform_options.plan_failures
             ):
+                self._notify_halted(names[index + 1 :], TerraformAction.PLAN)
                 break
             if not self.app_state.definitions[name].plan_failed and getattr(
                 self.app_state.definitions[name], "always_apply", False
@@ -418,8 +432,15 @@ class TerraformCommand(BaseCommand):
             return
         if not (self.app_state.root_options.backend_plans or options.plan_file_path):
             return
+        action = TerraformAction.DESTROY if options.destroy else TerraformAction.APPLY
 
-        for name, definition in self.app_state.definitions.items():
+        names = list(self.app_state.definitions.keys())
+        for index, name in enumerate(names):
+            definition = self.app_state.definitions[name]
+            if self._init_incomplete(name):
+                definition.needs_apply = False
+                self._notify_skip(name, action, "not initialized")
+                continue
             def_plan.set_plan_file(definition)
             needed, reason = def_plan.needs_plan(definition)
 
@@ -432,6 +453,7 @@ class TerraformCommand(BaseCommand):
                     f"no saved plan for definition: {name}; it will not be applied"
                 )
                 definition.needs_apply = False
+                self._notify_skip(name, action, "no saved plan")
                 continue
 
             try:
@@ -445,6 +467,15 @@ class TerraformCommand(BaseCommand):
                         "halting the fetch; the definitions behind "
                         f"{name} have no plan to apply"
                     )
+                    # a definition with a plan already on disk is still applied
+                    self._notify_halted(
+                        [
+                            n
+                            for n in names[index + 1 :]
+                            if not self.app_state.definitions[n].needs_apply
+                        ],
+                        action,
+                    )
                     break
                 continue
 
@@ -456,6 +487,7 @@ class TerraformCommand(BaseCommand):
                     f"saved plan for definition {name} could not be used; "
                     "it will not be applied"
                 )
+                self._notify_skip(name, action, "saved plan could not be used")
 
         if options.fail_on_plan_error:
             if any(d.plan_failed for d in self.app_state.definitions.values()):
@@ -523,9 +555,11 @@ class TerraformCommand(BaseCommand):
                 log.warn(
                     f"skipping {action} for definition: {name}; it was not initialized"
                 )
+                self._notify_skip(name, action, "not initialized")
                 continue
             if action == TerraformAction.DESTROY and limit and name not in limit:
                 log.info(f"skipping destroy for definition: {name}")
+                self._notify_skip(name, action, "outside --limit")
                 continue
             log.trace(f"definition {name} needs_apply value: {definition.needs_apply}")
             if not definition.needs_apply:
@@ -535,6 +569,7 @@ class TerraformCommand(BaseCommand):
                 log.info(
                     f"plan file does not exist for definition: {name}; skipping {action}"
                 )
+                self._notify_skip(name, action, "plan file does not exist")
                 continue
             candidates.append(name)
         return candidates
@@ -562,12 +597,37 @@ class TerraformCommand(BaseCommand):
         self.apply_errors[name] = message
         log.error(f"error applying definition {name}: {message}")
 
+    def _notify_skip(self, name: str, action: TerraformAction, reason: str) -> None:
+        """
+        Tell handlers that a phase passed over a definition without running terraform.
+
+        Each definition is reported at most once per action: the apply phase
+        can reach a definition the plan phase already passed over.
+        """
+        if (name, action) in self.skips_notified:
+            return
+        self.skips_notified.add((name, action))
+        self.app_state.handlers.exec_skip(
+            action=action,
+            deployment=self.app_state.deployment,
+            definition=self.app_state.definitions[name],
+            reason=reason,
+        )
+
+    def _notify_halted(self, names: List[str], action: TerraformAction) -> None:
+        """Tell handlers about the definitions an earlier failure kept the phase from reaching."""
+        for name in names:
+            self._notify_skip(
+                name, action, f"{action.value} halted by an earlier failure"
+            )
+
     def _mark_apply_skipped(self, names: List[str], action: TerraformAction) -> None:
         """Mark the definitions a halted apply or destroy phase never reached."""
         if not names:
             return
         for name in names:
             self.app_state.definitions[name].apply_skipped = True
+        self._notify_halted(names, action)
         log.warn(
             f"not running {action} for {len(names)} definitions after a failure; "
             "use --no-apply-failures to attempt every definition"
@@ -693,7 +753,7 @@ class TerraformCommand(BaseCommand):
             self._exec_error_handlers(
                 name,
                 TerraformAction.INIT,
-                TerraformResult(1, b"", message.encode()),
+                TerraformResult.synthesized(1, message),
             )
 
     def _mark_init_skipped(self, names: List[str]) -> None:
@@ -712,6 +772,7 @@ class TerraformCommand(BaseCommand):
 
         for name in skipped:
             self.app_state.definitions[name].init_skipped = True
+        self._notify_halted(skipped, TerraformAction.INIT)
         log.warn(
             f"not initializing {len(skipped)} definitions after an init failure; "
             "use --no-init-failures to initialize every definition"
@@ -1090,6 +1151,8 @@ class TerraformCommand(BaseCommand):
             )
             stream_output = False
 
+        started_at = datetime.now(timezone.utc)
+        started = time.monotonic()
         result: TerraformResult = TerraformResult(
             *pipe_exec_logged(
                 command,
@@ -1104,6 +1167,9 @@ class TerraformCommand(BaseCommand):
                 message=f"terraform {terraform_command} output for {definition_name}",
             )
         )
+        result.started_at = started_at
+        result.finished_at = datetime.now(timezone.utc)
+        result.elapsed = time.monotonic() - started
 
         log.debug(f"exit code: {result.exit_code}")
         return result
@@ -1186,7 +1252,7 @@ class TerraformCommand(BaseCommand):
         """
         definition: Definition = self.app_state.definitions[name]
         message = f"{stage.value}-{action.value} hook failed"
-        result = TerraformResult(2, b"", message.encode())
+        result = TerraformResult.synthesized(2, message)
 
         if action == TerraformAction.INIT:
             # marks init_failed and dispatches the ERROR stage
@@ -1211,10 +1277,39 @@ class TerraformResult:
     Hold the results of a terraform run
     """
 
-    def __init__(self, exit_code: int, stdout: bytes, stderr: bytes):
+    def __init__(
+        self,
+        exit_code: int,
+        stdout: bytes,
+        stderr: bytes,
+        started_at: Optional[datetime] = None,
+        finished_at: Optional[datetime] = None,
+    ):
         self.exit_code = exit_code
         self.stdout = stdout
         self.stderr = stderr
+        self.started_at = started_at
+        self.finished_at = finished_at
+        # monotonic seconds, immune to wall clock steps; set by _run
+        self.elapsed: Optional[float] = None
+
+    @classmethod
+    def synthesized(cls, exit_code: int, message: str) -> "TerraformResult":
+        """
+        A result standing in for a failure that happened outside terraform,
+        such as a failed hook. Its start and finish are the moment of failure.
+        """
+        now = datetime.now(timezone.utc)
+        return cls(exit_code, b"", message.encode(), started_at=now, finished_at=now)
+
+    @property
+    def duration(self) -> Optional[float]:
+        """Seconds terraform ran for, or None when the run was not timed."""
+        if self.elapsed is not None:
+            return self.elapsed
+        if self.started_at is None or self.finished_at is None:
+            return None
+        return (self.finished_at - self.started_at).total_seconds()
 
     @property
     def stdout_str(self) -> str:

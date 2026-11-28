@@ -378,3 +378,75 @@ class TestExecSetupTeardown:
     def test_exec_teardown_noop_for_base_handler(self):
         h = HandlersCollection({"a": HandlerA()})
         h.exec_teardown("prod", "/tmp")
+
+
+class SkipRecorder(DummyHandler):
+    tag = "skip"
+
+    def __init__(self):
+        super().__init__()
+        self.skips = []
+
+    def skip(self, action, deployment, definition, reason):
+        self.skips.append((action, deployment, definition.name, reason))
+
+
+class SkipRaiser(DummyHandler):
+    tag = "raiser"
+    default_priority = {TerraformAction.PLAN: 1}
+
+    def skip(self, action, deployment, definition, reason):
+        raise RuntimeError("boom")
+
+
+class TestExecSkip:
+    def test_ready_handlers_for_the_action_hear_the_skip(self):
+        recorder = SkipRecorder()
+        h = HandlersCollection({"skip": recorder})
+        h.exec_skip(TerraformAction.PLAN, "dep", DummyDef(), "plan file exists")
+        assert recorder.skips == [
+            (TerraformAction.PLAN, "dep", "def", "plan file exists")
+        ]
+
+    def test_handlers_for_other_actions_are_not_told(self):
+        recorder = SkipRecorder()
+        h = HandlersCollection({"skip": recorder})
+        h.exec_skip(TerraformAction.APPLY, "dep", DummyDef(), "no saved plan")
+        assert recorder.skips == []
+
+    def test_unready_handlers_are_not_told(self):
+        recorder = SkipRecorder()
+        recorder._ready = False
+        h = HandlersCollection({"skip": recorder})
+        h.exec_skip(TerraformAction.PLAN, "dep", DummyDef(), "reason")
+        assert recorder.skips == []
+
+    def test_a_failing_handler_does_not_stop_the_others(self, mocker):
+        error = mocker.patch("tfworker.util.log.error")
+        recorder = SkipRecorder()
+        h = HandlersCollection({"raiser": SkipRaiser(), "skip": recorder})
+        h.exec_skip(TerraformAction.PLAN, "dep", DummyDef(), "reason")
+        assert len(recorder.skips) == 1
+        assert "raiser" in error.call_args.args[0]
+
+    def test_default_skip_is_a_no_op(self):
+        handler = HandlerA()
+        assert handler.skip(TerraformAction.PLAN, "dep", DummyDef(), "reason") is None
+
+    def test_invalid_action_is_rejected(self):
+        h = HandlersCollection({"skip": SkipRecorder()})
+        with pytest.raises(HandlerError):
+            h.exec_skip("not-an-action", "dep", DummyDef(), "reason")
+
+    def test_click_exit_from_a_handler_is_not_swallowed(self):
+        import click
+
+        class Exiter(DummyHandler):
+            tag = "exiter"
+
+            def skip(self, action, deployment, definition, reason):
+                raise click.exceptions.Exit(3)
+
+        h = HandlersCollection({"exiter": Exiter()})
+        with pytest.raises(click.exceptions.Exit):
+            h.exec_skip(TerraformAction.PLAN, "dep", DummyDef(), "reason")

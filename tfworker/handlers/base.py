@@ -77,6 +77,26 @@ class BaseHandler(metaclass=ABCMeta):
         """
         pass
 
+    def skip(
+        self,
+        action: "TerraformAction",
+        deployment: str,
+        definition: "Definition",
+        reason: str,
+    ) -> None:
+        """
+        skip is called when a phase passes over a definition without running
+        terraform for it, such as a plan that is not needed or an apply halted
+        by an earlier failure. No-op by default.
+
+        Args:
+            action: the action that was not run
+            deployment: the deployment name
+            definition: the definition that was skipped
+            reason: a short, human readable reason
+        """
+        pass
+
     def setup(
         self,
         deployment: str,

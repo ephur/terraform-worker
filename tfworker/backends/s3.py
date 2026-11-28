@@ -1,7 +1,7 @@
 import json
 import os
 from contextlib import closing
-from typing import TYPE_CHECKING, Generator
+from typing import TYPE_CHECKING, Generator, Union
 
 import boto3.dynamodb
 import botocore
@@ -490,8 +490,8 @@ class S3Backend(BaseBackend):
 
     def _list_bucket_definitions(self) -> set:
         """
-        _get_bucket_files returns a set of the keys in the bucket that correspond
-        to all the definitions in a deployment, the function is poorly named.
+        Return the names of the definitions that have a state file in the
+        deployment's prefix, see _definition_from_state_key.
         """
         bucket_files = set()
         root_options = click.get_current_context().obj.root_options
@@ -503,11 +503,10 @@ class S3Backend(BaseBackend):
         )
 
         for page in s3_paginator:
-            if "Contents" in page:
-                for key in page["Contents"]:
-                    # just append the last part of the prefix to the list, as they
-                    # are relative to the base path, and deployment name
-                    bucket_files.add(key["Key"].split("/")[-2])
+            for key in page.get("Contents", []):
+                name = _definition_from_state_key(key["Key"], prefix)
+                if name is not None:
+                    bucket_files.add(name)
         log.trace(f"bucket files: {bucket_files}")
 
         return bucket_files
@@ -542,3 +541,22 @@ class S3Backend(BaseBackend):
             state = json.load(body)
 
         return state
+
+
+def _definition_from_state_key(key: str, prefix: str) -> Union[str, None]:
+    """
+    Return the definition a state key belongs to, or None for any other key.
+
+    Only `<prefix>/<definition>/terraform.tfstate` names a definition. Saved
+    plans, logs and the worker's own `_tfworker/` metadata share the prefix
+    and are ignored, as is anything whose name starts with an underscore.
+    """
+    base = prefix.rstrip("/") + "/"
+    if not key.startswith(base):
+        return None
+    parts = key[len(base) :].split("/")
+    if len(parts) != 2 or parts[1] != "terraform.tfstate":
+        return None
+    if not parts[0] or parts[0].startswith("_"):
+        return None
+    return parts[0]

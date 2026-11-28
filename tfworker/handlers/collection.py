@@ -2,6 +2,8 @@ import threading
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Dict, Union
 
+import click
+
 import tfworker.util.log as log
 from tfworker.exceptions import FrozenInstanceError, HandlerError, UnknownHandler
 
@@ -242,6 +244,39 @@ class HandlersCollection(Mapping):
                         self.add_result(r)
                 else:
                     self.add_result(ret)
+
+    def exec_skip(
+        self,
+        action: "TerraformAction",
+        deployment: str,
+        definition: "Definition",
+        reason: str,
+    ) -> None:
+        """
+        Tell every ready handler for the action that a definition was skipped.
+
+        A skip is informational, so a handler that fails to record it is logged
+        and never stops the run.
+        """
+        from tfworker.custom_types import TerraformAction, TerraformStage
+
+        if not isinstance(action, TerraformAction):
+            raise HandlerError(f"Invalid action {action}")
+        for name, handler in self._ordered_handlers(action, TerraformStage.PRE):
+            try:
+                handler.skip(
+                    action=action,
+                    deployment=deployment,
+                    definition=definition,
+                    reason=reason,
+                )
+            except click.exceptions.Exit:
+                raise
+            except Exception as e:
+                log.error(
+                    f"handler {name} failed to record the skipped {action.value} "
+                    f"of {definition.name}: {e}"
+                )
 
     def exec_setup(
         self,
