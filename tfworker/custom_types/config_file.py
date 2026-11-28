@@ -102,6 +102,28 @@ class LockingOptions(FreezableBaseModel):
         return value
 
 
+class ReportingOptions(FreezableBaseModel):
+    """
+    What run reporting records beside each run's state.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    resources: bool = Field(
+        True, description="Record changed resource addresses, not only counts"
+    )
+    state_serials: bool = Field(
+        True, description="Read state lineage and serial around plan and apply"
+    )
+    tracked_ref: Optional[str] = Field(
+        None,
+        description="The ref provenance compares HEAD with; the remote's default branch when unset",
+    )
+    status_retries: int = Field(
+        5, ge=1, description="Attempts at a status update another run raced"
+    )
+
+
 class GlobalVars(FreezableBaseModel):
     """
     Global Variables can be defined inside of the configuration file, this is a model for those variables.
@@ -149,27 +171,36 @@ class ConfigFile(FreezableBaseModel):
     model_config = ConfigDict(extra="forbid")
 
     definitions: Dict[str, Any] = Field(
-        {}, description="The definition configurations."
+        {}, description="The terraform root modules to run, in order, keyed by name."
     )
     definitions_sources: Dict[str, DefinitionsSource] = Field(
         {}, description="Sources whose commands generate definitions."
     )
     global_vars: Optional[GlobalVars] = Field(
         default_factory=GlobalVars,
-        description="Global variables that are used in the configuration file.",
+        description="Variables merged into every definition.",
     )
-    providers: Dict[str, Any] = Field({}, description="The provider configurations.")
+    providers: Dict[str, Any] = Field(
+        {}, description="Provider requirements and blocks, keyed by provider name."
+    )
     worker_options: Dict[str, str | bool] = Field(
-        {}, description="The base worker options, overlaps with command line options"
+        {},
+        description="Defaults for command line options, keyed by option name with underscores.",
     )
-    handlers: Dict[str, Any] = Field({}, description="The handler configurations.")
+    handlers: Dict[str, Any] = Field(
+        {}, description="Handlers to turn on, keyed by handler name."
+    )
     parallel_options: Optional[ParallelOptions] = Field(
         default_factory=ParallelOptions,
-        description="Configuration options for parallel processing of definitions.",
+        description="How many definitions are prepared and initialized at once.",
     )
     locking: Optional[LockingOptions] = Field(
         None,
         description="Wait for held state locks and keep a worker lease; off when unset.",
+    )
+    reporting: Optional[ReportingOptions] = Field(
+        None,
+        description="Write run records and definition status beside state; off when unset.",
     )
 
     def freeze(self):
@@ -180,4 +211,6 @@ class ConfigFile(FreezableBaseModel):
             self.parallel_options.freeze()
         if self.locking:
             self.locking.freeze()
+        if self.reporting:
+            self.reporting.freeze()
         return self

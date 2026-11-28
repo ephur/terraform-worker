@@ -30,7 +30,7 @@ def cli(ctx: click.Context, **kwargs):
 
     The goal is to reduce the amount of boiler plate terraform code, and allow
     for both a more dynamic execution, as well as a more controlled execution.
-    Through a combinatin of definitions and providers specified in the configuration
+    Through a combination of definitions and providers specified in the configuration
     file, the worker can be used to build, destroy, and manage terraform deployments.
     """
     try:
@@ -114,6 +114,7 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
     log.info(f"building Deployment: {deployment}")
     log_limiter()
     tfc = TerraformCommand(deployment=deployment)
+    tfc.phases.setup(deployment)
 
     if tfc.app_state.handlers is not None:
         try:
@@ -125,6 +126,7 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
             )
         except HandlerError as e:
             log.error(f"handler setup failed: {e}")
+            tfc.phases.teardown(deployment)
             ctx.exit(1)
 
     run_failed = True
@@ -136,6 +138,7 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
         tfc.terraform_apply_or_destroy()
         run_failed = False
     finally:
+        tfc.phases.teardown(deployment)
         if tfc.app_state.handlers is not None:
             try:
                 # when the run already failed, teardown errors are only

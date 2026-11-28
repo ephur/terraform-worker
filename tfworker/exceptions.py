@@ -96,6 +96,10 @@ class HandlerError(TFWorkerException):
         return f"Handler error: {self.message}"
 
 
+class ReportConflictError(BackendError):
+    """A conditional report write lost to a concurrent writer."""
+
+
 class LockUnavailableError(TFWorkerException):
     """
     A definition's state lock could not be acquired: it was held past the

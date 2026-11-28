@@ -26,6 +26,12 @@ dep-test: init-dev
 	uv run pytest --disable-socket
 	uv run coverage report
 
+docs: init-dev
+	uv run python scripts/gen_reference.py
+
+docs-check: init-dev
+	uv run python scripts/gen_reference.py --check
+
 typecheck: init-dev
 	uv run mypy -p tfworker
 

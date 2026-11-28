@@ -40,7 +40,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/ephur/terraform-worker"
 Repository = "https://github.com/ephur/terraform-worker"
-Documentation = "https://github.com/ephur/terraform-worker"
+Documentation = "https://github.com/ephur/terraform-worker/tree/master/docs"
 
 [project.scripts]
 worker = "tfworker.cli:cli"
@@ -59,7 +59,6 @@ dev = [
     "pytest-socket>=0.8.1,<0.9",
     "pytest-timeout>=2.4.0,<3",
     "seed-isort-config>=2.2.0,<3",
-    "sphinx>=7.4.7,<8",
     "moto[sts,dynamodb,s3]>=5.2.2,<6",
     "mypy>=1.20.2,<2",
 ]
@@ -99,7 +98,7 @@ markers = [
 ]
 
 [tool.coverage.report]
-fail_under = 93
+fail_under = 94
 show_missing = true
 skip_empty = true
 

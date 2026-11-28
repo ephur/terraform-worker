@@ -62,3 +62,16 @@ class TestLockInspectionDefaults:
         ):
             with pytest.raises(NotImplementedError):
                 call()
+
+    def test_base_backend_report_methods_not_implemented(self):
+        from tfworker.backends.base import BaseBackend
+
+        assert BaseBackend.report_storage is False
+        for name, args in (
+            ("location", ("d",)),
+            ("state_version", ("d",)),
+            ("read_report", ("p",)),
+            ("write_report", ("p", "{}")),
+        ):
+            with pytest.raises(NotImplementedError):
+                getattr(BaseBackend, name)(None, *args)
