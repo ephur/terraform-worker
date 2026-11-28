@@ -359,14 +359,14 @@ def main(argv: list[str] | None = None) -> int:
     for filename, render in PAGES.items():
         path = REFERENCE_DIR / filename
         content = render()
-        current = path.read_text() if path.exists() else None
+        current = path.read_text(encoding="utf-8") if path.exists() else None
         if current == content:
             continue
         if args.check:
             stale.append(os.path.relpath(path, REPO_ROOT))
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content)
+            path.write_text(content, encoding="utf-8")
             print(f"wrote {os.path.relpath(path, REPO_ROOT)}")
 
     if stale:

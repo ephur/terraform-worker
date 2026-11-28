@@ -126,7 +126,7 @@ class CLIOptionsRoot(FreezableBaseModel):
     working_dir: Optional[str] = Field(
         None,
         json_schema_extra={"env": "WORKER_WORKING_DIR"},
-        description="Specify the path to use instead of a temporary directory, must exist, be empty, and be writeable, --clean applies to this directory as well",
+        description="Path to use instead of a temporary directory; it must exist, be empty and be writeable, and is left in place after the run",
     )
 
     @field_validator("backend", mode="before")

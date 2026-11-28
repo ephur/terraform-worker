@@ -42,7 +42,7 @@ worker [OPTIONS] COMMAND [ARGS]...
 | `--repository-path` | `WORKER_REPOSITORY_PATH` | `.` | The root repository/working path, any relative paths will be resolved from here |
 | `--run-id` | `WORKER_RUN_ID` |  | When set, prefix remote plan files with this id |
 | `--version` |  |  | Show the version and exit. |
-| `--working-dir` | `WORKER_WORKING_DIR` |  | Specify the path to use instead of a temporary directory, must exist, be empty, and be writeable, --clean applies to this directory as well |
+| `--working-dir` | `WORKER_WORKING_DIR` |  | Path to use instead of a temporary directory; it must exist, be empty and be writeable, and is left in place after the run |
 
 ## worker clean
 
