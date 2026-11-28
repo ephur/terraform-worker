@@ -32,7 +32,7 @@ def cli(ctx: click.Context, **kwargs):
 
     The goal is to reduce the amount of boiler plate terraform code, and allow
     for both a more dynamic execution, as well as a more controlled execution.
-    Through a combinatin of definitions and providers specified in the configuration
+    Through a combination of definitions and providers specified in the configuration
     file, the worker can be used to build, destroy, and manage terraform deployments.
     """
     try:
