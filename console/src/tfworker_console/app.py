@@ -10,9 +10,8 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.middleware.sessions import SessionMiddleware
-from tfworker.report import PLAN_SCHEMA, RUN_SCHEMA, STATUS_SCHEMA
 
-from . import api, demo, login, version, web
+from . import api, demo, login, probes, version, web
 from .actions import Actions
 from .auth import OIDCClient, load_roles
 from .db import engine_for, session_factory
@@ -149,6 +148,7 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
     app.state.sessions = None
     app.state.reconciler = None
     app.state.actions = None
+    engine = None
     app.state.groups = load_groups(settings.groups_file)
     if settings.demo:
         if not settings.database_url:
@@ -203,6 +203,7 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
                 app.state.reconciler, settings.reconcile_interval
             )
 
+    app.state.readiness = probes.Readiness(engine)
     app.state.roles = load_roles(settings.roles_file)
     for mapping in app.state.roles.role_mappings:
         if mapping.groups is not None:
@@ -276,16 +277,9 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
             return JSONResponse({"detail": str(exc)}, status_code=403)
         return PlainTextResponse(str(exc), status_code=403)
 
+    app.include_router(probes.router)
     app.include_router(api.router)
     app.include_router(login.router)
     app.include_router(web.router)
-
-    @app.get("/healthz")
-    def healthz() -> dict:
-        return {
-            "status": "ok",
-            "version": version(),
-            "schemas": [RUN_SCHEMA, STATUS_SCHEMA, PLAN_SCHEMA],
-        }
 
     return app

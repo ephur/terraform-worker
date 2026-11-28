@@ -169,7 +169,8 @@ class TestSignIn:
         page = client.get("/plans?store=prod", follow_redirects=False)
         assert page.status_code == 303
         assert page.headers["location"] == "/login?next=%2Fplans%3Fstore%3Dprod"
-        assert client.get("/healthz").status_code == 200
+        assert client.get("/livez").status_code == 200
+        assert client.get("/readyz").status_code == 200
         login = client.get("/login?next=/plans")
         assert 'name="next" value="/plans"' in login.text
         assert "Sign in with SSO" not in login.text
@@ -585,6 +586,10 @@ def sso_sign_in(client, provider, next="/plans"):
 
 
 class TestSSO:
+    def test_probes_need_no_sign_in(self, sso):
+        assert sso.get("/livez").status_code == 200
+        assert sso.get("/readyz").status_code == 200
+
     def test_pkce_flow_and_role_mapping(self, sso, provider, sessions):  # noqa: F811
         assert "Sign in with SSO" in sso.get("/login").text
         done = sso_sign_in(sso, provider)
