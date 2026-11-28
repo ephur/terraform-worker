@@ -47,6 +47,8 @@ if TYPE_CHECKING:
 
 @HandlerRegistry.register("local_plans", always=True)
 class LocalPlanHandler(BaseHandler):
+    """Write and check manifests for plans saved with --plan-file-path."""
+
     actions = [TerraformAction.PLAN, TerraformAction.APPLY, TerraformAction.DESTROY]
     config_model = BaseConfig
     default_priority = {
