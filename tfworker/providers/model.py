@@ -1,6 +1,6 @@
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tfworker.constants import (
     TF_PROVIDER_DEFAULT_HOSTNAME,
@@ -15,8 +15,11 @@ class ProviderRequirements(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    version: str
-    source: Optional[str] = None
+    version: str = Field(description='Version constraint, such as ">= 5.0".')
+    source: Optional[str] = Field(
+        None,
+        description="Provider source address; defaults to hashicorp/<name> on the public registry.",
+    )
 
 
 class ProviderAlias(BaseModel):
@@ -26,8 +29,13 @@ class ProviderAlias(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    vars: Optional[Dict[str, Any]] = None
-    config_blocks: Optional[Dict[str, Any]] = None
+    vars: Optional[Dict[str, Any]] = Field(
+        None, description="Arguments merged over the provider's vars for this alias."
+    )
+    config_blocks: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Nested blocks merged over the provider's config_blocks for this alias.",
+    )
 
 
 class ProviderConfig(BaseModel):
@@ -37,10 +45,19 @@ class ProviderConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    requirements: ProviderRequirements
-    vars: Optional[Dict[str, Any]] = None
-    config_blocks: Optional[Dict[str, Any]] = None
-    aliases: Optional[Dict[str, ProviderAlias]] = None
+    requirements: ProviderRequirements = Field(
+        description="Version and source for required_providers, written when a definition has none of its own."
+    )
+    vars: Optional[Dict[str, Any]] = Field(
+        None, description="Arguments written into the provider block."
+    )
+    config_blocks: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Nested blocks written into the provider block, such as assume_role.",
+    )
+    aliases: Optional[Dict[str, ProviderAlias]] = Field(
+        None, description="Additional aliased provider blocks, keyed by alias."
+    )
 
     @model_validator(mode="before")
     @classmethod
