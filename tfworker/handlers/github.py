@@ -273,7 +273,10 @@ class GithubConfig(BaseModel):
         default=None,
         description="Text of the logs link; falls back to GITHUB_CHECK_LOGS_LABEL, then 'View logs'.",
     )
-    comment_marker: str = "tfworker-status"
+    comment_marker: str = Field(
+        default="tfworker-status",
+        description="Hidden marker that identifies the worker's PR comment so later runs update it in place.",
+    )
     comment_details: bool = Field(
         default=False,
         description="Include per-definition detail (plan output or AI summary) in the PR comment, split across additional comments when needed. When false the comment carries only the status table; detail lives in the check run output.",

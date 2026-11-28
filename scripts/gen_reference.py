@@ -30,6 +30,7 @@ from tfworker.custom_types.config_file import (
     ReportingOptions,
 )
 from tfworker.definitions.model import Definition, DefinitionRemoteOptions
+from tfworker.handlers.openai import OpenAITaskSettings
 from tfworker.handlers.registry import HandlerRegistry
 from tfworker.providers.model import ProviderAlias, ProviderConfig, ProviderRequirements
 
@@ -44,6 +45,12 @@ HEADER = (
 TYPE_OVERRIDES = {
     (LockingOptions, "actions"): "list of `plan` \\| `apply` \\| `destroy`",
 }
+
+# Map keys named in nested handler section titles; "key" otherwise.
+NESTED_KEY_LABELS = {"tasks": "task", "queues": "url"}
+
+# Fields a validator fills in from the enclosing map key.
+NESTED_SKIP = {OpenAITaskSettings: {"task_type"}}
 
 # Fields the worker sets while it runs; they are not configuration.
 INTERNAL_DEFINITION_FIELDS = {
@@ -254,6 +261,32 @@ def _model_table(model: type[BaseModel], skip: set[str] = frozenset()) -> list[s
     return lines + [""]
 
 
+def _nested_models(annotation, title: str, field: str):
+    origin = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+    if origin in (typing.Union, types.UnionType):
+        for arg in args:
+            yield from _nested_models(arg, title, field)
+    elif origin in (list, typing.List) and args:
+        yield from _nested_models(args[0], f"{title}[]", field)
+    elif origin in (dict, typing.Dict) and len(args) == 2:
+        label = NESTED_KEY_LABELS.get(field, "key")
+        yield from _nested_models(args[1], f"{title}.&lt;{label}&gt;", field)
+    elif isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        yield title, annotation
+
+
+def _handler_sections(name: str, model: type[BaseModel]) -> list[str]:
+    lines: list[str] = []
+    for field_name, field in model.model_fields.items():
+        for title, nested in _nested_models(
+            field.annotation, f"handlers.{name}.{field_name}", field_name
+        ):
+            lines += [f"#### {title}", ""]
+            lines += _model_table(nested, NESTED_SKIP.get(nested, frozenset()))
+    return lines
+
+
 def _model_section(
     title: str, model: type[BaseModel], intro: str, skip: set[str] = frozenset()
 ) -> list[str]:
@@ -351,6 +384,7 @@ def render_config() -> str:
             lines += [_escape(summary), ""]
         if model.model_fields:
             lines += _model_table(model)
+            lines += _handler_sections(name, model)
         else:
             lines += ["No options.", ""]
     return HEADER + "\n".join(lines).rstrip() + "\n"

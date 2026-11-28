@@ -77,19 +77,42 @@ _APPLY_COUNT_RE = re.compile(r"(\d+) (?:imported|added|changed|destroyed)")
 
 
 class SlackLink(BaseModel):
-    text: str
-    url: str
+    text: str = Field(description="Link text.")
+    url: str = Field(description="Link target.")
 
 
 class SlackConfig(BaseModel):
-    channel: str
-    token: str | None = Field(default=None, repr=False)
-    token_env: str = "SLACK_BOT_TOKEN"
-    title: str | None = None
-    links: list[SlackLink] = Field(default_factory=list)
-    definition_log_url_template: str | None = None
-    update_interval: float = Field(default=4.0, ge=0.0)
-    timezone: str = "America/Chicago"
+    channel: str = Field(description="Channel to post the run report in.")
+    token: str | None = Field(
+        default=None,
+        repr=False,
+        description="Bot token; read from token_env when unset.",
+    )
+    token_env: str = Field(
+        default="SLACK_BOT_TOKEN",
+        description="Environment variable holding the bot token.",
+    )
+    title: str | None = Field(
+        default=None,
+        description="Title of the report card; the deployment name when unset.",
+    )
+    links: list[SlackLink] = Field(
+        default_factory=list,
+        description="Links shown in the report card, each with text and url.",
+    )
+    definition_log_url_template: str | None = Field(
+        default=None,
+        description="Link to a definition's logs on its failure card; {definition} is replaced with the definition name.",
+    )
+    update_interval: float = Field(
+        default=4.0,
+        ge=0.0,
+        description="Minimum seconds between updates of the Slack messages.",
+    )
+    timezone: str = Field(
+        default="America/Chicago",
+        description="Time zone of the fallback timestamp text; live timestamps show in each viewer's own time zone.",
+    )
 
     _resolved_token: str = PrivateAttr(default="")
 

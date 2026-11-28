@@ -153,13 +153,13 @@ The BitbucketHandler class is meant to interact with bitbucket cloud.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `username` | string | required |  |
-| `password` | string | required |  |
-| `workspace` | string | required |  |
-| `project` | string | required |  |
-| `repository` | string | required |  |
+| `username` | string | required | Bitbucket Cloud username. |
+| `password` | string | required | App password for the username. |
+| `workspace` | string | required | Workspace that owns the repository. |
+| `project` | string | required | Name of the project that holds the repository. |
+| `repository` | string | required | Name of the repository. |
 | `pull_request` | string | required | The pull request number to add the comment to. |
-| `pr_text` | string | built in |  |
+| `pr_text` | string | built in | Comment posted for each plan with changes; str.format placeholders: {deployment}, {definition} and {text}, the plan output. |
 
 ### handlers.datadog
 
@@ -167,10 +167,10 @@ Post a Datadog change event after a successful apply or destroy.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `api_key` | string |  |  |
-| `app_key` | string |  |  |
-| `api_key_env` | string | `DD_API_KEY` |  |
-| `app_key_env` | string | `DD_APP_KEY` |  |
+| `api_key` | string |  | Datadog API key; read from api_key_env when unset. |
+| `app_key` | string |  | Datadog application key; read from app_key_env when unset. |
+| `api_key_env` | string | `DD_API_KEY` | Environment variable holding the API key. |
+| `app_key_env` | string | `DD_APP_KEY` | Environment variable holding the application key. |
 
 ### handlers.github
 
@@ -192,7 +192,7 @@ Report plan and apply progress and results to GitHub.
 | `logs_url` | string |  | Template for a labelled logs link in the rollup check runs' output, with the placeholders of details_url; falls back to GITHUB_CHECK_LOGS_URL. |
 | `definition_logs_url` | string |  | Template for the logs link in the per-definition check runs' output; falls back to GITHUB_CHECK_DEFINITION_LOGS_URL, then logs_url. |
 | `logs_label` | string |  | Text of the logs link; falls back to GITHUB_CHECK_LOGS_LABEL, then 'View logs'. |
-| `comment_marker` | string | `tfworker-status` |  |
+| `comment_marker` | string | `tfworker-status` | Hidden marker that identifies the worker's PR comment so later runs update it in place. |
 | `comment_details` | boolean | `false` | Include per-definition detail (plan output or AI summary) in the PR comment, split across additional comments when needed. When false the comment carries only the status table; detail lives in the check run output. |
 | `max_detail_chars` | integer | `8000` | Maximum characters of per-definition detail included in check run output, which cannot be split. PR comments always carry the full detail, split across comments as needed. |
 | `wrap_width` | integer | `120` | Hard-wrap fenced plan and error output at this column so check run pages do not scroll horizontally. 0 disables wrapping. |
@@ -212,9 +212,17 @@ Analyze terraform plans using OpenAI.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `tasks` | map of object | built in |  |
-| `send_plan_file` | boolean | `false` |  |
-| `required` | boolean | `false` |  |
+| `tasks` | map of object | built in | Tasks to run on each plan with changes, keyed by summary, cost_payload or cost_estimate; a summary task when unset. |
+| `send_plan_file` | boolean | `false` | Send the plan JSON instead of the plan's text output. |
+| `required` | boolean | `false` | Stop the run when the handler cannot start or a request fails. |
+
+#### handlers.openai.tasks.&lt;task&gt;
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `model` | `gpt-3.5-turbo` \| `gpt-4` \| `gpt-4o` \| `gpt-4o-mini` \| `gpt-4.1` \| `gpt-4.1-nano` | `gpt-4.1-nano` | OpenAI model to use. |
+| `level` | `concise` \| `standard` \| `verbose` | `standard` | How much detail the summary prompt asks for; summary task only. |
+| `custom_prompt` | string |  | Prompt sent ahead of the plan instead of the task's built-in prompt. |
 
 ### handlers.s3
 
@@ -230,14 +238,21 @@ Post a live-updating Slack report for each terraform-worker run.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `channel` | string | required |  |
-| `token` | string |  |  |
-| `token_env` | string | `SLACK_BOT_TOKEN` |  |
-| `title` | string |  |  |
-| `links` | list of object |  |  |
-| `definition_log_url_template` | string |  |  |
-| `update_interval` | number | `4` |  |
-| `timezone` | string | `America/Chicago` |  |
+| `channel` | string | required | Channel to post the run report in. |
+| `token` | string |  | Bot token; read from token_env when unset. |
+| `token_env` | string | `SLACK_BOT_TOKEN` | Environment variable holding the bot token. |
+| `title` | string |  | Title of the report card; the deployment name when unset. |
+| `links` | list of object |  | Links shown in the report card, each with text and url. |
+| `definition_log_url_template` | string |  | Link to a definition's logs on its failure card; {definition} is replaced with the definition name. |
+| `update_interval` | number | `4` | Minimum seconds between updates of the Slack messages. |
+| `timezone` | string | `America/Chicago` | Time zone of the fallback timestamp text; live timestamps show in each viewer's own time zone. |
+
+#### handlers.slack.links[]
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `text` | string | required | Link text. |
+| `url` | string | required | Link target. |
 
 ### handlers.snyk
 
@@ -245,20 +260,13 @@ The SnykHandler will execute a snyk scan on a specified terraform plan file
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `args` | map |  |  |
-| `cache_dir` | string | `/tmp/snyk_cache` |  |
-| `debug` | boolean | `false` |  |
-| `exit_code` | string | `1` |  |
-| `handler_debug` | boolean | `false` |  |
-| `path` | string | `/usr/bin/snyk` |  |
-| `quiet` | boolean | `true` |  |
-| `required` | boolean | `false` |  |
-| `severity` | string | `HIGH,CRITICAL` |  |
-| `skip_dirs` | list | `[**/examples]` |  |
-| `skip_planfile` | boolean | `false` |  |
-| `skip_definition` | boolean | `true` |  |
-| `stream_output` | boolean | `true` |  |
-| `exempt_definitions` | list |  |  |
+| `debug` | boolean | `false` | Log the snyk command line at debug level. |
+| `path` | string | `/usr/bin/snyk` | Path to the snyk binary. |
+| `required` | boolean | `false` | Stop the run when snyk is missing or a scan fails; a failed scan also removes the saved plan. |
+| `skip_planfile` | boolean | `false` | Skip the scan of the plan after planning. |
+| `skip_definition` | boolean | `true` | Skip both scans of every definition, the source before planning and the plan after it. |
+| `stream_output` | boolean | `true` | Stream snyk's output. |
+| `exempt_definitions` | list of string |  | Definitions that are never scanned. |
 
 ### handlers.sqs
 
@@ -266,15 +274,24 @@ Send execution details to AWS SQS.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `queues` | list of string or map of object |  |  |
-| `actions` | list of `plan` \| `apply` \| `destroy` \| `init` |  |  |
-| `stages` | list of `pre` \| `post` \| `error` |  |  |
-| `results` | list of integer |  |  |
+| `queues` | list of string or map of object |  | Queue URLs, or a map of queue URL to rules for that queue. |
+| `actions` | list of `plan` \| `apply` \| `destroy` \| `init` |  | Legacy format: actions to send; all when unset. |
+| `stages` | list of `pre` \| `post` \| `error` |  | Legacy format: stages to send; pre and post when unset. |
+| `results` | list of integer |  | Legacy format: terraform exit codes to send; when set, messages without a result, such as pre stages, are not sent. |
 | `include_plan` | boolean | `false` | Include plan file content when sending post plan messages |
 | `format` | `legacy` \| `cloudevents` | `legacy` | legacy sends one message per terraform stage; cloudevents publishes the report events |
 | `types` | list of string |  | CloudEvents types to publish (shell-style patterns); all when unset |
 | `event_bus` | string |  | An EventBridge bus to publish CloudEvents to |
 | `event_source` | string | `tfworker` | The EventBridge Source of published events |
+
+#### handlers.sqs.queues.&lt;url&gt;
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `actions` | list of `plan` \| `apply` \| `destroy` \| `init` |  | Actions sent to this queue; the handler's actions when unset. |
+| `stages` | list of `pre` \| `post` \| `error` |  | Stages sent to this queue; the handler's stages when unset. |
+| `results` | list of integer |  | Terraform exit codes sent to this queue; the handler's results when unset. |
+| `types` | list of string |  | CloudEvents types sent to this queue (shell-style patterns); the handler's types when unset. |
 
 ### handlers.trivy
 
@@ -282,18 +299,17 @@ The TrivyHandler will execute a trivy scan on a specified terraform plan file
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `args` | map |  |  |
-| `cache_dir` | string | `/tmp/trivy_cache` |  |
-| `debug` | boolean | `false` |  |
-| `exit_code` | string | `1` |  |
-| `format` | string |  |  |
-| `handler_debug` | boolean | `false` |  |
-| `path` | string | `/usr/bin/trivy` |  |
-| `quiet` | boolean | `true` |  |
-| `required` | boolean | `false` |  |
-| `severity` | string | `HIGH,CRITICAL` |  |
-| `skip_dirs` | list | `[**/examples]` |  |
-| `template` | string | built in |  |
-| `skip_planfile` | boolean | `false` |  |
-| `skip_definition` | boolean | `false` |  |
-| `stream_output` | boolean | `true` |  |
+| `args` | map |  | Extra trivy options, each key passed as --&lt;key&gt; &lt;value&gt;. |
+| `cache_dir` | string | `/tmp/trivy_cache` | Passed as --cache-dir. |
+| `debug` | boolean | `false` | Pass --debug and log the trivy command line at debug level. |
+| `exit_code` | string | `1` | Passed as --exit-code, the code trivy exits with when it finds issues; any non-zero exit fails the scan. |
+| `format` | string |  | Passed as --format; with template, template is passed as --template. |
+| `path` | string | `/usr/bin/trivy` | Path to the trivy binary. |
+| `quiet` | boolean | `true` | Pass --quiet. |
+| `required` | boolean | `false` | Stop the run when trivy is missing or a scan fails; a failed plan scan also removes the saved plan. |
+| `severity` | string | `HIGH,CRITICAL` | Passed as --severity. |
+| `skip_dirs` | list | `[**/examples]` | Passed as --skip-dirs when scanning a definition's source. |
+| `template` | string | built in | Template passed as --template when format is template. |
+| `skip_planfile` | boolean | `false` | Skip the scan of the plan after planning. |
+| `skip_definition` | boolean | `false` | Skip the scan of the definition's source before planning. |
+| `stream_output` | boolean | `true` | Stream trivy's output. |

@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import tfworker.util.log as log
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
@@ -18,20 +18,25 @@ if TYPE_CHECKING:
 
 
 class SnykConfig(BaseModel):
-    args: dict = {}
-    cache_dir: str = "/tmp/snyk_cache"
-    debug: bool = False
-    exit_code: str = "1"
-    handler_debug: bool = False
-    path: str = "/usr/bin/snyk"
-    quiet: bool = True
-    required: bool = False
-    severity: str = "HIGH,CRITICAL"
-    skip_dirs: list = ["**/examples"]
-    skip_planfile: bool = False
-    skip_definition: bool = True
-    stream_output: bool = True
-    exempt_definitions: list = []
+    debug: bool = Field(
+        default=False, description="Log the snyk command line at debug level."
+    )
+    path: str = Field(default="/usr/bin/snyk", description="Path to the snyk binary.")
+    required: bool = Field(
+        default=False,
+        description="Stop the run when snyk is missing or a scan fails; a failed scan also removes the saved plan.",
+    )
+    skip_planfile: bool = Field(
+        default=False, description="Skip the scan of the plan after planning."
+    )
+    skip_definition: bool = Field(
+        default=True,
+        description="Skip both scans of every definition, the source before planning and the plan after it.",
+    )
+    stream_output: bool = Field(default=True, description="Stream snyk's output.")
+    exempt_definitions: list[str] = Field(
+        default_factory=list, description="Definitions that are never scanned."
+    )
 
 
 @HandlerRegistry.register("snyk")

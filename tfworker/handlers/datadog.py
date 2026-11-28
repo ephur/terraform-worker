@@ -38,10 +38,24 @@ if TYPE_CHECKING:  # pragma: no cover
 class DatadogConfig(BaseModel):
     """Configuration for the Datadog change-event handler."""
 
-    api_key: str | None = Field(default=None, repr=False)
-    app_key: str | None = Field(default=None, repr=False)
-    api_key_env: str = "DD_API_KEY"
-    app_key_env: str = "DD_APP_KEY"
+    api_key: str | None = Field(
+        default=None,
+        repr=False,
+        description="Datadog API key; read from api_key_env when unset.",
+    )
+    app_key: str | None = Field(
+        default=None,
+        repr=False,
+        description="Datadog application key; read from app_key_env when unset.",
+    )
+    api_key_env: str = Field(
+        default="DD_API_KEY",
+        description="Environment variable holding the API key.",
+    )
+    app_key_env: str = Field(
+        default="DD_APP_KEY",
+        description="Environment variable holding the application key.",
+    )
 
     _resolved_api_key: str = PrivateAttr(default="")
     _resolved_app_key: str = PrivateAttr(default="")

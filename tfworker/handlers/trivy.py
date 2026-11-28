@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import tfworker.util.log as log
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
@@ -18,23 +18,50 @@ if TYPE_CHECKING:
 
 
 class TrivyConfig(BaseModel):
-    args: dict = {}
-    cache_dir: str = "/tmp/trivy_cache"
-    debug: bool = False
-    exit_code: str = "1"
-    format: str = None
-    handler_debug: bool = False
-    path: str = "/usr/bin/trivy"
-    quiet: bool = True
-    required: bool = False
-    severity: str = "HIGH,CRITICAL"
-    skip_dirs: list = ["**/examples"]
-    template: str = (
-        '\'ERRORS: {{ range . }}{{ range .Misconfigurations}}{{ .Severity }} - {{ .ID }} - {{ .AVDID }} - {{ .Title -}} - {{ .Description }} - {{ .Message }} - {{ .Resolution }} - {{ .PrimaryURL }} - {{ range .References }}{{ . }}{{ end }}{{ "\\n" }}{{ end }}{{ "\\n" }}{{ end }}{{ "\\n" }}\''
+    args: dict = Field(
+        default={},
+        description="Extra trivy options, each key passed as --<key> <value>.",
     )
-    skip_planfile: bool = False
-    skip_definition: bool = False
-    stream_output: bool = True
+    cache_dir: str = Field(
+        default="/tmp/trivy_cache", description="Passed as --cache-dir."
+    )
+    debug: bool = Field(
+        default=False,
+        description="Pass --debug and log the trivy command line at debug level.",
+    )
+    exit_code: str = Field(
+        default="1",
+        description="Passed as --exit-code, the code trivy exits with when it finds issues; any non-zero exit fails the scan.",
+    )
+    format: str | None = Field(
+        default=None,
+        description="Passed as --format; with template, template is passed as --template.",
+    )
+    path: str = Field(default="/usr/bin/trivy", description="Path to the trivy binary.")
+    quiet: bool = Field(default=True, description="Pass --quiet.")
+    required: bool = Field(
+        default=False,
+        description="Stop the run when trivy is missing or a scan fails; a failed plan scan also removes the saved plan.",
+    )
+    severity: str = Field(default="HIGH,CRITICAL", description="Passed as --severity.")
+    skip_dirs: list = Field(
+        default=["**/examples"],
+        description="Passed as --skip-dirs when scanning a definition's source.",
+    )
+    template: str = Field(
+        default=(
+            '\'ERRORS: {{ range . }}{{ range .Misconfigurations}}{{ .Severity }} - {{ .ID }} - {{ .AVDID }} - {{ .Title -}} - {{ .Description }} - {{ .Message }} - {{ .Resolution }} - {{ .PrimaryURL }} - {{ range .References }}{{ . }}{{ end }}{{ "\\n" }}{{ end }}{{ "\\n" }}{{ end }}{{ "\\n" }}\''
+        ),
+        description="Template passed as --template when format is template.",
+    )
+    skip_planfile: bool = Field(
+        default=False, description="Skip the scan of the plan after planning."
+    )
+    skip_definition: bool = Field(
+        default=False,
+        description="Skip the scan of the definition's source before planning.",
+    )
+    stream_output: bool = Field(default=True, description="Stream trivy's output.")
 
 
 @HandlerRegistry.register("trivy")

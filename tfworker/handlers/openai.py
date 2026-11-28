@@ -102,9 +102,17 @@ class SummaryLevel(str, Enum):
 
 
 class OpenAITaskSettings(BaseModel):
-    model: OpenAIModel = OpenAIModel.GPT41_NANO
-    level: SummaryLevel = SummaryLevel.STANDARD
-    custom_prompt: str | None = None
+    model: OpenAIModel = Field(
+        default=OpenAIModel.GPT41_NANO, description="OpenAI model to use."
+    )
+    level: SummaryLevel = Field(
+        default=SummaryLevel.STANDARD,
+        description="How much detail the summary prompt asks for; summary task only.",
+    )
+    custom_prompt: str | None = Field(
+        default=None,
+        description="Prompt sent ahead of the plan instead of the task's built-in prompt.",
+    )
     task_type: OpenAITask
 
     model_config = {
@@ -126,10 +134,17 @@ class OpenAIConfig(BaseModel):
     tasks: Dict[OpenAITask, OpenAITaskSettings] = Field(
         default_factory=lambda: {
             OpenAITask.SUMMARY: OpenAITaskSettings(task_type=OpenAITask.SUMMARY),
-        }
+        },
+        description="Tasks to run on each plan with changes, keyed by summary, cost_payload or cost_estimate; a summary task when unset.",
     )
-    send_plan_file: bool = False
-    required: bool = False
+    send_plan_file: bool = Field(
+        default=False,
+        description="Send the plan JSON instead of the plan's text output.",
+    )
+    required: bool = Field(
+        default=False,
+        description="Stop the run when the handler cannot start or a request fails.",
+    )
 
     model_config = {
         "extra": "forbid",
