@@ -69,6 +69,25 @@ schema at startup; replicas take turns on a Postgres advisory lock, so only
 one migrates. To migrate as a separate step of a rollout instead, set
 `TFWORKER_CONSOLE_AUTO_MIGRATE=false` and run `tfworker-console db upgrade`.
 
+### Probes
+
+Two endpoints answer without a session or a token, for a load balancer or
+Kubernetes:
+
+| Endpoint | Use it for | Answers |
+| --- | --- | --- |
+| `/livez` | liveness | `200` whenever the process is serving. It does no I/O, so a slow database never gets a healthy pod restarted. The body carries the console's version and the record schemas it reads. |
+| `/readyz` | readiness | `200` when the database answers within 2 seconds and its schema is at this console's migration head, `503` otherwise. The body names each check, for example `{"status": "unavailable", "checks": {"database": "ok", "schema": "not migrated"}}`. |
+
+`/readyz` caches its answer for a second, so frequent probes don't load the
+database, and it never reads the stores: a slow or broken store shows on the
+screens without taking the console out of rotation. A failing database check
+names only the error type, so the body never carries hostnames. With
+`TFWORKER_CONSOLE_AUTO_MIGRATE=false`, a new console stays unready until
+`tfworker-console db upgrade` brings the schema to its head, which keeps it out
+of rotation during a rollout. Without a database (development mode only) the
+database check reads `not configured` and the console is ready.
+
 ## Stores and the projection
 
 The console reads the run records, status snapshots, plan manifests and

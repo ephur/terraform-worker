@@ -169,7 +169,8 @@ class TestSignIn:
         page = client.get("/plans?store=prod", follow_redirects=False)
         assert page.status_code == 303
         assert page.headers["location"] == "/login?next=%2Fplans%3Fstore%3Dprod"
-        assert client.get("/healthz").status_code == 200
+        assert client.get("/livez").status_code == 200
+        assert client.get("/readyz").status_code == 200
         login = client.get("/login?next=/plans")
         assert 'name="next" value="/plans"' in login.text
         assert "Sign in with SSO" not in login.text

@@ -10,8 +10,8 @@ from tfworker_console.cli import main
 from tfworker_console.settings import ConsoleSettings
 
 
-def test_healthz():
-    response = TestClient(create_app()).get("/healthz")
+def test_livez():
+    response = TestClient(create_app()).get("/livez")
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
