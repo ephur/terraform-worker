@@ -495,6 +495,9 @@ class TestSplitKeyPath:
             ('items["a"][2].id', ["items", "a", 2, "id"]),
             ('m["say \\"hi\\""]', ["m", 'say "hi"']),
             ('m[ "k" ]', ["m", "k"]),
+            (r'm["a\nb\t\\"]', ["m", "a\nb\t\\"]),
+            (r'm["\u00e9\U0001F600"]', ["m", "\u00e9\U0001f600"]),
+            ('m["$${x}"]', ["m", "${x}"]),
         ],
     )
     def test_valid_paths(self, key_path, expected):
@@ -502,7 +505,17 @@ class TestSplitKeyPath:
 
     @pytest.mark.parametrize(
         "key_path",
-        [".a", "a..b", "a b", 'items["x"]foo', "a[", "a.", 'a["x"', "a[-1]"],
+        [
+            ".a",
+            "a..b",
+            "a b",
+            'items["x"]foo',
+            "a[",
+            "a.",
+            'a["x"',
+            "a[-1]",
+            r'm["\q"]',
+        ],
     )
     def test_invalid_paths(self, key_path):
         with pytest.raises(ValueError):

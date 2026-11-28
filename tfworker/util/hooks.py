@@ -421,6 +421,8 @@ def _populate_environment_with_terraform_remote_vars(
                     b64_encode,
                 )
             return
+    except HookError:
+        raise
     except Exception as e:
         log.debug(f"HCL2 parsing failed, falling back to regex: {e}")
 
@@ -492,10 +494,15 @@ def _lookup_output(outputs: Dict[str, Any], key_path: str, state: str) -> Any:
         The value at the key path
 
     Raises:
-        HookError: If the output or a key along the path does not exist
-        ValueError: If the key path cannot be parsed
+        HookError: If the key path cannot be parsed, or the output or a key
+            along the path does not exist
     """
-    segments = split_key_path(key_path)
+    try:
+        segments = split_key_path(key_path)
+    except ValueError as e:
+        raise HookError(
+            f"Unsupported output key path '{key_path}' in state '{state}': {e}"
+        ) from None
     name = segments[0]
     if not isinstance(name, str) or name not in outputs:
         raise HookError(f"Output '{name}' not found in state '{state}'")

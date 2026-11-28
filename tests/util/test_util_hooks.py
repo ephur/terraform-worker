@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 import shlex
 from unittest import mock
 
@@ -894,6 +895,24 @@ class TestResolveNestedOutputKeys:
             "subnet-b",
         ]
         assert local_env["TF_REMOTE_EDGE"] == "subnet-e"
+
+    @pytest.mark.parametrize(
+        "ref,message",
+        [
+            ("outputs.subnets.nope", "Key 'nope' not found"),
+            ("outputs.subnets.private[5]", "Key '5' not found"),
+            ("outputs.missing.key", "Output 'missing' not found"),
+            ("outputs.list[*].id", "Unsupported output key path"),
+        ],
+    )
+    def test_real_hcl2_bad_key_path_fails_hook(self, tmp_path, ref, message):
+        (tmp_path / WORKER_LOCALS_FILENAME).write_text(
+            f"locals {{\n  v = data.terraform_remote_state.network.{ref}\n}}\n"
+        )
+        with pytest.raises(hooks.HookError, match=re.escape(message)):
+            hooks._populate_environment_with_terraform_remote_vars(
+                {}, str(tmp_path), "terraform", False, self._backend()
+            )
 
 
 class TestPopulateEnvironmentWithNestedRemoteVars:

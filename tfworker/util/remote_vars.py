@@ -247,6 +247,24 @@ _KEY_PATH_TOKEN = re.compile(
 )
 
 
+_HCL_ESCAPES = {"n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}
+_HCL_ESCAPE = re.compile(r"\\(?:u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|(.))")
+
+
+def _unescape_hcl(quoted: str, key_path: str) -> str:
+    def replace(m: "re.Match[str]") -> str:
+        if m.group(1) or m.group(2):
+            return chr(int(m.group(1) or m.group(2), 16))
+        if m.group(3) in _HCL_ESCAPES:
+            return _HCL_ESCAPES[m.group(3)]
+        raise ValueError(
+            f"Unsupported escape '\\{m.group(3)}' in output key path: '{key_path}'"
+        )
+
+    unescaped = _HCL_ESCAPE.sub(replace, quoted)
+    return unescaped.replace("$${", "${").replace("%%{", "%{")
+
+
 def split_key_path(key_path: str) -> List[Union[str, int]]:
     """
     Split an output key path into its segments.
@@ -284,7 +302,7 @@ def split_key_path(key_path: str) -> List[Union[str, int]]:
         elif m.group("index") is not None:
             segments.append(int(m.group("index")))
         else:
-            segments.append(re.sub(r"\\(.)", r"\1", m.group("key")))
+            segments.append(_unescape_hcl(m.group("key"), key_path))
         pos = m.end()
     return segments
 
