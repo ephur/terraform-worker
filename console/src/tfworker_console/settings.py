@@ -22,6 +22,13 @@ class ConsoleSettings(BaseSettings):
     demo: bool = False
     # seconds between scheduled reconciles while serving; 0 turns them off
     reconcile_interval: float = 300.0
+    # an SQS queue the worker's sqs handler sends CloudEvents to; when set,
+    # events are applied as they arrive (see tfworker_console.ingest)
+    events_queue_url: Optional[str] = None
+    # a role to assume to read the queue; the ambient credentials otherwise
+    events_role_arn: Optional[str] = None
+    # the queue's region, when its URL does not name one
+    events_region: Optional[str] = None
     # a lock with no fresh worker lease is shown as stale once older than this
     lock_stale_after: float = 7200.0
 

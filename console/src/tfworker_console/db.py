@@ -38,6 +38,8 @@ class Store(Base):
     prefix: Mapped[str] = mapped_column(String(1024))
     credentials: Mapped[str] = mapped_column(String(16))
     reconciled_at: Mapped[Optional[datetime]]
+    # when the last reconcile that finished began listing the store
+    reconcile_started_at: Mapped[Optional[datetime]]
     last_error: Mapped[Optional[str]] = mapped_column(String(2048))
 
 

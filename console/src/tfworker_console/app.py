@@ -16,12 +16,13 @@ from .actions import Actions
 from .auth import OIDCClient, load_roles
 from .db import engine_for, session_factory
 from .groups import load_groups
+from .ingest import EventConsumer, EventIngest
 from .migrate import upgrade
 from .reconcile import Reconciler
 from .scheduler import ReconcileScheduler
 from .security import Forbidden, LoginRequired
 from .settings import ConsoleSettings
-from .stores import load_stores
+from .stores import Credentials, load_stores
 
 log = logging.getLogger(__name__)
 
@@ -136,12 +137,14 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        scheduler = app_state.get("scheduler")
-        if scheduler is not None:
-            scheduler.start()
+        workers = [
+            app_state[name] for name in ("scheduler", "events") if name in app_state
+        ]
+        for worker in workers:
+            worker.start()
         yield
-        if scheduler is not None:
-            scheduler.stop()
+        for worker in workers:
+            worker.stop()
 
     app = FastAPI(title="tfworker console", version=version(), lifespan=lifespan)
     app.state.settings = settings
@@ -162,6 +165,10 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
             )
         if not settings.groups_file:
             app.state.groups = demo.GROUPS
+    if settings.events_queue_url and not settings.database_url:
+        raise ValueError(
+            "TFWORKER_CONSOLE_EVENTS_QUEUE_URL needs TFWORKER_CONSOLE_DATABASE_URL"
+        )
     if settings.database_url:
         engine = engine_for(settings.database_url)
         # the demo starts from nothing, so it always brings the schema up
@@ -201,6 +208,18 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
         ):
             app_state["scheduler"] = ReconcileScheduler(
                 app.state.reconciler, settings.reconcile_interval
+            )
+        if settings.events_queue_url:
+            if app.state.reconciler is None or not app.state.reconciler.stores:
+                raise ValueError(
+                    "TFWORKER_CONSOLE_EVENTS_QUEUE_URL needs the stores the events "
+                    "come from in TFWORKER_CONSOLE_STORES_FILE"
+                )
+            app_state["events"] = EventConsumer(
+                EventIngest(app.state.reconciler),
+                settings.events_queue_url,
+                Credentials(role_arn=settings.events_role_arn),
+                region=settings.events_region,
             )
 
     app.state.readiness = probes.Readiness(engine)

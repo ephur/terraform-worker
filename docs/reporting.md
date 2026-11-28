@@ -138,6 +138,8 @@ Every event has `source` `urn:tfworker:deployment:<deployment>` and a `tfworkerr
 
 A failure to publish is logged and never fails the run. Events are sent as they happen, so the clients give up after a 5 second connect timeout, a 10 second read timeout and two attempts. SQS and EventBridge both limit a message to 256 KiB, so a very large run record may be rejected; it is still in the bucket. Without `format: cloudevents`, the `sqs` handler keeps sending its original per-stage messages. Publishing needs `sqs:SendMessage` on the queues, `sqs:ListQueues`, and `events:PutEvents` and `events:DescribeEventBus` on the bus.
 
+The [management console](../console/README.md#events) can read the events from a queue, so its screens follow runs as they happen instead of waiting for its next reconcile.
+
 ## IAM
 
 On top of what terraform needs, the backend credentials need `s3:GetObject` and `s3:PutObject` on `<prefix>/_tfworker/*` (plus `s3:DeleteObject` and `s3:ListBucket` there for the pending plan index), `s3:GetObject`, `s3:PutObject` and `s3:DeleteObject` on saved plans and their pointers, `s3:GetObject` on the state (for lineage and serial), and `sts:GetCallerIdentity` for the account id. Applying a plan from `--plan-file-path` with an S3 backend needs the `_tfworker` permissions too, since it marks the definition's pending backend plans stale.
