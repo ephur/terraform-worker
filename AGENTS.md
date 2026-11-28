@@ -11,6 +11,7 @@
 - Lint: `make lint`
 - Format: `make format`
 - Type check: `make typecheck`
+- Reference docs: `make docs` regenerates `docs/reference/` after changing CLI options or config models; CI fails when they are stale (`make docs-check`).
 - Use `uv run <tool>` when invoking tools directly (e.g., `uv run pytest -k my_test`).
 
 ## Coding Style & Naming Conventions
