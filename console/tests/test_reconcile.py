@@ -875,5 +875,7 @@ class TestScheduler:
             reconcile_interval=3600,
         )
         with TestClient(create_app(settings)) as client:
-            assert client.get("/readyz").json()["checks"]["schema"] == "ok"
+            ready = client.get("/readyz")
+            assert ready.status_code == 200
+            assert ready.json()["checks"]["schema"] == "ok"
         assert count(db.session_factory(engine), db.Run) == 2
