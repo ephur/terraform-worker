@@ -490,6 +490,18 @@ class TestEndpoint:
         with sessions() as session:
             assert token_principal(session, token, NOW) is None
 
+    def test_last_used_is_written_sparingly(self, sessions):  # noqa: F811
+        from tfworker_console.auth import metrics_token
+
+        token = add_token(sessions, "metrics")
+        with sessions() as session:
+            assert metrics_token(session, token, NOW)
+            with mock.patch.object(session, "commit") as commit:
+                assert metrics_token(session, token, NOW + timedelta(seconds=30))
+                commit.assert_not_called()
+                assert metrics_token(session, token, NOW + timedelta(minutes=2))
+                commit.assert_called_once()
+
     def test_expired_token(self, engine, sessions):  # noqa: F811
         app = app_with(engine, metrics="token")
         token = add_token(sessions, "metrics", expires_at=NOW)

@@ -171,11 +171,12 @@ class Reconciler:
         return summary
 
     def _observe(self, summary: StoreSummary, started: float) -> None:
+        seconds = time.monotonic() - started
         for observer in self.observers:
             try:
-                observer(summary, time.monotonic() - started)
+                observer(summary, seconds)
             except Exception as e:
-                log.warning(f"a reconcile observer failed: {e}")
+                log.warning(f"a reconcile observer failed: {e}", exc_info=True)
 
     def _reconcile(self, name: str) -> StoreSummary:
         store = self.stores[name]
