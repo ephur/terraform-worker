@@ -1,14 +1,18 @@
 """Gather observable facts about where a run came from, for run records."""
 
+import getpass
 import json
 import re
+import socket
 import subprocess
+import threading
+from importlib import metadata
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 
 import tfworker.util.log as log
-from tfworker.report import ModuleSource, RepositoryState
+from tfworker.report import ModuleSource, Provenance, RepositoryState, new_ulid
 
 GIT_TIMEOUT = 10
 _REGISTRY = re.compile(r"^([\w.-]+/)?[\w-]+/[\w-]+/[\w-]+$")
@@ -162,3 +166,71 @@ def module_sources(target_dir: Path) -> List[ModuleSource]:
         by_key[key] = module
         out.append(module)
     return out
+
+
+_generated_run_id: Optional[str] = None
+_run_id_lock = threading.Lock()
+
+
+def current_run_id(app_state) -> Tuple[str, bool]:
+    """
+    The run's id and whether it was generated: `--run-id` when given,
+    otherwise one ULID shared by everything this process records.
+    """
+    global _generated_run_id
+    given = getattr(app_state.root_options, "run_id", None)
+    if given:
+        return given, False
+    with _run_id_lock:
+        if _generated_run_id is None:
+            _generated_run_id = new_ulid()
+        return _generated_run_id, True
+
+
+def plan_storage(app_state) -> str:
+    if getattr(app_state.root_options, "backend_plans", False):
+        return "backend"
+    if getattr(app_state.terraform_options, "plan_file_path", None):
+        return "local"
+    return "run"
+
+
+def run_provenance(app_state, tracked_ref: Optional[str] = None) -> Provenance:
+    """Observable facts about the current run, for run records and plan manifests."""
+    from tfworker.cli_options import parse_labels
+
+    root = app_state.root_options
+    tf = app_state.terraform_options
+    config_files = getattr(root, "config_file", None) or []
+    if isinstance(config_files, str):
+        config_files = [config_files]
+    repo = None
+    if config_files:
+        repo = repository_state(Path(config_files[0]).resolve().parent, tracked_ref)
+    version = getattr(app_state, "terraform_version", None)
+    if isinstance(version, tuple):
+        version = ".".join(str(part) for part in version)
+    return Provenance(
+        labels=parse_labels(getattr(root, "run_label", None)),
+        intent=getattr(tf, "intent", None),
+        plan_storage=plan_storage(app_state),
+        repository=repo,
+        worker_version=_worker_version(),
+        terraform_version=str(version) if version else None,
+        host=socket.gethostname(),
+        user=_user(),
+    )
+
+
+def _worker_version() -> Optional[str]:
+    try:
+        return metadata.version("terraform-worker")
+    except metadata.PackageNotFoundError:
+        return None
+
+
+def _user() -> Optional[str]:
+    try:
+        return getpass.getuser()
+    except (KeyError, OSError):
+        return None

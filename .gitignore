@@ -13,7 +13,7 @@ registry.terraform.io/
 .scannerwork/
 coverage.xml
 reports/*
-plans*
+/plans*
 docs/superpowers/**
 **/.DS_Store
 

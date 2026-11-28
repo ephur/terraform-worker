@@ -321,7 +321,11 @@ class TestMergeStatus:
 class TestSchema:
     def test_ids(self):
         schemas = json_schemas()
-        assert set(schemas) == {"tfworker.run/v1", "tfworker.status/v1"}
+        assert set(schemas) == {
+            "tfworker.plan/v1",
+            "tfworker.run/v1",
+            "tfworker.status/v1",
+        }
         assert schemas["tfworker.run/v1"]["$id"] == "tfworker.run/v1"
         assert file_name("tfworker.run/v1") == "run-v1.schema.json"
 

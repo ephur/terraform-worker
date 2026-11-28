@@ -198,6 +198,14 @@ Report plan and apply progress and results to GitHub.
 | `wrap_width` | integer | `120` | Hard-wrap fenced plan and error output at this column so check run pages do not scroll horizontally. 0 disables wrapping. |
 | `required` | boolean | `false` |  |
 
+### handlers.local_plans
+
+Always on.
+
+Write and check manifests for plans saved with --plan-file-path.
+
+No options.
+
 ### handlers.openai
 
 Analyze terraform plans using OpenAI.
@@ -212,7 +220,7 @@ Analyze terraform plans using OpenAI.
 
 Always on.
 
-The S3Handler class is a handler for the s3 backend
+Save plans in the state bucket so a later run can apply them.
 
 No options.
 

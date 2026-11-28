@@ -113,7 +113,9 @@ worker terraform [OPTIONS] DEPLOYMENT
 | `--plan-destroy` / `--no-plan-destroy` | `WORKER_PLAN_DESTROY` | `--no-plan-destroy` | Create a destroy plan (mutually exclusive with --plan) |
 | `--plan-failures` / `--no-plan-failures` | `WORKER_PLAN_FAILURES` | `--plan-failures` | Stop planning remaining definitions when a plan error occurs (exit code 1) |
 | `--plan-file-path` | `WORKER_PLAN_FILE_PATH` |  | Path to plan files, with plan it will save to this location, apply will read from it |
+| `--plan-ttl` | `WORKER_PLAN_TTL` | `7d` | How long a saved plan may be applied after it was made, such as 12h or 7d |
 | `--provider-cache` | `WORKER_PROVIDER_CACHE` |  | Directory to be used as a cache for provider plugins |
+| `--require-plan-manifest` / `--no-require-plan-manifest` | `WORKER_REQUIRE_PLAN_MANIFEST` | `--no-require-plan-manifest` | Refuse to apply a saved plan that has no manifest (plans saved by older workers) |
 | `--show-output` / `--no-show-output` | `WORKER_SHOW_OUTPUT` | `--show-output` | Show output from terraform commands |
 | `--stream-output` / `--no-stream-output` | `WORKER_STREAM_OUTPUT` | `--stream-output` | Stream the output from terraform command |
 | `--strict-locking` / `--no-strict-locking` | `WORKER_STRICT_LOCKING` | `--strict-locking` | Enable strict locking for terraform providers (fail if pinned providers do not meet constraints) |

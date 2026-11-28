@@ -66,9 +66,50 @@ The models live in `tfworker.report` and have no web or cloud dependencies, so o
 
 - [run-v1.schema.json](schemas/run-v1.schema.json)
 - [status-v1.schema.json](schemas/status-v1.schema.json)
+- [plan-v1.schema.json](schemas/plan-v1.schema.json)
 
 Regenerate them with `python -m tfworker.report.schema docs/schemas`; a test fails when they are out of date.
 
+## Saved plans and the apply gate
+
+Every plan the worker saves, in the backend with `--backend-plans` or on disk with `--plan-file-path`, gets a `tfworker.plan/v1` manifest. The manifest records the run that made the plan and its provenance, the definition, whether it is a destroy plan, the lineage, serial and S3 version id of the state it was made against, the plan's sha256 and size, its change counts and addresses, when it was made and when it expires (`--plan-ttl`, default `7d`; `0` means it never expires), and its status with a history of every change.
+
+In the backend each manifest is a record of its own at `<prefix>/_tfworker/plans/<definition>/<plan_id>.json`, so a plan's history survives a newer plan made for the same definition. The plan's slot holds a small pointer, `terraform.tfplan.manifest.json`, naming the record of the plan currently in the slot. The record is written before the plan is uploaded, so a plan file never sits in the bucket without one. On disk the manifest sits beside the plan as `<definition>.tfplan.manifest.json`.
+
+A plan starts out `pending`. From there it becomes `applying` and then `applied` or `failed`, or it is retired as `stale` (the state changed), `superseded` (a newer plan replaced it), `expired` or `discarded` (its file no longer matches the manifest). When terraform never started, for example because a PRE hook failed, the plan is released from `applying` back to `pending` so a later run can still apply it. A plan is only applied when:
+
+1. it is `pending`
+2. it has not expired
+3. its file matches the manifest's sha256
+4. it is a destroy plan exactly when the run is destroying
+5. its lineage and serial still match the state
+6. this run won the conditional write that moves it from `pending` to `applying`
+
+The last step means two runs never apply the same plan at the same time; the one that loses is refused. A refused plan counts as that definition's apply failure and follows `--apply-failures`. Expiry is judged by the clock of the machine applying the plan, so keep worker clocks in sync. The state version id in the manifest is advisory; the lineage and serial check is what refuses an out of date plan.
+
+After a successful apply or destroy, every other pending backend plan for that definition is marked `stale` straight away, rather than waiting for a later run to find its lineage out of date, and its plan file is removed. Pending backend plans are found through small index entries under `<prefix>/_tfworker/pending/<definition>/`, so this never lists the whole bucket. `--force-plan` marks the plan it replaces `superseded`. Records stay behind for reporting.
+
+Plans on disk are never pending fleet wide, since only the holder of the file can apply them, but they are gated and taken the same way, and applying one still marks the definition's pending backend plans stale.
+
+A saved plan with no manifest, made by an older worker, is still applied with a warning. `--require-plan-manifest` (`WORKER_REQUIRE_PLAN_MANIFEST`) refuses it instead.
+
+### Previews
+
+A run with `--intent preview` or `--intent drift` saves its backend plans under `<prefix>/_tfworker/previews/<run_id>/`. They are never offered to a later apply run and do not count as pending, and such a run cannot apply or destroy. Expire them with a bucket lifecycle rule, for example:
+
+``` json
+{
+  "Rules": [
+    {
+      "ID": "expire-tfworker-previews",
+      "Filter": {"Prefix": "<prefix>/_tfworker/previews/"},
+      "Status": "Enabled",
+      "Expiration": {"Days": 14}
+    }
+  ]
+}
+```
+
 ## IAM
 
-On top of what terraform needs, the backend credentials need `s3:GetObject` and `s3:PutObject` on `<prefix>/_tfworker/*`, `s3:GetObject` on the state (for lineage and serial), and `sts:GetCallerIdentity` for the account id.
+On top of what terraform needs, the backend credentials need `s3:GetObject` and `s3:PutObject` on `<prefix>/_tfworker/*` (plus `s3:DeleteObject` and `s3:ListBucket` there for the pending plan index), `s3:GetObject`, `s3:PutObject` and `s3:DeleteObject` on saved plans and their pointers, `s3:GetObject` on the state (for lineage and serial), and `sts:GetCallerIdentity` for the account id. Applying a plan from `--plan-file-path` with an S3 backend needs the `_tfworker` permissions too, since it marks the definition's pending backend plans stale.

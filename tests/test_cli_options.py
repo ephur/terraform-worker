@@ -240,6 +240,13 @@ class TestCLIOptionsTerraform:
         with pytest.raises(ValueError):
             c.CLIOptionsTerraform(intent="maybe")
 
+    @pytest.mark.parametrize("intent", ["preview", "drift"])
+    @pytest.mark.parametrize("action", ["apply", "destroy"])
+    def test_preview_and_drift_runs_cannot_apply(self, intent, action):
+        with pytest.raises(ValueError, match="cannot apply or destroy"):
+            c.CLIOptionsTerraform(intent=intent, **{action: True})
+        assert c.CLIOptionsTerraform(intent="deploy", **{action: True})
+
     def test_validate_lock_timeout(self):
         assert c.CLIOptionsTerraform(lock_timeout="10m").lock_timeout == "10m"
         assert c.CLIOptionsTerraform().lock_timeout is None

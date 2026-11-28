@@ -17,6 +17,7 @@ from tfworker.commands.base import BaseCommand
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.definitions import Definition
 from tfworker.exceptions import (
+    DefinitionRefusedError,
     HandlerError,
     HookError,
     LockUnavailableError,
@@ -942,6 +943,8 @@ class TerraformCommand(BaseCommand):
                 definition=definition,
                 working_dir=self.app_state.working_dir,
             )
+        except DefinitionRefusedError as e:
+            return self._definition_refused(name, action, e, exit_on_error)
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
@@ -957,7 +960,7 @@ class TerraformCommand(BaseCommand):
         try:
             result = self._run_locked(name, action)
         except LockUnavailableError as e:
-            return self._lock_unavailable(name, action, e, exit_on_error)
+            return self._definition_refused(name, action, e, exit_on_error)
         if result.exit_code:
             log.error(f"error running terraform {action.value} for {name}")
             # If stream_output was disabled, show the captured output at error level
@@ -1062,6 +1065,9 @@ class TerraformCommand(BaseCommand):
                 definition=definition,
                 working_dir=self.app_state.working_dir,
             )
+        except DefinitionRefusedError as e:
+            self._definition_refused(name, TerraformAction.PLAN, e, exit_on_error=False)
+            return False
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
@@ -1095,7 +1101,7 @@ class TerraformCommand(BaseCommand):
         try:
             result = self._run_locked(name, TerraformAction.PLAN)
         except LockUnavailableError as e:
-            self._lock_unavailable(name, TerraformAction.PLAN, e, exit_on_error=False)
+            self._definition_refused(name, TerraformAction.PLAN, e, exit_on_error=False)
             return
 
         if result.exit_code == 0:
@@ -1385,22 +1391,24 @@ class TerraformCommand(BaseCommand):
         )
         return self.state_locker is not None and self.state_locker.fail_run
 
-    def _lock_unavailable(
+    def _definition_refused(
         self,
         name: str,
         action: TerraformAction,
-        error: LockUnavailableError,
+        error: DefinitionRefusedError,
         exit_on_error: bool,
     ) -> "TerraformResult":
         """
-        Record that a definition's state lock could not be acquired.
+        Record that terraform could not run for a definition: its state lock
+        stayed held, or a handler refused it, such as a saved plan that failed
+        the apply gate.
 
         It counts as a failure of that definition's plan, apply or destroy and
-        follows the phase's failure options, like a failing hook, unless
-        locking is set to stop the whole run.
+        follows the phase's failure options, like a failing hook, unless the
+        error asks for the whole run to stop.
         """
         definition: Definition = self.app_state.definitions[name]
-        log.error(f"state lock unavailable for definition {name}: {error.message}")
+        log.error(f"{error.kind} for definition {name}: {error.message}")
         result = TerraformResult.synthesized(1, error.message)
 
         if action == TerraformAction.PLAN:
@@ -1479,6 +1487,8 @@ class TerraformResult:
         self.finished_at = finished_at
         # monotonic seconds, immune to wall clock steps; set by _run
         self.elapsed: Optional[float] = None
+        # True when terraform never ran, such as a failed hook or a refusal
+        self.outside_terraform = False
 
     @classmethod
     def synthesized(cls, exit_code: int, message: str) -> "TerraformResult":
@@ -1487,7 +1497,9 @@ class TerraformResult:
         such as a failed hook. Its start and finish are the moment of failure.
         """
         now = datetime.now(timezone.utc)
-        return cls(exit_code, b"", message.encode(), started_at=now, finished_at=now)
+        result = cls(exit_code, b"", message.encode(), started_at=now, finished_at=now)
+        result.outside_terraform = True
+        return result
 
     @property
     def duration(self) -> Optional[float]:

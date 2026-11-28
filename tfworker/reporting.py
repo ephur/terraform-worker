@@ -25,20 +25,16 @@ when it is absent::
       tracked_ref: origin/main   # default: the remote's default branch
 """
 
-import getpass
 import json
 import random
 import re
-import socket
 import threading
 import time
 from datetime import datetime, timezone
-from importlib import metadata
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Dict, Optional
 
 import tfworker.util.log as log
-from tfworker.cli_options import parse_labels
 from tfworker.custom_types.config_file import ReportingOptions
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import BackendError, ReportConflictError
@@ -55,7 +51,7 @@ from tfworker.report.models import (
 )
 from tfworker.report.status import merge_status
 from tfworker.report.ulid import new_ulid
-from tfworker.util.provenance import module_sources, repository_state
+from tfworker.util.provenance import current_run_id, module_sources, run_provenance
 from tfworker.util.system import strip_ansi
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -105,9 +101,7 @@ class RunRecorder(PhaseListener):
     @property
     def run_id(self) -> str:
         if self._run_id is None:
-            given = getattr(self.app_state.root_options, "run_id", None)
-            self._run_id_generated = not given
-            self._run_id = given or new_ulid()
+            self._run_id, self._run_id_generated = current_run_id(self.app_state)
         return self._run_id
 
     def setup(self, deployment: str) -> None:
@@ -286,35 +280,7 @@ class RunRecorder(PhaseListener):
             return None
 
     def _provenance(self) -> Provenance:
-        root = self.app_state.root_options
-        tf = self.app_state.terraform_options
-        if getattr(root, "backend_plans", False):
-            storage = "backend"
-        elif getattr(tf, "plan_file_path", None):
-            storage = "local"
-        else:
-            storage = "run"
-        config_files = getattr(root, "config_file", None) or []
-        if isinstance(config_files, str):
-            config_files = [config_files]
-        repo = None
-        if config_files:
-            repo = repository_state(
-                Path(config_files[0]).resolve().parent, self.options.tracked_ref
-            )
-        version = getattr(self.app_state, "terraform_version", None)
-        if isinstance(version, tuple):
-            version = ".".join(str(part) for part in version)
-        return Provenance(
-            labels=parse_labels(getattr(root, "run_label", None)),
-            intent=getattr(tf, "intent", None),
-            plan_storage=storage,
-            repository=repo,
-            worker_version=_worker_version(),
-            terraform_version=str(version) if version else None,
-            host=socket.gethostname(),
-            user=_user(),
-        )
+        return run_provenance(self.app_state, self.options.tracked_ref)
 
     def _record(self, results) -> RunRecord:
         tf = self.app_state.terraform_options
@@ -394,20 +360,6 @@ class RunRecorder(PhaseListener):
             f"gave up updating the status {path} after "
             f"{self.options.status_retries} conflicting writes"
         )
-
-
-def _worker_version() -> Optional[str]:
-    try:
-        return metadata.version("terraform-worker")
-    except metadata.PackageNotFoundError:
-        return None
-
-
-def _user() -> Optional[str]:
-    try:
-        return getpass.getuser()
-    except (KeyError, OSError):
-        return None
 
 
 def _schema_of(text: str) -> Optional[str]:

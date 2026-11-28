@@ -301,6 +301,16 @@ class CLIOptionsTerraform(FreezableBaseModel):
         json_schema_extra={"env": "WORKER_FORCE_PLAN"},
         description="Plan even when a saved plan is available, replacing the saved plan",
     )
+    plan_ttl: str = Field(
+        "7d",
+        json_schema_extra={"env": "WORKER_PLAN_TTL"},
+        description="How long a saved plan may be applied after it was made, such as 12h or 7d",
+    )
+    require_plan_manifest: bool = Field(
+        False,
+        json_schema_extra={"env": "WORKER_REQUIRE_PLAN_MANIFEST"},
+        description="Refuse to apply a saved plan that has no manifest (plans saved by older workers)",
+    )
     intent: Optional[str] = Field(
         None,
         json_schema_extra={"env": "WORKER_INTENT"},
@@ -435,6 +445,19 @@ class CLIOptionsTerraform(FreezableBaseModel):
                     type="value_error",
                 )
             )
+        if values.get("intent") in ("preview", "drift") and (
+            values.get("apply") or values.get("destroy")
+        ):
+            errors.append(
+                InitErrorDetails(
+                    loc=("--intent", "--intent"),
+                    input=(values.get("intent")),
+                    ctx={
+                        "error": f"a {values.get('intent')} run cannot apply or destroy"
+                    },
+                    type="value_error",
+                )
+            )
         if values.get("plan") and values.get("plan_destroy"):
             errors.append(
                 InitErrorDetails(
@@ -509,6 +532,12 @@ class CLIOptionsTerraform(FreezableBaseModel):
     def validate_intent(cls, value: Union[str, None]) -> Union[str, None]:
         if value is not None and value not in INTENTS:
             raise ValueError(f"intent must be one of {', '.join(INTENTS)}")
+        return value
+
+    @field_validator("plan_ttl")
+    @classmethod
+    def validate_plan_ttl(cls, value: str) -> str:
+        parse_duration(value)
         return value
 
     @field_validator("lock_timeout")

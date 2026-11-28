@@ -35,7 +35,9 @@ With `--plan-file-path DIR`, plans are written to `DIR/<deployment>/<definition>
 
 When saved plans are on, a definition that already has a saved plan is not planned again; the plan phase reuses it and the apply phase applies it. `--force-plan` plans anyway and replaces the saved plan. A run with `--apply` and no `--plan` fetches the saved plans and applies only the definitions that have one; it needs the same `--plan-file-path` or `--backend-plans` as the planning run.
 
-`--intent deploy|preview|drift` (`WORKER_INTENT`) says what a run's plans are for. [Run reporting](reporting.md) records it, and a `preview` or `drift` plan never becomes a pending plan.
+Each saved plan gets a `tfworker.plan/v1` manifest, and a plan is only applied while it is pending, unexpired, unaltered and still matches the state; see [Saved plans and the apply gate](reporting.md#saved-plans-and-the-apply-gate). `--plan-ttl` (`WORKER_PLAN_TTL`, default `7d`) sets how long a saved plan may be applied after it was made, and `--require-plan-manifest` (`WORKER_REQUIRE_PLAN_MANIFEST`) refuses plans saved by older workers without a manifest, which are otherwise applied with a warning.
+
+`--intent deploy|preview|drift` (`WORKER_INTENT`) says what a run's plans are for. [Run reporting](reporting.md) records it, and a `preview` or `drift` plan never becomes a pending plan. With `--backend-plans`, such plans are saved apart under `<prefix>/_tfworker/previews/` and never applied by a later run.
 
 ## Choosing definitions
 

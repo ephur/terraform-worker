@@ -524,7 +524,7 @@ class TestReadiness:
         root.config_file = []
         assert handler._provenance().plan_storage == "run"
         mocker.patch(
-            "tfworker.reporting.metadata.version",
+            "tfworker.util.provenance.metadata.version",
             side_effect=__import__("importlib").metadata.PackageNotFoundError,
         )
         mocker.patch("getpass.getuser", side_effect=KeyError("uid"))
