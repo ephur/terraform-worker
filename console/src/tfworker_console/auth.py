@@ -207,7 +207,16 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def token_principal(session: Session, token: str, now: datetime) -> Optional[Principal]:
+# a token that may only scrape /metrics; it signs in to nothing else
+METRICS_ROLE = "metrics"
+TOKEN_ROLES = [*sorted(RANKS, key=RANKS.__getitem__), METRICS_ROLE]
+
+
+LAST_USED_EVERY = timedelta(minutes=1)
+
+
+def _live_token(session: Session, token: str, now: datetime) -> Optional[db.ApiToken]:
+    """The unexpired token row for a bearer token, marked used."""
     if not token.startswith(TOKEN_PREFIX):
         return None
     row = session.scalar(
@@ -215,8 +224,23 @@ def token_principal(session: Session, token: str, now: datetime) -> Optional[Pri
     )
     if row is None or (row.expires_at is not None and now >= row.expires_at):
         return None
-    row.last_used = now
-    session.commit()
+    # scrapes come every few seconds; last_used needn't be written each time
+    if row.last_used is None or now - row.last_used >= LAST_USED_EVERY:
+        row.last_used = now
+        session.commit()
+    return row
+
+
+def metrics_token(session: Session, token: str, now: datetime) -> bool:
+    """Whether a bearer token may scrape /metrics."""
+    row = _live_token(session, token, now)
+    return row is not None and row.role == METRICS_ROLE
+
+
+def token_principal(session: Session, token: str, now: datetime) -> Optional[Principal]:
+    row = _live_token(session, token, now)
+    if row is None or row.role == METRICS_ROLE:
+        return None
     return Principal(
         f"token:{row.name}",
         "token",

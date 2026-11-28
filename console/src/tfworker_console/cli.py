@@ -11,7 +11,15 @@ from sqlalchemy import select
 from tfworker.util.duration import parse_duration
 
 from . import db, version
-from .auth import RANKS, hash_password, new_token, new_totp_secret, token_hash
+from .auth import (
+    METRICS_ROLE,
+    RANKS,
+    TOKEN_ROLES,
+    hash_password,
+    new_token,
+    new_totp_secret,
+    token_hash,
+)
 from .db import engine_for, session_factory
 from .groups import load_groups
 from .migrate import upgrade
@@ -111,6 +119,7 @@ def _now() -> datetime:
 
 
 ROLE = click.Choice(sorted(RANKS, key=RANKS.__getitem__))
+TOKEN_ROLE = click.Choice(TOKEN_ROLES)
 
 
 def _groups(settings: ConsoleSettings, groups) -> Optional[list]:
@@ -268,13 +277,20 @@ def tokens() -> None:
 
 @tokens.command("create")
 @click.argument("name")
-@click.option("--role", type=ROLE, required=True)
+@click.option(
+    "--role",
+    type=TOKEN_ROLE,
+    required=True,
+    help="metrics makes a token that can only scrape /metrics",
+)
 @click.option("--group", "groups", multiple=True)
 @click.option("--expires-in", default=None, help="A duration such as 90d")
 @click.option("--created-by", default="cli")
 def tokens_create(name, role, groups, expires_in, created_by) -> None:
     """Create a token; it is shown once."""
     settings = ConsoleSettings()
+    if role == METRICS_ROLE and groups:
+        raise click.UsageError("a metrics token reads the whole fleet; drop --group")
     groups = _groups(settings, groups)
     now = _now()
     expires = None
