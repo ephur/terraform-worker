@@ -79,6 +79,68 @@ worker env [OPTIONS] DEPLOYMENT
 
 `DEPLOYMENT` is required. Can also be set with `WORKER_DEPLOYMENT`.
 
+## worker plans
+
+List, discard and sweep saved plans
+
+Works on the manifests saved plans get in an S3 backend, under
+`<prefix>/_tfworker/plans/`.
+
+```
+worker plans [OPTIONS] COMMAND [ARGS]...
+```
+
+### worker plans discard
+
+Discard pending plans so no run can apply them
+
+```
+worker plans discard [OPTIONS] DEPLOYMENT PLAN_IDS
+```
+
+`DEPLOYMENT` is required. Can also be set with `WORKER_DEPLOYMENT`.
+
+`PLAN_IDS` is required.
+
+| Option | Environment variable | Default | Description |
+| --- | --- | --- | --- |
+| `--definition` / `-d` |  |  | Only look for the plans in this definition |
+| `--reason` |  |  | Why the plans are discarded |
+
+### worker plans gc
+
+Retire saved plans that are stale, expired or orphaned
+
+```
+worker plans gc [OPTIONS] DEPLOYMENT
+```
+
+`DEPLOYMENT` is required. Can also be set with `WORKER_DEPLOYMENT`.
+
+| Option | Environment variable | Default | Description |
+| --- | --- | --- | --- |
+| `--all-records` |  |  | Check every plan record, not only those in the pending index |
+| `--applying-timeout` |  |  | Also mark plans applying for longer than this (such as 6h) failed |
+| `--discard-unconfigured` |  |  | Discard plans for definitions missing from the configuration, even when their state exists |
+| `--dry-run` |  |  | Report what would be retired, change nothing |
+| `--json` |  |  | Print the result as JSON |
+
+### worker plans list
+
+List saved plans, oldest first
+
+```
+worker plans list [OPTIONS] DEPLOYMENT
+```
+
+`DEPLOYMENT` is required. Can also be set with `WORKER_DEPLOYMENT`.
+
+| Option | Environment variable | Default | Description |
+| --- | --- | --- | --- |
+| `--definition` / `-d` |  |  | Only plans for this definition |
+| `--json` |  |  | Print the manifests as JSON |
+| `--status` (repeatable) |  |  | Only plans in this status; may be given more than once |
+
 ## worker terraform
 
 Execute terraform orchestration on all or a subset of definitions in a deployment

@@ -88,6 +88,9 @@ def _portable(value: str) -> str:
 
 def _option_default(param: click.Option) -> str:
     default = param.default
+    # click 8.2 marks an option with no default with an enum sentinel
+    if type(default).__name__ == "Sentinel":
+        return ""
     if param.is_flag and not param.secondary_opts:
         return ""
     if not isinstance(default, (str, int, float, list, tuple, enum.Enum)):
@@ -148,6 +151,10 @@ def _command_section(name: str, command: click.Command, level: int) -> list[str]
                 f"| {_escape(option.help or '')} |"
             )
         lines.append("")
+    # the root's commands are listed by render_cli; nested groups list their own
+    if isinstance(command, click.Group) and name != "worker":
+        for sub in sorted(command.commands):
+            lines += _command_section(f"{name} {sub}", command.commands[sub], level + 1)
     return lines
 
 

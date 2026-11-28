@@ -25,6 +25,7 @@ class LogFormat(Enum):
 
 log_level = LogLevel.ERROR
 log_format = LogFormat.TEXT
+log_to_stderr = False
 
 # Fields added to every structured record; set once per run so central logging
 # can tell one deployment's run from another sharing the same service/index.
@@ -145,7 +146,10 @@ def log(
             color = None
         else:
             rendered_msg = _format_text_message(msg)
-        secho(rendered_msg, fg=color)
+        if log_to_stderr:
+            secho(rendered_msg, fg=color, err=True)
+        else:
+            secho(rendered_msg, fg=color)
     return
 
 

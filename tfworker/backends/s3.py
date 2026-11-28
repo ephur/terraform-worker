@@ -58,8 +58,12 @@ class S3Backend(BaseBackend):
     tag = "s3"
 
     def __init__(
-        self, authenticators: "AuthenticatorsCollection", deployment: str = None
+        self,
+        authenticators: "AuthenticatorsCollection",
+        deployment: str = None,
+        provision: bool = True,
     ):
+        """With `provision` off, a missing lock table or bucket is not created."""
         self._authenticator: "AWSAuthenticator" = authenticators[self.auth_tag]
         self._ctx: click.Context = click.get_current_context()
         self._app_state: "AppState" = self._ctx.obj
@@ -88,8 +92,9 @@ class S3Backend(BaseBackend):
         )
 
         try:
-            self._ensure_locking_table()
-            self._ensure_backend_bucket()
+            if provision:
+                self._ensure_locking_table()
+                self._ensure_backend_bucket()
             self._bucket_files: list = self._list_bucket_definitions()
         except (
             botocore.exceptions.TokenRetrievalError,

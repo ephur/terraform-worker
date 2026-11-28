@@ -87,7 +87,7 @@ A plan starts out `pending`. From there it becomes `applying` and then `applied`
 
 The last step means two runs never apply the same plan at the same time; the one that loses is refused. A refused plan counts as that definition's apply failure and follows `--apply-failures`. Expiry is judged by the clock of the machine applying the plan, so keep worker clocks in sync. The state version id in the manifest is advisory; the lineage and serial check is what refuses an out of date plan.
 
-After a successful apply or destroy, every other pending backend plan for that definition is marked `stale` straight away, rather than waiting for a later run to find its lineage out of date, and its plan file is removed. Pending backend plans are found through small index entries under `<prefix>/_tfworker/pending/<definition>/`, so this never lists the whole bucket. `--force-plan` marks the plan it replaces `superseded`. Records stay behind for reporting.
+After a successful apply or destroy, every other pending backend plan for that definition is marked `stale` straight away, rather than waiting for a later run to find its lineage out of date, and its plan file is removed. Pending backend plans are found through small index entries under `<prefix>/_tfworker/pending/<definition>/`, so this never lists the whole bucket. `--force-plan` marks the plan it replaces `superseded`. Records stay behind for reporting, and `worker plans` lists, discards and sweeps them (see [Saved plan commands](running.md#saved-plan-commands)).
 
 Plans on disk are never pending fleet wide, since only the holder of the file can apply them, but they are gated and taken the same way, and applying one still marks the definition's pending backend plans stale.
 
