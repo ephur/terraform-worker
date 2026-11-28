@@ -7,6 +7,7 @@ from tfworker.util.remote_vars import (
     generate_tf_reference,
     parse_remote_var_reference,
     parse_tf_reference,
+    split_key_path,
     validate_remote_vars,
 )
 
@@ -477,3 +478,32 @@ class TestIntegrationScenarios:
         for value in config.values():
             all_states.update(extract_remote_states(value))
         assert all_states == {"env_info", "network1", "network2", "db1", "db2"}
+
+
+class TestSplitKeyPath:
+    """Tests for split_key_path() function."""
+
+    @pytest.mark.parametrize(
+        "key_path,expected",
+        [
+            ("vpc_id", ["vpc_id"]),
+            ("subnets.private", ["subnets", "private"]),
+            ('items["test-key"]', ["items", "test-key"]),
+            ('["test-key"]', ["test-key"]),
+            ("list[0]", ["list", 0]),
+            ('m["x.y"].z', ["m", "x.y", "z"]),
+            ('items["a"][2].id', ["items", "a", 2, "id"]),
+            ('m["say \\"hi\\""]', ["m", 'say "hi"']),
+            ('m[ "k" ]', ["m", "k"]),
+        ],
+    )
+    def test_valid_paths(self, key_path, expected):
+        assert split_key_path(key_path) == expected
+
+    @pytest.mark.parametrize(
+        "key_path",
+        [".a", "a..b", "a b", 'items["x"]foo', "a[", "a.", 'a["x"', "a[-1]"],
+    )
+    def test_invalid_paths(self, key_path):
+        with pytest.raises(ValueError):
+            split_key_path(key_path)

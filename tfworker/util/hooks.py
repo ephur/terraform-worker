@@ -17,6 +17,7 @@ import tfworker.util.log as log
 from tfworker.constants import WORKER_LOCALS_FILENAME, WORKER_TFVARS_FILENAME
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import HookError
+from tfworker.util.remote_vars import parse_tf_reference, split_key_path
 from tfworker.util.system import pipe_exec, pipe_exec_logged
 
 
@@ -478,6 +479,44 @@ def _unwrap_interpolation(value: str) -> str:
     return value
 
 
+def _lookup_output(outputs: Dict[str, Any], key_path: str, state: str) -> Any:
+    """
+    Follow an output key path into a state's outputs.
+
+    Args:
+        outputs: The ``outputs`` section of the state file
+        key_path: Key path after ``outputs``, e.g. ``subnets.private``
+        state: The state name, used in error messages
+
+    Returns:
+        The value at the key path
+
+    Raises:
+        HookError: If the output or a key along the path does not exist
+        ValueError: If the key path cannot be parsed
+    """
+    segments = split_key_path(key_path)
+    name = segments[0]
+    if not isinstance(name, str) or name not in outputs:
+        raise HookError(f"Output '{name}' not found in state '{state}'")
+
+    value = outputs[name].get("value")
+    for segment in segments[1:]:
+        if isinstance(value, dict) and str(segment) in value:
+            value = value[str(segment)]
+        elif (
+            isinstance(value, list)
+            and str(segment).isdigit()
+            and int(segment) < len(value)
+        ):
+            value = value[int(segment)]
+        else:
+            raise HookError(
+                f"Key '{segment}' not found at '{key_path}' in state '{state}'"
+            )
+    return value
+
+
 def _resolve_terraform_value(
     value: Any,
     backend: "BaseBackend",
@@ -500,7 +539,6 @@ def _resolve_terraform_value(
     Returns:
         Resolved value with terraform_remote_state references replaced by actual values
     """
-    from tfworker.util.remote_vars import parse_tf_reference
 
     if isinstance(value, str):
         # Check if it's a terraform_remote_state reference
@@ -519,13 +557,7 @@ def _resolve_terraform_value(
                 if output_key is None:
                     # Return entire outputs dict (all output values)
                     return {k: v.get("value") for k, v in outputs.items()}
-                else:
-                    # Return specific output value
-                    if output_key not in outputs:
-                        raise HookError(
-                            f"Output '{output_key}' not found in state '{state}'"
-                        )
-                    return outputs[output_key].get("value")
+                return _lookup_output(outputs, output_key, state)
             except (ValueError, KeyError) as e:
                 log.warn(f"Failed to parse terraform reference '{value}': {e}")
                 return value
