@@ -40,6 +40,7 @@
 - `--config-var` values containing `=` no longer crash definition preparation or get dropped from config templates (#187).
 - The snyk handler's `args`, `cache_dir`, `exit_code`, `handler_debug`, `quiet`, `severity` and `skip_dirs` options and the trivy handler's `handler_debug` were never read, and are removed; a config that still sets them loads as before (#258).
 - The hook env var size warning now names the real `--b64-encode` flag instead of `--b64-encode-hook-values` (#257).
+- Hook remote vars that reference a nested output key, such as `network.outputs.subnets.private` or `network.outputs.subnets["private"][0]`, now resolve to the value at that key instead of failing every hook of the definition with `Output 'subnets.private' not found` (#256).
 - `terraform get` now runs with `--terraform-bin` and the same authenticator environment as init, plan and apply, instead of the `terraform` on `PATH` with no credentials (#185).
 
 ## Features and changes
