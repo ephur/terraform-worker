@@ -7,6 +7,8 @@ Revises: 0003
 import sqlalchemy as sa
 from alembic import op
 
+from tfworker_console.sqltypes import Timestamp
+
 revision = "0004"
 down_revision = "0003"
 branch_labels = None
@@ -22,12 +24,12 @@ def upgrade() -> None:
         sa.Column("totp_secret", sa.String(length=64), nullable=True),
         sa.Column("break_glass", sa.Boolean(), nullable=False),
         sa.Column("disabled", sa.Boolean(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("last_login", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", Timestamp(), nullable=False),
+        sa.Column("last_login", Timestamp(), nullable=True),
         sa.Column("subject", sa.String(length=1024), nullable=True),
         sa.Column("session_version", sa.Integer(), nullable=False),
         sa.Column("failed_logins", sa.Integer(), nullable=False),
-        sa.Column("locked_until", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("locked_until", Timestamp(), nullable=True),
         sa.Column("totp_last_step", sa.BigInteger(), nullable=True),
         sa.PrimaryKeyConstraint("username"),
         sa.UniqueConstraint("subject"),
@@ -51,9 +53,9 @@ def upgrade() -> None:
         sa.Column("role", sa.String(length=16), nullable=False),
         sa.Column("groups", sa.JSON(), nullable=True),
         sa.Column("created_by", sa.String(length=255), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("last_used", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", Timestamp(), nullable=False),
+        sa.Column("expires_at", Timestamp(), nullable=True),
+        sa.Column("last_used", Timestamp(), nullable=True),
         sa.PrimaryKeyConstraint("name"),
         sa.UniqueConstraint("token_hash"),
     )
