@@ -1,4 +1,5 @@
 import threading
+import time
 from unittest import mock
 
 import pytest
@@ -9,13 +10,20 @@ from sqlalchemy.exc import OperationalError
 from tfworker_console import db
 from tfworker_console.app import create_app
 from tfworker_console.migrate import upgrade
-from tfworker_console.probes import Readiness
+from tfworker_console.probes import TIMED_OUT, Readiness
 from tfworker_console.settings import ConsoleSettings
 
 
 @pytest.fixture
 def engine(tmp_path):
     return db.engine_for(f"sqlite:///{tmp_path}/console.db")
+
+
+def wait_until(condition, seconds=5.0):
+    deadline = time.monotonic() + seconds
+    while not condition():
+        assert time.monotonic() < deadline, "timed out waiting"
+        time.sleep(0.01)
 
 
 class Clock:
@@ -65,13 +73,99 @@ class TestReadiness:
     def test_timeout(self, engine):
         release = threading.Event()
         readiness = Readiness(engine, timeout=0.05)
-        with mock.patch.object(
-            readiness, "_revision", side_effect=lambda: release.wait(5)
-        ):
-            ready, checks = readiness.check()
+        with mock.patch.object(readiness, "_revision", side_effect=release.wait):
+            assert readiness.check() == TIMED_OUT
         release.set()
-        assert not ready
-        assert checks == {"database": "did not answer in time"}
+
+    def test_recovers_once_a_hung_check_returns(self, engine):
+        upgrade(engine)
+        clock = Clock()
+        release = threading.Event()
+        readiness = Readiness(engine, timeout=0.05, clock=clock)
+        real = readiness._revision
+        calls = []
+
+        def revision():
+            calls.append(1)
+            if len(calls) == 1:
+                release.wait(5)
+            return real()
+
+        with mock.patch.object(readiness, "_revision", side_effect=revision):
+            assert readiness.check() == TIMED_OUT
+            clock.now += 2
+            # still hung: the same check is waited on, none is started beside it
+            assert readiness.check() == TIMED_OUT
+            assert len(calls) == 1
+            release.set()
+            wait_until(lambda: readiness._running is None)
+            clock.now += 2
+            assert readiness.check() == (True, {"database": "ok", "schema": "ok"})
+            assert len(calls) == 2
+
+    def test_a_stuck_check_is_left_behind(self, engine):
+        upgrade(engine)
+        clock = Clock()
+        release = threading.Event()
+        readiness = Readiness(engine, timeout=0.05, stuck_seconds=30, clock=clock)
+        real = readiness._revision
+        calls = []
+
+        def revision():
+            calls.append(1)
+            if len(calls) == 1:
+                release.wait(5)
+            return real()
+
+        with mock.patch.object(readiness, "_revision", side_effect=revision):
+            assert readiness.check() == TIMED_OUT
+            clock.now += 31
+            assert readiness.check()[0]
+            assert len(calls) == 2
+        release.set()
+
+    def test_concurrent_callers_share_one_check(self, engine):
+        upgrade(engine)
+        release = threading.Event()
+        readiness = Readiness(engine, timeout=5)
+        real = readiness._revision
+        calls = []
+
+        def revision():
+            calls.append(1)
+            release.wait(5)
+            return real()
+
+        answers = []
+        with mock.patch.object(readiness, "_revision", side_effect=revision):
+            threads = [
+                threading.Thread(target=lambda: answers.append(readiness.check()))
+                for _ in range(5)
+            ]
+            for thread in threads:
+                thread.start()
+            wait_until(lambda: calls)
+            release.set()
+            for thread in threads:
+                thread.join(5)
+        assert len(calls) == 1
+        assert answers == [(True, {"database": "ok", "schema": "ok"})] * 5
+
+    def test_a_failure_is_cached_too(self, engine):
+        clock = Clock()
+        readiness = Readiness(engine, clock=clock)
+        with mock.patch.object(
+            readiness, "_revision", side_effect=OSError("down")
+        ) as revision:
+            readiness.check()
+            clock.now += 0.5
+            assert readiness.check() == (False, {"database": "unreachable (OSError)"})
+            assert revision.call_count == 1
+
+    def test_percent_in_the_database_url(self, tmp_path):
+        engine = db.engine_for(f"sqlite:///{tmp_path}/a%40b.db")
+        upgrade(engine)
+        assert Readiness(engine).check()[0]
 
     def test_answer_is_cached_briefly(self, engine):
         upgrade(engine)
@@ -116,16 +210,30 @@ class TestEndpoints:
         assert response.status_code == 200
         assert response.json()["checks"] == {"database": "ok", "schema": "ok"}
 
-    def test_readyz_unavailable(self):
-        app = create_app()
-        app.state.readiness = mock.Mock(
-            check=mock.Mock(
-                return_value=(False, {"database": "did not answer in time"})
-            )
-        )
-        response = TestClient(app).get("/readyz")
+    def test_readyz_unavailable(self, tmp_path):
+        url = f"sqlite:///{tmp_path}/console.db"
+        app = create_app(ConsoleSettings(database_url=url, auto_migrate=True))
+        error = OSError("db.internal:5432 refused")
+        with mock.patch.object(app.state.readiness, "_revision", side_effect=error):
+            response = TestClient(app).get("/readyz")
         assert response.status_code == 503
         assert response.json() == {
             "status": "unavailable",
-            "checks": {"database": "did not answer in time"},
+            "checks": {"database": "unreachable (OSError)"},
         }
+
+    def test_readyz_times_out(self, tmp_path):
+        url = f"sqlite:///{tmp_path}/console.db"
+        app = create_app(ConsoleSettings(database_url=url, auto_migrate=True))
+        app.state.readiness.timeout = 0.05
+        release = threading.Event()
+        with mock.patch.object(
+            app.state.readiness, "_revision", side_effect=release.wait
+        ):
+            client = TestClient(app)
+            response = client.get("/readyz")
+            assert response.status_code == 503
+            assert response.json()["checks"] == {"database": "did not answer in time"}
+            # liveness never waits on the database
+            assert client.get("/livez").status_code == 200
+        release.set()

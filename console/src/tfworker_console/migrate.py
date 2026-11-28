@@ -13,7 +13,10 @@ def alembic_config(engine: Engine) -> Config:
     config.set_main_option(
         "script_location", str(resources.files("tfworker_console") / "migrations")
     )
-    config.set_main_option("sqlalchemy.url", engine.url.render_as_string(False))
+    # configparser reads % as interpolation; URL-encoded passwords carry it
+    config.set_main_option(
+        "sqlalchemy.url", engine.url.render_as_string(False).replace("%", "%%")
+    )
     return config
 
 

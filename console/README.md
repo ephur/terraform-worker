@@ -77,16 +77,32 @@ Kubernetes:
 | Endpoint | Use it for | Answers |
 | --- | --- | --- |
 | `/livez` | liveness | `200` whenever the process is serving. It does no I/O, so a slow database never gets a healthy pod restarted. The body carries the console's version and the record schemas it reads. |
-| `/readyz` | readiness | `200` when the database answers within 2 seconds and its schema is at this console's migration head, `503` otherwise. The body names each check, for example `{"status": "unavailable", "checks": {"database": "ok", "schema": "not migrated"}}`. |
+| `/readyz` | readiness | `200` when the database answers within 0.8 seconds and its schema is at this console's migration head, `503` otherwise. The body names each check, for example `{"status": "unavailable", "checks": {"database": "ok", "schema": "not migrated"}}`. |
+
+Both answers fit inside the default one-second probe timeout. `/livez` runs on
+the event loop, so it answers even when every request thread is waiting on a
+hung database.
 
 `/readyz` caches its answer for a second, so frequent probes don't load the
-database, and it never reads the stores: a slow or broken store shows on the
-screens without taking the console out of rotation. A failing database check
-names only the error type, so the body never carries hostnames. With
-`TFWORKER_CONSOLE_AUTO_MIGRATE=false`, a new console stays unready until
-`tfworker-console db upgrade` brings the schema to its head, which keeps it out
-of rotation during a rollout. Without a database (development mode only) the
-database check reads `not configured` and the console is ready.
+database. Probes that arrive while a check is running share it. A check that
+hangs, for example on a half-open connection after a failover, is waited on
+for 30 seconds and then left behind, so the console turns ready again once
+the database is back. `/readyz` never reads the stores, so a slow or broken
+store shows on the screens without taking the console out of rotation. A
+failing database check names only the error type, so the body never carries
+hostnames. Without a database (development mode only) the database check
+reads `not configured` and the console is ready.
+
+The schema must match exactly, so a rollout that changes it briefly has no
+ready replicas:
+
+- With `TFWORKER_CONSOLE_AUTO_MIGRATE=false`, a new console stays unready
+  until `tfworker-console db upgrade` brings the schema to its head. Run the
+  upgrade as the first step of the rollout.
+- Once the schema is ahead of an old console, that console turns unready
+  within a second. When the first new replica migrates at startup, the old
+  ones leave rotation together, and the console is unavailable until the new
+  ones pass. Expect a short gap on any release that adds a migration.
 
 ## Stores and the projection
 
