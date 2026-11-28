@@ -150,6 +150,52 @@ The reconciler never reads state files. It needs `s3:ListBucket` on the
 prefix, and `s3:GetObject` on `<prefix>/_tfworker/*`, `*.tflock` and
 `*.tfworker-lease.*`.
 
+### Events
+
+Reconciling on a schedule leaves the screens up to five minutes behind a run.
+To follow runs as they happen, have the worker's `sqs` handler send its
+CloudEvents (`format: cloudevents`, see
+[Streaming events](../docs/reporting.md#streaming-events)) to a queue, and
+point `TFWORKER_CONSOLE_EVENTS_QUEUE_URL` at it:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `TFWORKER_CONSOLE_EVENTS_QUEUE_URL` | | The SQS queue to read. Unset, the console only reconciles. |
+| `TFWORKER_CONSOLE_EVENTS_ROLE_ARN` | | A role to assume to read the queue; the ambient credentials otherwise. |
+| `TFWORKER_CONSOLE_EVENTS_REGION` | from the URL | The queue's region, when its URL does not name one. |
+
+Each replica long-polls the queue and applies every run record, status
+snapshot, plan manifest and lock wait as it arrives. The queue can be fed by
+the handler directly or by an EventBridge rule; the console reads either
+message shape.
+
+The reconciler stays the source of truth, and events only ever get ahead of
+it:
+
+- An event is placed in a store by its state's bucket and key, or, for an
+  event without them, by the deployment's name when exactly one projected
+  deployment has it. An event no configured store holds is dropped.
+- Applying an event is idempotent. A duplicate changes nothing, and so does an
+  event older than what is projected: a status snapshot older than the
+  current one, a plan manifest with no more history than the current one, or
+  a lock wait older than when the lock was last seen. Run records never
+  change once written.
+- Every object an event writes is marked unread, so the next reconcile reads
+  it from the bucket, and removes the row if the object is gone. A lock from a
+  lock wait leaves on the next reconcile if it is no longer held. Plans kept
+  only on a worker's disk (`--plan-file-path`) are ignored, since the console
+  cannot read them.
+- Applying an event takes turns with the store's reconcile, like replicas do.
+
+A message is deleted once it is applied, or when it can never be (it is not a
+CloudEvent, or its data is unreadable). Any other failure, such as the
+database being down, leaves it on the queue to come back after the visibility
+timeout. Give the queue a redrive policy and a dead-letter queue so a message
+that keeps failing stops coming back. Every replica reads the same queue, and
+SQS gives each message to one of them. Reading needs `sqs:ReceiveMessage` and
+`sqs:DeleteMessage` on the queue (and `kms:Decrypt` on its key when it is
+encrypted).
+
 ## Screens and the read API
 
 The console serves a screen for each view, and the same data as JSON under

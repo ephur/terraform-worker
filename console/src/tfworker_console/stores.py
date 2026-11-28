@@ -58,6 +58,24 @@ class Credentials(BaseModel):
             return "profile"
         return "ambient"
 
+    def session(self, region: Optional[str]) -> boto3.Session:
+        """A boto3 session with these credentials."""
+        if self.profile:
+            return boto3.Session(profile_name=self.profile, region_name=region)
+        if self.role_arn:
+            params = {"RoleArn": self.role_arn, "RoleSessionName": self.session_name}
+            if self.external_id:
+                params["ExternalId"] = self.external_id
+            sts = boto3.client("sts", region_name=region)
+            assumed = sts.assume_role(**params)["Credentials"]
+            return boto3.Session(
+                aws_access_key_id=assumed["AccessKeyId"],
+                aws_secret_access_key=assumed["SecretAccessKey"],
+                aws_session_token=assumed["SessionToken"],
+                region_name=region,
+            )
+        return boto3.Session(region_name=region)
+
 
 class StoreConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -87,24 +105,19 @@ class StoreConfig(BaseModel):
     def render(self, deployment: str) -> str:
         return self.prefix.replace(PLACEHOLDER, deployment)
 
+    def segment_of(self, key: str) -> Optional[str]:
+        """The deployment segment of a key under this store's template, if it is one."""
+        head = self.listing_prefix
+        if not key.startswith(head):
+            return None
+        segment = key[len(head) :].split("/", 1)[0]
+        if not segment or not key.startswith(self.render(segment) + "/"):
+            return None
+        return segment
+
     def session(self) -> boto3.Session:
         """A boto3 session with this store's credentials."""
-        creds = self.credentials
-        if creds.profile:
-            return boto3.Session(profile_name=creds.profile, region_name=self.region)
-        if creds.role_arn:
-            params = {"RoleArn": creds.role_arn, "RoleSessionName": creds.session_name}
-            if creds.external_id:
-                params["ExternalId"] = creds.external_id
-            sts = boto3.client("sts", region_name=self.region)
-            assumed = sts.assume_role(**params)["Credentials"]
-            return boto3.Session(
-                aws_access_key_id=assumed["AccessKeyId"],
-                aws_secret_access_key=assumed["SecretAccessKey"],
-                aws_session_token=assumed["SessionToken"],
-                region_name=self.region,
-            )
-        return boto3.Session(region_name=self.region)
+        return self.credentials.session(self.region)
 
 
 class StoresFile(BaseModel):
