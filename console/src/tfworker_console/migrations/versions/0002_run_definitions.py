@@ -7,6 +7,8 @@ Revises: 0001
 import sqlalchemy as sa
 from alembic import op
 
+from tfworker_console.sqltypes import Timestamp
+
 revision = "0002"
 down_revision = "0001"
 branch_labels = None
@@ -20,7 +22,7 @@ def upgrade() -> None:
         sa.Column("record_id", sa.String(length=255), nullable=False),
         sa.Column("definition", sa.String(length=255), nullable=False),
         sa.Column("deployment", sa.String(length=255), nullable=False),
-        sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("started_at", Timestamp(), nullable=False),
         sa.Column("phases", sa.JSON(), nullable=False),
         sa.Column("module_sources", sa.JSON(), nullable=True),
         sa.Column("tags", sa.JSON(), nullable=True),
