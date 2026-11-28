@@ -126,6 +126,7 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
             )
         except HandlerError as e:
             log.error(f"handler setup failed: {e}")
+            tfc.phases.teardown(deployment)
             ctx.exit(1)
 
     run_failed = True
