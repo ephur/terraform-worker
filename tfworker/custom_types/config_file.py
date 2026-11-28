@@ -171,23 +171,28 @@ class ConfigFile(FreezableBaseModel):
     model_config = ConfigDict(extra="forbid")
 
     definitions: Dict[str, Any] = Field(
-        {}, description="The definition configurations."
+        {}, description="The terraform root modules to run, in order, keyed by name."
     )
     definitions_sources: Dict[str, DefinitionsSource] = Field(
         {}, description="Sources whose commands generate definitions."
     )
     global_vars: Optional[GlobalVars] = Field(
         default_factory=GlobalVars,
-        description="Global variables that are used in the configuration file.",
+        description="Variables merged into every definition.",
     )
-    providers: Dict[str, Any] = Field({}, description="The provider configurations.")
+    providers: Dict[str, Any] = Field(
+        {}, description="Provider requirements and blocks, keyed by provider name."
+    )
     worker_options: Dict[str, str | bool] = Field(
-        {}, description="The base worker options, overlaps with command line options"
+        {},
+        description="Defaults for command line options, keyed by option name with underscores.",
     )
-    handlers: Dict[str, Any] = Field({}, description="The handler configurations.")
+    handlers: Dict[str, Any] = Field(
+        {}, description="Handlers to turn on, keyed by handler name."
+    )
     parallel_options: Optional[ParallelOptions] = Field(
         default_factory=ParallelOptions,
-        description="Configuration options for parallel processing of definitions.",
+        description="How many definitions are prepared and initialized at once.",
     )
     locking: Optional[LockingOptions] = Field(
         None,
