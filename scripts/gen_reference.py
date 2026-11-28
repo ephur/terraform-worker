@@ -7,6 +7,7 @@ pages are out of date.
 
 import argparse
 import enum
+import inspect
 import os
 import sys
 import types
@@ -89,7 +90,7 @@ def _option_name(param: click.Option) -> str:
 
 def _command_section(name: str, command: click.Command, level: int) -> list[str]:
     lines = [f"{'#' * level} {name}", ""]
-    help_text = (command.help or "").strip()
+    help_text = inspect.cleandoc(command.help or "")
     if help_text:
         lines += [help_text, ""]
 
@@ -305,7 +306,9 @@ def render_config() -> str:
     for name in sorted(HandlerRegistry.get_handler_names()):
         model = HandlerRegistry.get_handler_config_model(name)
         handler = HandlerRegistry.get_handler(name)
-        summary = (handler.__doc__ or model.__doc__ or "").strip().split("\n\n")[0]
+        summary = inspect.cleandoc(handler.__doc__ or model.__doc__ or "").split(
+            "\n\n"
+        )[0]
         lines += [f"### handlers.{name}", ""]
         if name in universal:
             lines += ["Always on.", ""]
