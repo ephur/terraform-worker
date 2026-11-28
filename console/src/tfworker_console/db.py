@@ -17,7 +17,7 @@ from .sqltypes import Timestamp
 
 
 class Base(DeclarativeBase):
-    type_annotation_map = {datetime: Timestamp, dict: JSON}
+    type_annotation_map = {datetime: Timestamp(), dict: JSON}
 
 
 class Store(Base):

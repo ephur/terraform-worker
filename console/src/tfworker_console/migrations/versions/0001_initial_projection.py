@@ -24,8 +24,8 @@ def upgrade() -> None:
         sa.Column("prefix", sa.String(length=1024), nullable=False),
         sa.Column("record_name", sa.String(length=255), nullable=True),
         sa.Column("discovered_from", sa.String(length=16), nullable=False),
-        sa.Column("first_seen", Timestamp, nullable=False),
-        sa.Column("last_seen", Timestamp, nullable=False),
+        sa.Column("first_seen", Timestamp(), nullable=False),
+        sa.Column("last_seen", Timestamp(), nullable=False),
         sa.PrimaryKeyConstraint("store", "name"),
     )
     op.create_table(
@@ -36,9 +36,9 @@ def upgrade() -> None:
         sa.Column("lock_id", sa.String(length=255), nullable=False),
         sa.Column("who", sa.String(length=1024), nullable=False),
         sa.Column("operation", sa.String(length=64), nullable=False),
-        sa.Column("created", Timestamp, nullable=False),
+        sa.Column("created", Timestamp(), nullable=False),
         sa.Column("lease", sa.JSON(), nullable=True),
-        sa.Column("observed_at", Timestamp, nullable=False),
+        sa.Column("observed_at", Timestamp(), nullable=False),
         sa.PrimaryKeyConstraint("store", "deployment", "definition"),
     )
     op.create_table(
@@ -48,7 +48,7 @@ def upgrade() -> None:
         sa.Column("deployment", sa.String(length=255), nullable=False),
         sa.Column("definition", sa.String(length=255), nullable=False),
         sa.Column("status", sa.String(length=16), nullable=False),
-        sa.Column("created_at", Timestamp, nullable=False),
+        sa.Column("created_at", Timestamp(), nullable=False),
         sa.Column("body", sa.JSON(), nullable=False),
         sa.PrimaryKeyConstraint("store", "plan_id"),
     )
@@ -61,8 +61,8 @@ def upgrade() -> None:
         sa.Column("run_id", sa.String(length=255), nullable=False),
         sa.Column("deployment", sa.String(length=255), nullable=False),
         sa.Column("status", sa.String(length=16), nullable=False),
-        sa.Column("started_at", Timestamp, nullable=False),
-        sa.Column("finished_at", Timestamp, nullable=True),
+        sa.Column("started_at", Timestamp(), nullable=False),
+        sa.Column("finished_at", Timestamp(), nullable=True),
         sa.Column("body", sa.JSON(), nullable=False),
         sa.PrimaryKeyConstraint("store", "record_id"),
     )
@@ -84,7 +84,7 @@ def upgrade() -> None:
         sa.Column("store", sa.String(length=128), nullable=False),
         sa.Column("deployment", sa.String(length=255), nullable=False),
         sa.Column("definition", sa.String(length=255), nullable=False),
-        sa.Column("updated_at", Timestamp, nullable=False),
+        sa.Column("updated_at", Timestamp(), nullable=False),
         sa.Column("body", sa.JSON(), nullable=False),
         sa.PrimaryKeyConstraint("store", "deployment", "definition"),
     )
@@ -95,7 +95,7 @@ def upgrade() -> None:
         sa.Column("bucket", sa.String(length=255), nullable=False),
         sa.Column("prefix", sa.String(length=1024), nullable=False),
         sa.Column("credentials", sa.String(length=16), nullable=False),
-        sa.Column("reconciled_at", Timestamp, nullable=True),
+        sa.Column("reconciled_at", Timestamp(), nullable=True),
         sa.Column("last_error", sa.String(length=2048), nullable=True),
         sa.PrimaryKeyConstraint("name"),
     )
@@ -105,7 +105,7 @@ def upgrade() -> None:
         sa.Column("deployment", sa.String(length=255), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("state_key", sa.String(length=1024), nullable=True),
-        sa.Column("last_seen", Timestamp, nullable=False),
+        sa.Column("last_seen", Timestamp(), nullable=False),
         sa.ForeignKeyConstraint(
             ["store", "deployment"],
             ["deployments.store", "deployments.name"],
