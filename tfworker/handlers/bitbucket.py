@@ -18,17 +18,18 @@ if TYPE_CHECKING:
 class BitbucketConfig(BaseModel):
     model_config = SettingsConfigDict(env_prefix="BITBUCKET_")
 
-    username: str
-    password: str
-    workspace: str
-    project: str
-    repository: str
+    username: str = Field(description="Bitbucket Cloud username.")
+    password: str = Field(description="App password for the username.", repr=False)
+    workspace: str = Field(description="Workspace that owns the repository.")
+    project: str = Field(description="Name of the project that holds the repository.")
+    repository: str = Field(description="Name of the repository.")
     pull_request: str = Field(
         description="The pull request number to add the comment to.",
         json_schema_extra={"env": "PULL_REQUEST"},
     )
-    pr_text: str = (
-        "Terraform Plan Output for {deployment} / {definition} \n---\n\n```\n{text}\n```"
+    pr_text: str = Field(
+        default="Terraform Plan Output for {deployment} / {definition} \n---\n\n```\n{text}\n```",
+        description="Comment posted for each plan with changes; str.format placeholders: {deployment}, {definition} and {text}, the planned changes from the plan output.",
     )
 
 

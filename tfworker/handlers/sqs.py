@@ -70,17 +70,41 @@ CLOUDEVENTS_CONTENT_TYPE = "application/cloudevents+json"
 
 
 class QueueRule(BaseModel):
-    actions: List[TerraformAction] | None = None
-    stages: List[TerraformStage] | None = None
-    results: List[int] | None = None
-    types: List[str] | None = Field(default=None, min_length=1)
+    actions: List[TerraformAction] | None = Field(
+        default=None,
+        description="Actions sent to this queue; the handler's actions when unset.",
+    )
+    stages: List[TerraformStage] | None = Field(
+        default=None,
+        description="Stages sent to this queue; the handler's stages when unset.",
+    )
+    results: List[int] | None = Field(
+        default=None,
+        description="Terraform exit codes sent to this queue; the handler's results when unset.",
+    )
+    types: List[str] | None = Field(
+        default=None,
+        min_length=1,
+        description="CloudEvents types sent to this queue (shell-style patterns); the handler's types when unset.",
+    )
 
 
 class SQSConfig(BaseModel):
-    queues: List[str] | Dict[str, QueueRule] = Field(default_factory=list)
-    actions: List[TerraformAction] | None = None
-    stages: List[TerraformStage] | None = None
-    results: List[int] | None = None
+    queues: List[str] | Dict[str, QueueRule] = Field(
+        default_factory=list,
+        description="Queue URLs, or a map of queue URL to rules for that queue.",
+    )
+    actions: List[TerraformAction] | None = Field(
+        default=None, description="Legacy format: actions to send; all when unset."
+    )
+    stages: List[TerraformStage] | None = Field(
+        default=None,
+        description="Legacy format: stages to send; pre and post when unset.",
+    )
+    results: List[int] | None = Field(
+        default=None,
+        description="Legacy format: terraform exit codes to send; when set, messages without a result, such as pre stages, are not sent.",
+    )
     include_plan: bool = Field(
         default=False,
         description="Include plan file content when sending post plan messages",
