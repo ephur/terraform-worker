@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 import shlex
 from unittest import mock
 
@@ -825,6 +826,93 @@ class TestResolveTerraformValue:
         with pytest.raises(hooks.HookError) as exc_info:
             hooks._resolve_terraform_value(value, mock_backend, state_cache)
         assert "Output 'nonexistent' not found" in str(exc_info.value)
+
+
+class TestResolveNestedOutputKeys:
+    """Remote vars that point into a nested output value (#256)."""
+
+    @staticmethod
+    def _backend():
+        backend = mock.Mock()
+        backend.get_state.return_value = {
+            "version": 4,
+            "outputs": {
+                "subnets": {
+                    "value": {
+                        "private": ["subnet-a", "subnet-b"],
+                        "public-edge": {"id": "subnet-e"},
+                    },
+                    "type": "object",
+                },
+                "list": {"value": [{"id": "x"}, {"id": "y"}], "type": "list"},
+            },
+        }
+        return backend
+
+    @pytest.mark.parametrize(
+        "ref,expected",
+        [
+            ("outputs.subnets.private", ["subnet-a", "subnet-b"]),
+            ("outputs.subnets.private[1]", "subnet-b"),
+            ('outputs.subnets["public-edge"].id', "subnet-e"),
+            ('outputs["subnets"]["private"][0]', "subnet-a"),
+            ("outputs.list[1].id", "y"),
+            ("outputs.list.0.id", "x"),
+        ],
+    )
+    def test_nested_key_paths(self, ref, expected):
+        value = f"${{data.terraform_remote_state.network.{ref}}}"
+        result = hooks._resolve_terraform_value(value, self._backend(), {})
+        assert result == expected
+
+    @pytest.mark.parametrize(
+        "ref,missing",
+        [
+            ("outputs.subnets.nope", "nope"),
+            ("outputs.subnets.private[5]", "5"),
+            ("outputs.subnets.private.first", "first"),
+            ("outputs.list[0].id.deeper", "deeper"),
+        ],
+    )
+    def test_missing_nested_key_raises(self, ref, missing):
+        value = f"data.terraform_remote_state.network.{ref}"
+        with pytest.raises(hooks.HookError, match=f"Key '{missing}' not found"):
+            hooks._resolve_terraform_value(value, self._backend(), {})
+
+    def test_real_hcl2_nested_key_populates_env(self, tmp_path):
+        (tmp_path / WORKER_LOCALS_FILENAME).write_text(
+            "locals {\n"
+            "  subnet = data.terraform_remote_state.network.outputs.subnets.private\n"
+            '  edge = data.terraform_remote_state.network.outputs.subnets["public-edge"].id\n'
+            "}\n"
+        )
+        local_env = {}
+        hooks._populate_environment_with_terraform_remote_vars(
+            local_env, str(tmp_path), "terraform", False, self._backend()
+        )
+        assert json.loads(local_env["TF_REMOTE_SUBNET"].strip("'")) == [
+            "subnet-a",
+            "subnet-b",
+        ]
+        assert local_env["TF_REMOTE_EDGE"] == "subnet-e"
+
+    @pytest.mark.parametrize(
+        "ref,message",
+        [
+            ("outputs.subnets.nope", "Key 'nope' not found"),
+            ("outputs.subnets.private[5]", "Key '5' not found"),
+            ("outputs.missing.key", "Output 'missing' not found"),
+            ("outputs.list[*].id", "Unsupported output key path"),
+        ],
+    )
+    def test_real_hcl2_bad_key_path_fails_hook(self, tmp_path, ref, message):
+        (tmp_path / WORKER_LOCALS_FILENAME).write_text(
+            f"locals {{\n  v = data.terraform_remote_state.network.{ref}\n}}\n"
+        )
+        with pytest.raises(hooks.HookError, match=re.escape(message)):
+            hooks._populate_environment_with_terraform_remote_vars(
+                {}, str(tmp_path), "terraform", False, self._backend()
+            )
 
 
 class TestPopulateEnvironmentWithNestedRemoteVars:

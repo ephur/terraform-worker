@@ -30,7 +30,7 @@ The hook inherits the environment terraform runs with, including the backend cre
 
 Names are upper-cased, with `-` and `.` turned into `_`. Booleans are `TRUE` or `FALSE`, lists and maps are compact JSON, and every value is shell-quoted. With `--b64-encode`, values are base64 encoded instead (lists and maps as JSON first), which is easier to decode reliably. The worker warns when a value comes close to the shell's environment size limit.
 
-Resolving `TF_REMOTE_*` reads every referenced state from the backend. A definition that does not need them in its hooks can set `hooks_disable_remotes: true` to skip that. Remote vars that reference a nested key (`network.outputs.subnets.private`) cannot be resolved for hooks yet and fail the hook, so a definition that uses them needs `hooks_disable_remotes: true`.
+Resolving `TF_REMOTE_*` reads every referenced state from the backend. A definition that does not need them in its hooks can set `hooks_disable_remotes: true` to skip that. Remote vars that reference a nested key (`network.outputs.subnets.private`, `network.outputs.subnets["private"][0]`) get the value at that key, the same value terraform sees; a key that does not exist in the state fails the hook.
 
 ## Failures
 
