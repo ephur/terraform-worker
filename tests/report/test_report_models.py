@@ -336,9 +336,7 @@ class TestSchema:
             assert json.loads((tmp_path / directory / "run-v1.schema.json").read_text())
 
     def test_published_schemas_are_current(self):
-        published = (
-            Path(__file__).parents[2] / "docs" / "source" / "_static" / "schemas"
-        )
+        published = Path(__file__).parents[2] / "docs" / "schemas"
         for schema_id, schema in json_schemas().items():
             on_disk = json.loads((published / file_name(schema_id)).read_text())
             assert (
