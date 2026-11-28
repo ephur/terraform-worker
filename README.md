@@ -1,75 +1,45 @@
 # terraform-worker
 
-`terraform-worker` is a command line tool for pipelining terraform operations while sharing state between them. The worker consumese a yaml configuration file which is broken up into two sections, definitions (which were really just top level modules) and sub-modules. The definitions are put into a worker config in order, with the terraform variables, and remote state variables.  Following is a sample configuration file and command:
+`terraform-worker` runs a pipeline of terraform root modules, called definitions, from one configuration file. It generates the provider, backend and remote state blocks for each definition, passes outputs from one definition to the next, and plans, applies or destroys the whole set in order. Each definition keeps its own state, so large deployments stay split into small, fast states that share common providers and variables.
 
 *./worker.yaml*
 ```yaml
 terraform:
   providers:
     aws:
+      requirements:
+        version: ">= 5.0"
       vars:
         region: {{ aws_region }}
-        version: "~> 2.61.0"
 
-  # global level variables
-  terraform_vars:
-    region: {{ aws_region }}
-    environment: dev
+  global_vars:
+    terraform_vars:
+      environment: dev
 
   definitions:
-    # Either setup a VPC and resources, or deploy into an existing one
     network:
-      path: /definitions/aws/network-existing
-
+      path: /definitions/aws/network
     database:
       path: /definitions/aws/rds
+      remote_vars:
+        subnet_ids: network.outputs.private_subnet_ids
 ```
 
 ```sh
-% worker --aws-profile default --backend s3 terraform example1
-```
-**NOTE:** When adding a provider from a non-hashicorp source, use a `source` field, as follows
-(_the `source` field is only valid for terraform 13+ and is not emitted when using 12_):
-
-```yaml
-providers:
-...
-  kubectl:
-    vars:
-      version: "~> 1.9"
-    source: "gavinbunney/kubectl"
+uv tool install terraform-worker
+worker --aws-profile default --backend s3 --backend-bucket my-state terraform example --plan --apply
 ```
 
-In addition to using command line options, worker configuration can be specified using a `worker_options` section in
-the worker configuration.
+The `database` definition reads the network's output as `local.subnet_ids`, and `{{ aws_region }}` is filled in from `--aws-region`.
 
-```yaml
-terraform:
-  worker_options:
-    backend: s3
-    backend_prefix: tfstate
-    terraform_bin: /home/user/bin/terraform
+## Documentation
 
-  providers:
-...
-```
-
-**terraform-worker** requires a configuration file.  By default, it will looks for a file named "worker.yaml" in the
-current working directory.  Together with the `worker_options` listed above, it's possible to specify all options 
-either in the environment or in the configuration file and simply call the worker command by itself.
-
-```sh
- % env | grep AWS
- AWS_ACCESS_KEY_ID=somekey
- AWS_SECRET_ACCESS_KEY=somesecret
- % head ./worker.yaml
-terraform:
-  worker_options:
-    backend: s3
-    backend_prefix: tfstate
-    terraform_bin: /home/user/bin/terraform
- % worker terraform my-deploy
-```
+- [Getting started](docs/getting-started.md)
+- [Configuration](docs/configuration.md)
+- [Running the worker](docs/running.md)
+- [Hooks](docs/hooks.md)
+- [State locks](docs/locking.md)
+- [CLI reference](docs/reference/cli.md) and [configuration reference](docs/reference/config.md), generated from the code
 
 ## Assuming a Role
 
@@ -88,6 +58,10 @@ The project uses [uv](https://docs.astral.sh/uv/) to manage its environment and 
 
 `uv sync` creates `.venv` and installs the dev dependency group by default. Run tools through `uv run`, for example `uv run pytest -k my_test`.
 
+### Documentation
+
+User docs are Markdown under `docs/`. The pages in `docs/reference/` are generated from the CLI options and the configuration models; after changing either, run `make docs` and commit the result. CI fails when they are out of date.
+
 ## Releasing
 
 The package version comes from git tags (via `hatch-vcs`), so there is no version to bump in `pyproject.toml`. Tag the release commit and push the tag:
@@ -102,148 +76,6 @@ Build and publish the package to PYPI from the tagged commit. Instructions on co
  % uv publish
 ```
 
-## Configuration
-
-A project is configured through a worker config, a yaml, json, or hcl2 file that specifies the definitions, inputs, outputs, providers and all other necessary configuration. The worker config is what specifies how state is shared among your definitions. The config support jinja templating that can be used to conditionally pass state or pass in env variables through the command line via the `--config-var` option.
-
-*./worker.yaml*
-```yaml
-terraform:
-  providers:
-    aws:
-      vars:
-        region: {{ aws_region }}
-        version: "~> 2.61.1"
-
-  # global level variables
-  terraform_vars:
-    region: {{ aws_region }}
-    environment: dev
-
-  definitions:
-    # Either setup a VPC and resources, or deploy into an existing one
-    network:
-      path: /definitions/aws/network-existing
-
-    database:
-      path: /definitions/aws/rds
-      remote_vars:
-        subnet: network.outputs.subnet_id
-```
-
-```json
-{
-    "terraform": {
-        "providers": {
-            "aws": {
-                "vars": {
-                    "region": "{{ aws_region }}",
-                    "version": "~> 2.61"
-                }
-            }
-        },
-        "terraform_vars": {
-            "region": "{{ aws_region }}",
-            "environment": "dev"
-        },
-        "definitions": {
-            "network": {
-                "path": "/definitions/aws/network-existing"
-            },
-            "database": {
-                "path": "/definitions/aws/rds",
-                "remote_vars": {
-                    "subnet": "network.outputs.subnet_id"
-                }
-            }
-        }
-    }
-}
-```
-
-```hcl
-terraform {
-  providers {
-    aws = {
-      vars = {
-        region = "{{ aws_region }}"
-        version = "2.63.0"
-      }
-    }
-  }
-
-  terraform_vars {
-    environment = "dev"
-    region = "{{ aws_region }}"
-  }
-
-  definitions {
-    network = {
-      path = "/definitions/aws/network-existing"
-    }
-
-    database = {
-      path = "/definitions/aws/rds"
-
-      remote_vars = {
-        subnet = "network.outputs.subnet_id"
-      }
-    }
-  }
-}
-```
-
-In this config, the worker manages two separate terraform modules, a `network` and a `database` definition, and shares an output from the network definition with the database definition. This is made available inside of the `database` definition through the `local.subnet` value.
-
-`aws_region` is substituted at runtime for the value of `--aws-region` passed through the command line. The deployment being run is available as `{{ deployment }}`.
-
-### Definitions sources
-
-A `definitions_sources` entry generates definitions at config load. The source is fetched like a definition, its `command` runs in the fetched copy with `WORKER_DEPLOYMENT` set to the deployment, and the YAML or JSON mapping it prints is inserted into `definitions` after the `after` definition (or at the end). Generated definitions without a `path` use the source's `path` and `remote_path_options`.
-
-```yaml
-terraform:
-  definitions_sources:
-    catalog:
-      path: git@github.com:example/service-catalog.git
-      remote_path_options:
-        branch: main
-      command: bin/list-definitions
-      after: network
-
-  definitions:
-    network:
-      path: /definitions/aws/network-existing
-```
-
-The command runs with the worker's environment and credentials; only use trusted sources. See the configuration concepts in the docs for the full contract.
-
-## Troubleshooting
-
-Running the worker with the `--no-clean` option will keep around the terraform files that the worker generates. You can use these generated files to directly run terraform commands for that definition. This is useful for when you need to do things like troubleshoot or delete items from the remote state. After running the worker with --no-clean, cd into the definition directory where the terraform-worker generates it's tf files. The worker should tell you where it's putting these for example:
-
-```
-...
-building deployment mfaitest
-using temporary Directory: /tmp/tmpew44uopp
-...
-```
-
-In order to troubleshoot this definition, you would cd /tmp/tmpew44uopp/definitions/my_definition/ and then perform any terraform commands from there.
-
 ## Background
 
 The terraform worker was a weekend project to run terraform against a series of definitions (modules). The idea was the configuration vars, provider configuration, remote state, and variables from remote state would all be dynamically generated. The purpose was for building kubernetes deployments, and allowing all of the configuration information to be stored as either yamnl files in github, or have the worker configuration generated by an API which stored all of the deployment configurations in a database.
-
-## Documentation
-
-Documentation uses the [Sphinx](https://www.sphinx-doc.org/en/master/index.html) documentation fromework.
-
-To build HTML documentation:
-
-```bash
-% cd docs
-% make clean && make html
-```
-
-The documentation can be viewed locally by open `./docs/build/index.html` in a browser.

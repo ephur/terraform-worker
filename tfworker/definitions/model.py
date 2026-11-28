@@ -13,8 +13,12 @@ class DefinitionRemoteOptions(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    branch: Optional[str] = None
-    sub_path: Optional[str] = None
+    branch: Optional[str] = Field(
+        None, description="Branch or tag to clone; master when unset."
+    )
+    sub_path: Optional[str] = Field(
+        None, description="Directory inside the repository that holds the module."
+    )
 
 
 class Definition(BaseModel):
@@ -25,32 +29,47 @@ class Definition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    path: str
-    always_apply: bool = False
-    always_include: bool = False
+    path: str = Field(
+        description="Local path, relative to the repository path, or a git URL of the module."
+    )
+    always_apply: bool = Field(
+        False,
+        description="Apply right after this definition is planned, even without --apply or changes.",
+    )
+    always_include: bool = Field(
+        False, description="Include this definition even when --limit leaves it out."
+    )
     remote_path_options: Optional[DefinitionRemoteOptions] = Field(
         default_factory=DefinitionRemoteOptions,
         description="Options for the remote path of the definition",
     )
-    hooks_disable_remotes: bool = False
-    ignore_global_vars: bool = False
+    hooks_disable_remotes: bool = Field(
+        False,
+        description="Do not fetch remote state to set TF_REMOTE_* variables for hook scripts.",
+    )
+    ignore_global_vars: bool = Field(
+        False, description="Merge none of the global_vars into this definition."
+    )
     ignored_global_terraform_vars: Optional[List[str]] = Field(
-        [], description="List of global vars to ignore."
+        [], description="Global terraform_vars not merged into this definition."
     )
     ignored_global_remote_vars: Optional[List[str]] = Field(
-        [], description="List of global remote vars to ignore."
+        [], description="Global remote_vars not merged into this definition."
     )
     ignored_global_template_vars: Optional[List[str]] = Field(
-        [], description="List of global template vars to ignore."
+        [], description="Global template_vars not merged into this definition."
     )
     use_global_terraform_vars: Optional[List[str]] = Field(
-        [], description="List of global vars to use."
+        [],
+        description="When set, only these global terraform_vars are merged into this definition.",
     )
     use_global_remote_vars: Optional[List[str]] = Field(
-        [], description="List of global remote vars to use."
+        [],
+        description="When set, only these global remote_vars are merged into this definition.",
     )
     use_global_template_vars: Optional[List[str]] = Field(
-        [], description="List of global template vars to use."
+        [],
+        description="When set, only these global template_vars are merged into this definition.",
     )
     terraform_vars: Optional[Dict[str, Any]] = Field(
         {}, description="Variables to pass to terraform via a generated .tfvars file."
@@ -61,8 +80,12 @@ class Definition(BaseModel):
         "Supports strings (e.g., 'state.outputs.key'), dicts for mapping keys to remote refs, "
         "and lists of remote refs.",
     )
-    squelch_plan_output: bool = False
-    squelch_apply_output: bool = False
+    squelch_plan_output: bool = Field(
+        False, description="Do not stream terraform plan output for this definition."
+    )
+    squelch_apply_output: bool = Field(
+        False, description="Do not stream terraform apply output for this definition."
+    )
     template_vars: Optional[Dict[str, str | bool | list | dict]] = Field(
         {}, description="Variables which are suppled to any jinja templates."
     )
