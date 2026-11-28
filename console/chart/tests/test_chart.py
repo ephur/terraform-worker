@@ -5,7 +5,6 @@ They run `helm template` (helm on PATH, or HELM) and assert on the objects it
 renders: `pytest chart/tests -p no:cacheprovider --no-cov` from console/.
 """
 
-import json
 import os
 import shutil
 import subprocess
@@ -30,24 +29,34 @@ OIDC = {
             "clientSecret": {"existingSecret": "console-oidc"},
         },
     },
-    "stores": {"stores": [{"name": "prod", "region": "us-east-1", "bucket": "b"}]},
+    "stores": {
+        "stores": [
+            {
+                "name": "prod",
+                "region": "us-east-1",
+                "bucket": "b",
+                "prefix": "terraform/{deployment}",
+            }
+        ]
+    },
 }
 
 
 def merge(base, extra):
     out = dict(base)
     for key, value in extra.items():
-        if isinstance(value, dict) and isinstance(out.get(key), dict):
+        if value and isinstance(value, dict) and isinstance(out.get(key), dict):
             out[key] = merge(out[key], value)
         else:
             out[key] = value
     return out
 
 
-def helm(values, *args):
+def helm(values, *args, name="t"):
+    # through a values file, as an install reads it: numbers arrive as floats
     return subprocess.run(
-        [HELM, "template", "t", str(CHART), "-f", "-", *args],
-        input=json.dumps(values),
+        [HELM, "template", name, str(CHART), "-f", "-", *args],
+        input=yaml.safe_dump(values),
         capture_output=True,
         text=True,
     )
@@ -106,6 +115,65 @@ class TestWeb:
         assert container["livenessProbe"]["httpGet"]["path"] == "/livez"
         assert container["readinessProbe"]["httpGet"]["path"] == "/readyz"
 
+    def test_large_numbers(self):
+        objects = render(
+            auth={"sessionMaxAge": 2592000},
+            lockStaleAfter=2592000,
+            reconcile={"mode": "inPod", "interval": 1000000},
+            metrics={"mode": "port", "port": 19090},
+        )
+        values = env(web(objects)["containers"][0])
+        # never 2.592e+06, which the console can't read as a number of seconds
+        assert values["TFWORKER_CONSOLE_SESSION_MAX_AGE"] == "2592000"
+        assert float(values["TFWORKER_CONSOLE_LOCK_STALE_AFTER"]) == 2592000
+        assert float(values["TFWORKER_CONSOLE_RECONCILE_INTERVAL"]) == 1000000
+        assert values["TFWORKER_CONSOLE_METRICS_PORT"] == "19090"
+
+    def test_startup_probe(self):
+        pod = web(render())
+        (container,) = pod["containers"]
+        startup = container["startupProbe"]
+        assert startup["httpGet"]["path"] == "/livez"
+        assert startup["periodSeconds"] * startup["failureThreshold"] >= 300
+        assert pod["automountServiceAccountToken"] is False
+        assert pod["terminationGracePeriodSeconds"] == 45
+
+    def test_extra_env_and_volumes(self):
+        objects = render(
+            extraEnv=[{"name": "PGSSLMODE", "value": "verify-full"}],
+            extraVolumes=[{"name": "ca", "configMap": {"name": "corp-ca"}}],
+            extraVolumeMounts=[
+                {"name": "ca", "mountPath": "/etc/ca", "readOnly": True}
+            ],
+        )
+        cron = objects[("CronJob", "t-tfworker-console-reconcile")]
+        job = objects[("Job", "t-tfworker-console-migrate")]["spec"]["template"]["spec"]
+        for pod in (
+            web(objects),
+            cron["spec"]["jobTemplate"]["spec"]["template"]["spec"],
+            job,
+        ):
+            (container,) = pod["containers"]
+            assert env(container)["PGSSLMODE"] == "verify-full"
+            assert "/etc/ca" in {m["mountPath"] for m in container["volumeMounts"]}
+            assert "ca" in {v["name"] for v in pod["volumes"]}
+
+    def test_image(self):
+        (container,) = web(render())["containers"]
+        assert container["image"] == "tfworker-console:0.0.0-dev"
+        (container,) = web(render(image={"tag": "0.3.0"}))["containers"]
+        assert container["image"] == "tfworker-console:0.3.0"
+        pod = web(render(imagePullSecrets=[{"name": "registry"}]))
+        assert pod["imagePullSecrets"] == [{"name": "registry"}]
+
+    def test_roles_config_map(self):
+        objects = render(auth={"rolesConfigMap": "console-roles"})
+        pod = web(objects)
+        volumes = {v["name"]: v for v in pod["volumes"]}
+        assert volumes["roles"]["configMap"]["name"] == "console-roles"
+        values = env(pod["containers"][0])
+        assert values["TFWORKER_CONSOLE_ROLES_FILE"] == "/config/roles.yaml/roles.yaml"
+
     def test_hardened(self):
         pod = web(render())
         assert pod["securityContext"]["runAsNonRoot"] is True
@@ -114,6 +182,13 @@ class TestWeb:
         assert container["securityContext"]["capabilities"]["drop"] == ["ALL"]
         mounts = {m["mountPath"] for m in container["volumeMounts"]}
         assert "/tmp" in mounts
+        objects = render()
+        cron = objects[("CronJob", "t-tfworker-console-reconcile")]
+        job = objects[("Job", "t-tfworker-console-migrate")]["spec"]["template"]["spec"]
+        for pod in (cron["spec"]["jobTemplate"]["spec"]["template"]["spec"], job):
+            assert pod["securityContext"]["runAsNonRoot"] is True
+            (container,) = pod["containers"]
+            assert container["securityContext"]["readOnlyRootFilesystem"] is True
 
     def test_inline_config(self):
         objects = render(groups={"groups": [{"name": "Production"}]})
@@ -159,6 +234,17 @@ class TestWeb:
         assert path["path"] == "/"
         assert path["backend"]["service"]["port"]["name"] == "http"
 
+    def test_ingress_tls(self):
+        tls = [{"hosts": ["console.example.com"], "secretName": "console-tls"}]
+        objects = render(
+            ingress={
+                "enabled": True,
+                "hosts": [{"host": "console.example.com"}],
+                "tls": tls,
+            }
+        )
+        assert objects[("Ingress", "t-tfworker-console")]["spec"]["tls"] == tls
+
 
 class TestCredentials:
     def test_irsa(self):
@@ -192,10 +278,20 @@ class TestReconcile:
         assert values["TFWORKER_CONSOLE_RECONCILE_INTERVAL"] == "0"
         cron = objects[("CronJob", "t-tfworker-console-reconcile")]
         assert cron["spec"]["concurrencyPolicy"] == "Forbid"
+        assert cron["spec"]["startingDeadlineSeconds"] == 300
+        assert cron["spec"]["jobTemplate"]["spec"]["activeDeadlineSeconds"] == 1800
         job = cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]
         (container,) = job["containers"]
         assert container["args"] == ["reconcile"]
         assert "TFWORKER_CONSOLE_STORES_FILE" in env(container)
+
+    def test_long_release_names(self):
+        result = helm(OIDC, name="a" * 53)
+        assert result.returncode == 0, result.stderr
+        for doc in yaml.safe_load_all(result.stdout):
+            if doc and doc["kind"] == "CronJob":
+                # Kubernetes limits CronJob names to 52 characters
+                assert len(doc["metadata"]["name"]) <= 52
 
     def test_in_pod(self):
         objects = render(reconcile={"mode": "inPod", "interval": 120})
@@ -215,6 +311,14 @@ class TestMigrations:
         # the chart's service account isn't there yet on a first install
         assert "serviceAccountName" not in spec
         assert list(env(container)) == ["TFWORKER_CONSOLE_DATABASE_URL"]
+        assert spec["automountServiceAccountToken"] is False
+
+    def test_existing_service_account(self):
+        objects = render(serviceAccount={"create": False, "name": "console"})
+        assert ("ServiceAccount", "t-tfworker-console") not in objects
+        job = objects[("Job", "t-tfworker-console-migrate")]["spec"]["template"]["spec"]
+        assert job["serviceAccountName"] == "console"
+        assert web(objects)["serviceAccountName"] == "console"
 
     def test_off(self):
         objects = render(migrations={"enabled": False})
@@ -245,14 +349,28 @@ class TestMetrics:
         assert env(web(objects)["containers"][0])["TFWORKER_CONSOLE_METRICS"] == "off"
 
     def test_port(self):
-        objects = render(metrics={"mode": "port", "serviceMonitor": {"enabled": True}})
+        objects = render(metrics={"mode": "port"}, service={"type": "LoadBalancer"})
         pod = objects[("Deployment", "t-tfworker-console")]["spec"]["template"]
         (container,) = pod["spec"]["containers"]
         assert {"name": "metrics", "containerPort": 9090} in container["ports"]
         assert pod["metadata"]["annotations"]["prometheus.io/port"] == "9090"
+        # the unauthenticated port stays off the console's own Service
         ports = objects[("Service", "t-tfworker-console")]["spec"]["ports"]
-        assert {p["name"] for p in ports} == {"http", "metrics"}
+        assert [p["name"] for p in ports] == ["http"]
+        service = objects[("Service", "t-tfworker-console-metrics")]["spec"]
+        assert service["type"] == "ClusterIP"
+        assert [p["port"] for p in service["ports"]] == [9090]
+
+    def test_port_with_a_service_monitor(self):
+        objects = render(metrics={"mode": "port", "serviceMonitor": {"enabled": True}})
+        pod = objects[("Deployment", "t-tfworker-console")]["spec"]["template"]
+        # the ServiceMonitor scrapes; annotations would make some setups scrape twice
+        assert "prometheus.io/port" not in pod["metadata"]["annotations"]
         monitor = objects[("ServiceMonitor", "t-tfworker-console")]
+        selector = monitor["spec"]["selector"]["matchLabels"]
+        assert selector["app.kubernetes.io/component"] == "metrics"
+        metrics = objects[("Service", "t-tfworker-console-metrics")]["metadata"]
+        assert metrics["labels"]["app.kubernetes.io/component"] == "metrics"
         (endpoint,) = monitor["spec"]["endpoints"]
         assert endpoint["port"] == "metrics"
         assert "authorization" not in endpoint
@@ -269,6 +387,10 @@ class TestMetrics:
         )
         ports = objects[("Service", "t-tfworker-console")]["spec"]["ports"]
         assert [p["name"] for p in ports] == ["http"]
+        assert ("Service", "t-tfworker-console-metrics") not in objects
+        monitor = objects[("ServiceMonitor", "t-tfworker-console")]
+        selector = monitor["spec"]["selector"]["matchLabels"]
+        assert selector["app.kubernetes.io/component"] == "web"
         (endpoint,) = objects[("ServiceMonitor", "t-tfworker-console")]["spec"][
             "endpoints"
         ]
@@ -293,6 +415,12 @@ class TestRefused:
             ({"metrics": {"mode": "always"}}, "metrics.mode"),
             ({"events": {"enabled": True}}, "events.queueUrl"),
             (
+                {"events": {"enabled": True, "queueUrl": "q"}, "stores": {}},
+                "events need the stores",
+            ),
+            ({"storesConfigMap": "mine"}, "set stores inline or name its ConfigMap"),
+            ({"ingress": {"enabled": True}}, "ingress.hosts"),
+            (
                 {"metrics": {"serviceMonitor": {"enabled": True}}},
                 "metrics.mode token or port",
             ),
@@ -316,7 +444,7 @@ class TestRefused:
 def test_lint():
     result = subprocess.run(
         [HELM, "lint", str(CHART), "-f", "-"],
-        input=json.dumps(OIDC),
+        input=yaml.safe_dump(OIDC),
         capture_output=True,
         text=True,
     )

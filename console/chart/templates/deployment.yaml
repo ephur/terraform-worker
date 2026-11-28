@@ -22,9 +22,9 @@ spec:
       annotations:
         # roll the pods when inline config changes
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        {{- if and (eq (include "console.metricsMode" .) "port") .Values.metrics.podAnnotations }}
+        {{- if and (eq (include "console.metricsMode" .) "port") .Values.metrics.podAnnotations (not .Values.metrics.serviceMonitor.enabled) }}
         prometheus.io/scrape: "true"
-        prometheus.io/port: {{ .Values.metrics.port | quote }}
+        prometheus.io/port: {{ int64 .Values.metrics.port | quote }}
         prometheus.io/path: /metrics
         {{- end }}
         {{- with .Values.podAnnotations }}
@@ -32,6 +32,9 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "console.serviceAccountName" . }}
+      # the console never calls the Kubernetes API
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       {{- include "console.podSpecCommon" . | trim | nindent 6 }}
       containers:
         - name: console
@@ -43,7 +46,7 @@ spec:
               containerPort: 8000
             {{- if eq (include "console.metricsMode" .) "port" }}
             - name: metrics
-              containerPort: {{ .Values.metrics.port }}
+              containerPort: {{ int64 .Values.metrics.port }}
             {{- end }}
           env:
             - name: TFWORKER_CONSOLE_HOST
@@ -65,7 +68,7 @@ spec:
                   name: {{ .Values.auth.secretKey.existingSecret }}
                   key: {{ .Values.auth.secretKey.key }}
             - name: TFWORKER_CONSOLE_SESSION_MAX_AGE
-              value: {{ .Values.auth.sessionMaxAge | quote }}
+              value: {{ int64 .Values.auth.sessionMaxAge | quote }}
             {{- end }}
             {{- with .Values.auth.publicUrl }}
             - name: TFWORKER_CONSOLE_PUBLIC_URL
@@ -93,7 +96,7 @@ spec:
               value: {{ .Values.auth.oidc.usernameClaim | quote }}
             {{- end }}
             - name: TFWORKER_CONSOLE_RECONCILE_INTERVAL
-              value: {{ eq .Values.reconcile.mode "inPod" | ternary .Values.reconcile.interval 0 | quote }}
+              value: {{ eq .Values.reconcile.mode "inPod" | ternary (toString (float64 .Values.reconcile.interval)) "0" | quote }}
             {{- if .Values.events.enabled }}
             - name: TFWORKER_CONSOLE_EVENTS_QUEUE_URL
               value: {{ .Values.events.queueUrl | quote }}
@@ -110,13 +113,21 @@ spec:
               value: {{ include "console.metricsMode" . | quote }}
             {{- if ne (include "console.metricsMode" .) "off" }}
             - name: TFWORKER_CONSOLE_METRICS_PORT
-              value: {{ .Values.metrics.port | quote }}
+              value: {{ int64 .Values.metrics.port | quote }}
             - name: TFWORKER_CONSOLE_METRICS_DEFINITION_LABEL
               value: {{ .Values.metrics.definitionLabel | quote }}
             {{- end }}
             - name: TFWORKER_CONSOLE_LOCK_STALE_AFTER
-              value: {{ .Values.lockStaleAfter | quote }}
+              value: {{ float64 .Values.lockStaleAfter | toString | quote }}
             {{- include "console.commonEnv" . | nindent 12 }}
+          # start-up talks to the database before serving; give it time
+          # before liveness may restart the pod
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 5
+            failureThreshold: {{ .Values.startupFailureThreshold }}
           livenessProbe:
             httpGet:
               path: /livez

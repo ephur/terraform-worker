@@ -18,6 +18,10 @@ spec:
       labels:
         {{- include "console.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: migrate
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       restartPolicy: Never
       # the chart's service account does not exist yet on a first install,
@@ -25,6 +29,7 @@ spec:
       {{- if not .Values.serviceAccount.create }}
       serviceAccountName: {{ include "console.serviceAccountName" . }}
       {{- end }}
+      automountServiceAccountToken: false
       {{- include "console.podSpecCommon" . | trim | nindent 6 }}
       containers:
         - name: migrate
@@ -37,6 +42,9 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.existingSecret }}
                   key: {{ .Values.database.key }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
@@ -44,7 +52,13 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
 {{- end }}

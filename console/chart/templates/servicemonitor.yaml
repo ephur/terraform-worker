@@ -12,6 +12,7 @@ spec:
   selector:
     matchLabels:
       {{- include "console.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: {{ eq (include "console.metricsMode" .) "port" | ternary "metrics" "web" }}
   endpoints:
     {{- if eq (include "console.metricsMode" .) "port" }}
     - port: metrics

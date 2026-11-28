@@ -66,6 +66,18 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- if and .Values.events.enabled (not .Values.events.queueUrl) -}}
 {{- fail "events.queueUrl is required when events are enabled" -}}
 {{- end -}}
+{{- if and .Values.events.enabled (not (or .Values.stores .Values.storesConfigMap)) -}}
+{{- fail "events need the stores they come from: set stores or storesConfigMap" -}}
+{{- end -}}
+{{- range $pair := list (list "stores" .Values.stores .Values.storesConfigMap) (list "groups" .Values.groups .Values.groupsConfigMap) (list "auth.roles" .Values.auth.roles .Values.auth.rolesConfigMap) -}}
+{{- if and (index $pair 1) (index $pair 2) -}}
+{{- fail (printf "set %s inline or name its ConfigMap, not both" (index $pair 0)) -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.ingress.enabled (not .Values.ingress.hosts) -}}
+{{- fail "ingress.hosts needs at least one host when the ingress is enabled" -}}
+{{- end -}}
+
 {{- if and .Values.metrics.serviceMonitor.enabled (eq (include "console.metricsMode" .) "off") -}}
 {{- fail "metrics.serviceMonitor needs metrics.mode token or port" -}}
 {{- end -}}
@@ -117,7 +129,8 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 
 {{- define "console.volumes" -}}
 - name: tmp
-  emptyDir: {}
+  emptyDir:
+    sizeLimit: {{ .Values.tmpSizeLimit }}
 {{- range (include "console.files" . | fromJsonArray) }}
 - name: {{ index . 0 | replace ".yaml" "" }}
   configMap:
@@ -136,6 +149,9 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
       - key: {{ .Values.awsProfiles.credentialsKey }}
         path: credentials
 {{- end }}
+{{- with .Values.extraVolumes }}
+{{ toYaml . }}
+{{- end }}
 {{- end -}}
 
 {{- define "console.volumeMounts" -}}
@@ -150,6 +166,9 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 - name: aws
   mountPath: /aws
   readOnly: true
+{{- end }}
+{{- with .Values.extraVolumeMounts }}
+{{ toYaml . }}
 {{- end }}
 {{- end -}}
 

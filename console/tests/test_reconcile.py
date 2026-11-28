@@ -830,6 +830,24 @@ class TestCli:
         assert result.exit_code == 0, result.output
         assert [s["store"] for s in json.loads(result.output)] == ["prod", "dev"]
 
+    def test_reconcile_every_store_forgets_removed_ones(self, env, sessions):
+        with sessions() as session:
+            session.add(
+                db.Store(
+                    name="gone",
+                    bucket="old",
+                    prefix="p",
+                    region="us-east-1",
+                    credentials="default",
+                )
+            )
+            session.commit()
+        result = CliRunner().invoke(main, ["reconcile"])
+        assert result.exit_code == 0, result.output
+        assert [s["store"] for s in json.loads(result.output)] == ["prod", "dev"]
+        with sessions() as session:
+            assert session.get(db.Store, "gone") is None
+
     def test_bad_arguments(self, env):
         assert CliRunner().invoke(main, ["reconcile", "--store", "nope"]).exit_code == 2
         assert (

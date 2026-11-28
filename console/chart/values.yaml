@@ -77,6 +77,10 @@ reconcile:
   mode: cronJob
   interval: 300
   schedule: "*/5 * * * *"
+  # a run that hasn't started this long after its time is skipped
+  startingDeadlineSeconds: 300
+  # a run is stopped after this long, so a hung one can't hold up the rest
+  activeDeadlineSeconds: 1800
   # the CronJob's own resources
   resources: {}
 
@@ -100,7 +104,8 @@ metrics:
   mode: "off"
   port: 9090
   definitionLabel: true
-  # prometheus.io/* annotations on the pods, for port mode
+  # prometheus.io/* annotations on the pods, for port mode without a
+  # ServiceMonitor
   podAnnotations: true
   serviceMonitor:
     enabled: false
@@ -148,8 +153,19 @@ securityContext:
   capabilities:
     drop: ["ALL"]
 
+# start-up reads the database before serving: liveness waits this many 5s
+# startup probes (5 minutes) before it may restart a pod
+startupFailureThreshold: 60
+# the in-pod reconcile and event consumer stop within 30s
+terminationGracePeriodSeconds: 45
+tmpSizeLimit: 256Mi
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
-# more TFWORKER_CONSOLE_* or other variables for every console container
+# more TFWORKER_CONSOLE_* or other variables for every console container,
+# the migration Job included (PGSSLMODE, a CA bundle path, proxies)
 extraEnv: []
+# more volumes and mounts for every console container, such as a CA bundle
+extraVolumes: []
+extraVolumeMounts: []

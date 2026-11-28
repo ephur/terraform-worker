@@ -2,18 +2,22 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ include "console.fullname" . }}-reconcile
+  name: {{ include "console.fullname" . | trunc 42 | trimSuffix "-" }}-reconcile
   labels:
     {{- include "console.labels" . | nindent 4 }}
 spec:
   schedule: {{ .Values.reconcile.schedule | quote }}
   # a reconcile that outlasts the schedule is not started twice
   concurrencyPolicy: Forbid
+  # a run that couldn't start within this long is skipped, not queued up
+  startingDeadlineSeconds: {{ .Values.reconcile.startingDeadlineSeconds }}
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 0
+      # a hung run would hold up every later one
+      activeDeadlineSeconds: {{ .Values.reconcile.activeDeadlineSeconds }}
       template:
         metadata:
           labels:
@@ -22,11 +26,14 @@ spec:
             {{- with .Values.podLabels }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          {{- with .Values.podAnnotations }}
           annotations:
-            checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
         spec:
           restartPolicy: Never
           serviceAccountName: {{ include "console.serviceAccountName" . }}
+          automountServiceAccountToken: false
           {{- include "console.podSpecCommon" . | trim | nindent 10 }}
           containers:
             - name: reconcile
