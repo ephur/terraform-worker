@@ -197,6 +197,31 @@ class TestCliCommands:
         assert result.exit_code == 1
         tfc.prep_providers.assert_not_called()
         tfc.app_state.handlers.exec_teardown.assert_not_called()
+        tfc.phases.teardown.assert_called_once_with("dep")
+
+    def test_terraform_core_phases_wrap_the_run(self, mocker):
+        """Core listeners start before handlers and finish before handler teardown."""
+        tfc = self._patch_terraform_cli(mocker)
+        order = []
+        tfc.phases.setup.side_effect = lambda d: order.append("phases.setup")
+        tfc.app_state.handlers.exec_setup.side_effect = lambda **kw: order.append(
+            "handlers.setup"
+        )
+        tfc.terraform_plan.side_effect = RuntimeError("plan exploded")
+        tfc.phases.teardown.side_effect = lambda d: order.append("phases.teardown")
+        tfc.app_state.handlers.exec_teardown.side_effect = lambda **kw: order.append(
+            "handlers.teardown"
+        )
+
+        CliRunner().invoke(cli.cli, ["terraform", "dep"])
+
+        assert order == [
+            "phases.setup",
+            "handlers.setup",
+            "phases.teardown",
+            "handlers.teardown",
+        ]
+        tfc.phases.setup.assert_called_once_with("dep")
 
     def test_env_runs(self, mocker):
         runner = CliRunner()

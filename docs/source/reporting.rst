@@ -3,21 +3,23 @@
 Run reporting
 =============
 
-The ``report`` handler leaves a durable record of every run next to the state it touched, so a dashboard,
+Run reporting leaves a durable record of every run next to the state it touched, so a dashboard,
 Backstage or a script can answer questions such as when a definition was last applied, how long a plan
 took, what changes are pending and which runs failed. The worker only writes these records; it does not
 serve them.
 
 .. code-block:: yaml
 
-    handlers:
-      report:
-        resources: true           # record changed resource addresses in run records
-        state_serials: true       # read state lineage and serial around plan and apply
-        tracked_ref: origin/main  # default: the remote's default branch
-        status_retries: 5
+    reporting:
+      resources: true           # record changed resource addresses in run records
+      state_serials: true       # read state lineage and serial around plan and apply
+      tracked_ref: origin/main  # default: the remote's default branch
+      status_retries: 5
 
-All fields are optional. The handler needs a backend that can store reports (S3).
+Reporting is part of the worker, configured by the top-level ``reporting`` block like ``locking``, and off
+when the block is absent. All fields are optional; ``reporting: {}`` turns it on with the defaults. It needs
+a backend that can store reports (S3); with another backend the worker warns and runs without it. Handlers
+are not involved, and a failure to record never changes the outcome of a run.
 
 Where records live
 ------------------
@@ -201,8 +203,7 @@ give it queues, an EventBridge bus, or both:
 Each event's ``data`` is exactly what was written, and an event is only sent after that write succeeded,
 so the bucket stays the source of truth and a consumer that missed events can reconcile from it. Plan
 events also cover manifests kept on disk with ``--plan-file-path``, which only the run's own machine has.
-Run and status events come from the ``report`` handler, so enable it to get them, and lock events need
-``locking`` configured (see :ref:`state-locks`). The event types are:
+Run and status events need ``reporting`` configured, and lock events need ``locking`` configured (see :ref:`state-locks`). The event types are:
 
 - ``io.tfworker.run.v1``: a ``tfworker.run/v1`` record, once per run.
 - ``io.tfworker.status.v1``: a ``tfworker.status/v1`` snapshot, after each update. The ``subject`` is the
