@@ -238,6 +238,7 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
             app.state.groups,
             settings.lock_stale_after,
             definition_label=settings.metrics_definition_label,
+            cache_seconds=settings.metrics_cache_seconds,
         )
         if app.state.reconciler is not None:
             app.state.reconciler.observers.append(app.state.metrics.observe_reconcile)
@@ -247,6 +248,7 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
             app_state["metrics"] = MetricsListener(
                 app.state.metrics, settings.metrics_host, settings.metrics_port
             )
+    app.state.events = app_state.get("events")
     app.state.readiness = probes.Readiness(engine)
     app.state.roles = load_roles(settings.roles_file)
     for mapping in app.state.roles.role_mappings:

@@ -22,6 +22,7 @@ separate listener that should stay inside the cluster).
 """
 
 import logging
+import socket
 import threading
 import time
 from collections import defaultdict
@@ -36,6 +37,7 @@ from prometheus_client import (
     Counter,
     Gauge,
     Histogram,
+    disable_created_metrics,
     generate_latest,
 )
 from prometheus_client.core import GaugeMetricFamily, Metric
@@ -49,11 +51,16 @@ from .groups import Groups
 from .reconcile import StoreSummary
 
 log = logging.getLogger(__name__)
+# counters' *_created series double the output and nothing here reads them
+disable_created_metrics()
 
 PREFIX = "tfworker_console"
-CACHE_SECONDS = 10.0
+CACHE_SECONDS = 30.0
 # the window the local-module apply counts cover
 APPLY_WINDOW = timedelta(days=7)
+METHODS = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+HEALTHS = list(queries.HEALTH_ORDER)
+LOCK_STATES = ["live", "stale"]
 # HTTP latency buckets, in seconds
 BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 
@@ -86,7 +93,7 @@ class Metrics:
             registry=self.registry,
         )
         self.reconcile_duration = Gauge(
-            f"{PREFIX}_reconcile_duration_seconds",
+            f"{PREFIX}_reconcile_last_duration_seconds",
             "How long this replica's last reconcile of the store took",
             ["store"],
             registry=self.registry,
@@ -109,22 +116,24 @@ class Metrics:
             ["type", "outcome"],
             registry=self.registry,
         )
+        self.fleet: Optional["FleetCollector"] = None
         if sessions is not None:
-            self.registry.register(
-                FleetCollector(
-                    sessions,
-                    groups,
-                    stale_after,
-                    definition_label,
-                    cache_seconds,
-                    now,
-                    clock,
-                )
+            self.fleet = FleetCollector(
+                sessions,
+                groups,
+                stale_after,
+                definition_label,
+                cache_seconds,
+                now,
+                clock,
             )
+            self.registry.register(self.fleet)
 
     def observe_request(
         self, route: str, method: str, status: int, seconds: float
     ) -> None:
+        # the method comes from the client, so only known ones become labels
+        method = method if method in METHODS else "other"
         self.requests.labels(route, method, str(status)).inc()
         self.latency.labels(route, method).observe(seconds)
 
@@ -201,11 +210,21 @@ class FleetCollector:
             )
             stores = list(session.scalars(select(db.Store)))
             applies = self._applies(session, now)
+            deployments = [
+                (row.store, row.name, self.groups.of(row.store, row.name))
+                for row in session.scalars(select(db.Deployment))
+            ]
+            successes = self._last_successes(session, healths)
 
         definitions = _gauge("definitions", "Definitions by health", place + ["health"])
-        counts: Dict[Tuple[str, ...], int] = defaultdict(int)
+        # every deployment reports every health, so a recovery reads as 0
+        # rather than as no data
+        counts: Dict[Tuple[str, ...], int] = {
+            place + (health,): 0 for place in deployments for health in HEALTHS
+        }
         for health in healths:
-            counts[(health.store, health.deployment, health.group, health.health)] += 1
+            key = (health.store, health.deployment, health.group, health.health)
+            counts[key] = counts.get(key, 0) + 1
         for labels, count in sorted(counts.items()):
             definitions.add_metric(list(labels), count)
 
@@ -215,7 +234,9 @@ class FleetCollector:
             "Age of the oldest saved plan waiting to be applied",
             place,
         )
-        waiting: Dict[Tuple[str, ...], List[datetime]] = defaultdict(list)
+        waiting: Dict[Tuple[str, ...], List[datetime]] = {
+            place: [] for place in deployments
+        }
         for row in plans:
             if row.body.get("storage") == "preview" or queries._plan_expired(row, now):
                 continue
@@ -224,34 +245,38 @@ class FleetCollector:
                 row.deployment,
                 self.groups.of(row.store, row.deployment),
             )
-            waiting[labels].append(row.created_at)
+            waiting.setdefault(labels, []).append(row.created_at)
         for labels, created in sorted(waiting.items()):
             pending.add_metric(list(labels), len(created))
-            oldest.add_metric(list(labels), (now - min(created)).total_seconds())
+            if created:  # an age of nothing is no sample, not 0
+                oldest.add_metric(list(labels), (now - min(created)).total_seconds())
 
         held = _gauge("locks", "Held state locks, live or stale", place + ["state"])
-        lock_counts: Dict[Tuple[str, ...], int] = defaultdict(int)
+        lock_counts: Dict[Tuple[str, ...], int] = {
+            place + (state,): 0 for place in deployments for state in LOCK_STATES
+        }
         for lock in locks:
-            lock_counts[(lock.store, lock.deployment, lock.group, lock.state)] += 1
+            key = (lock.store, lock.deployment, lock.group, lock.state)
+            lock_counts[key] = lock_counts.get(key, 0) + 1
         for labels, count in sorted(lock_counts.items()):
             held.add_metric(list(labels), count)
 
         since_labels = place + (["definition"] if self.definition_label else [])
         since = _gauge(
             "last_apply_age_seconds",
-            "Seconds since the last apply, when it succeeded"
+            "Seconds since the last successful apply"
             + ("" if self.definition_label else "; the oldest in the deployment"),
             since_labels,
         )
         ages: Dict[Tuple[str, ...], float] = {}
         for health in healths:
-            apply = health.last_apply
-            if apply is None or apply.status != "succeeded":
+            at = successes.get((health.store, health.deployment, health.definition))
+            if at is None:
                 continue
             labels = (health.store, health.deployment, health.group)
             if self.definition_label:
                 labels += (health.definition,)
-            age = (now - apply.at).total_seconds()
+            age = (now - at).total_seconds()
             ages[labels] = max(age, ages.get(labels, age))
         for labels, age in sorted(ages.items()):
             since.add_metric(list(labels), age)
@@ -268,6 +293,8 @@ class FleetCollector:
             "from a local path",
             ["store"],
         )
+        for row in stores:
+            applies.setdefault(row.name, (0, 0))
         for store, (count, local_count) in sorted(applies.items()):
             total.add_metric([store], count)
             local.add_metric([store], local_count)
@@ -299,6 +326,39 @@ class FleetCollector:
             reconciled,
             healthy,
         ]
+
+    @staticmethod
+    def _last_successes(session, healths) -> Dict[Tuple[str, str, str], datetime]:
+        """
+        When each definition last applied successfully.
+
+        The status snapshot keeps only the last apply, so when that one
+        failed, the run records the console still holds are searched for the
+        last that succeeded.
+        """
+        found: Dict[Tuple[str, str, str], datetime] = {}
+        for health in healths:
+            key = (health.store, health.deployment, health.definition)
+            apply = health.last_apply
+            if apply is not None and apply.status == "succeeded":
+                found[key] = apply.at
+                continue
+            if apply is None:
+                continue
+            query = (
+                select(db.RunDefinition.started_at, db.RunDefinition.phases)
+                .where(
+                    db.RunDefinition.store == health.store,
+                    db.RunDefinition.deployment == health.deployment,
+                    db.RunDefinition.definition == health.definition,
+                )
+                .order_by(db.RunDefinition.started_at.desc())
+            )
+            for started_at, phases in session.execute(query):
+                if (phases.get("apply") or {}).get("status") == "succeeded":
+                    found[key] = started_at
+                    break
+        return found
 
     @staticmethod
     def _applies(session, now: datetime) -> Dict[str, Tuple[int, int]]:
@@ -333,10 +393,14 @@ def scrape(request: Request) -> Response:
         return PlainTextResponse("not found", status_code=404)
     header = request.headers.get("Authorization", "")
     token = header[7:].strip() if header[:7].lower() == "bearer " else ""
-    with state.sessions() as session:
-        allowed = bool(token) and metrics_token(
-            session, token, datetime.now(timezone.utc)
-        )
+    try:
+        with state.sessions() as session:
+            allowed = bool(token) and metrics_token(
+                session, token, datetime.now(timezone.utc)
+            )
+    except Exception as e:  # tokens live in the database
+        log.warning(f"unable to check a metrics token: {e}")
+        return PlainTextResponse("unable to check the token", status_code=503)
     if not allowed:
         return PlainTextResponse(
             "send a bearer token with the metrics role",
@@ -363,20 +427,38 @@ class MetricsListener:
     def __init__(self, metrics: "Metrics", host: str, port: int):
         import uvicorn
 
+        self.host = host
+        self.port = port
         self.server = uvicorn.Server(
             uvicorn.Config(
                 listener_app(metrics),
                 host=host,
                 port=port,
-                log_level="warning",
                 lifespan="off",
+                # uvicorn's logging is the console's own; leave it as it is
+                log_config=None,
+                access_log=False,
             )
         )
         self._thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
+        """Bind now, so a port in use stops the console instead of failing quietly."""
+        family = socket.AF_INET6 if ":" in self.host else socket.AF_INET
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((self.host, self.port))
+        except OSError as e:
+            sock.close()
+            raise RuntimeError(
+                f"unable to serve metrics on {self.host}:{self.port}: {e}"
+            ) from e
         self._thread = threading.Thread(
-            target=self.server.run, name="tfworker-console-metrics", daemon=True
+            target=self.server.run,
+            kwargs={"sockets": [sock]},
+            name="tfworker-console-metrics",
+            daemon=True,
         )
         self._thread.start()
 

@@ -270,17 +270,14 @@ class TestFleet:
         assert value(samples, "projection_up") == 0
         assert value(samples, "definitions", health="ok") is None
 
-    def test_cached_briefly(self, sessions):  # noqa: F811
+    def test_cached(self, sessions):  # noqa: F811
         seed(sessions)
         clock = mock.Mock(return_value=100.0)
-        metrics = Metrics(sessions, GROUPS, 3600, now=lambda: NOW, clock=clock)
-        (collector,) = [
-            c
-            for c in metrics.registry._collector_to_names
-            if type(c).__name__ == "FleetCollector"
-        ]
+        metrics = Metrics(
+            sessions, GROUPS, 3600, cache_seconds=10, now=lambda: NOW, clock=clock
+        )
         with mock.patch.object(
-            collector, "_families", wraps=collector._families
+            metrics.fleet, "_families", wraps=metrics.fleet._families
         ) as families:
             metrics.render()
             clock.return_value = 105.0
@@ -289,6 +286,74 @@ class TestFleet:
             clock.return_value = 111.0
             metrics.render()
             assert families.call_count == 2
+
+    def test_cache_default(self, sessions):  # noqa: F811
+        assert Metrics(sessions, GROUPS, 3600).fleet.cache_seconds == 30
+
+    def test_series_go_to_zero(self, sessions):  # noqa: F811
+        seed(sessions)
+        samples = scrape(Metrics(sessions, GROUPS, 3600, now=lambda: NOW))
+        dev = {"store": "dev", "deployment": "sandbox", "group": "Unassigned"}
+        # a recovered or unlocked deployment reads 0, not no data
+        for health in ("failing", "locked", "pending", "drifted"):
+            assert value(samples, "definitions", health=health, **dev) == 0
+        assert value(samples, "locks", state="live", **dev) == 0
+        assert value(samples, "locks", state="stale", **dev) == 0
+        assert value(samples, "pending_plans", **dev) == 0
+        # but an age of nothing is no sample
+        assert value(samples, "oldest_pending_plan_age_seconds", **dev) is None
+        # a store with no applies this week reads 0
+        assert value(samples, "applies", store="new") == 0
+        assert value(samples, "local_module_applies", store="new") == 0
+
+    def test_last_success_from_run_records(self, sessions):  # noqa: F811
+        seed(sessions)
+        with sessions() as session:
+            session.add(
+                db.RunDefinition(
+                    store="prod",
+                    record_id="R9",
+                    deployment="beta",
+                    definition="net",
+                    started_at=NOW - timedelta(hours=5),
+                    phases={"apply": {"status": "succeeded"}},
+                    module_sources=[],
+                    tags=[],
+                    local_modules=False,
+                )
+            )
+            session.commit()
+        samples = scrape(Metrics(sessions, GROUPS, 3600, now=lambda: NOW))
+        beta = {"store": "prod", "deployment": "beta", "group": "Unassigned"}
+        # the last apply failed; the run record says when one last succeeded
+        assert value(samples, "last_apply_age_seconds", definition="net", **beta) == (
+            5 * 3600
+        )
+
+    def test_no_created_series(self, metrics):
+        metrics.observe_request("/livez", "GET", 200, 0.01)
+        assert "_created" not in metrics.render().decode()
+
+    def test_label_names(self, metrics):
+        metrics.observe_request("/livez", "GET", 200, 0.01)
+        metrics.observe_reconcile(StoreSummary(store="prod"), 1.0)
+        metrics.observe_event("other", DROPPED)
+        allowed = {
+            "store",
+            "deployment",
+            "group",
+            "definition",
+            "health",
+            "state",
+            "route",
+            "method",
+            "status",
+            "type",
+            "outcome",
+            "le",
+        }
+        names = {name for _, labels in scrape(metrics) for name, _ in labels}
+        assert names <= allowed
 
     def test_no_database(self):
         samples = scrape(Metrics(None, GROUPS, 3600))
@@ -307,7 +372,28 @@ class TestConsoleMetrics:
         samples = scrape(metrics)
         assert value(samples, "reconcile_objects_read_total", store="prod") == 4
         assert value(samples, "reconcile_errors_total", store="prod") == 2
-        assert value(samples, "reconcile_duration_seconds", store="prod") >= 0
+        assert value(samples, "reconcile_last_duration_seconds", store="prod") >= 0
+
+    def test_failed_reconcile_is_counted(self, sessions):  # noqa: F811
+        metrics = Metrics(None, GROUPS, 3600)
+        reconciler = Reconciler([], sessions)
+        reconciler.observers.append(metrics.observe_reconcile)
+        with mock.patch.object(
+            reconciler, "_reconcile", side_effect=RuntimeError("store gone")
+        ):
+            with pytest.raises(RuntimeError):
+                reconciler.reconcile("prod")
+        samples = scrape(metrics)
+        assert value(samples, "reconcile_errors_total", store="prod") == 1
+
+    def test_unknown_methods(self):
+        metrics = Metrics(None, GROUPS, 3600)
+        metrics.observe_request("unmatched", "BREW", 405, 0.01)
+        metrics.observe_request("unmatched", "GET", 404, 0.01)
+        samples = scrape(metrics)
+        other = {"route": "unmatched", "method": "other", "status": "405"}
+        assert value(samples, "http_requests_total", **other) == 1
+        assert not any(("method", "BREW") in labels for _, labels in samples)
 
     def test_events(self):
         metrics = Metrics(None, GROUPS, 3600)
@@ -416,6 +502,23 @@ class TestEndpoint:
         with pytest.raises(ValueError, match="DATABASE_URL"):
             create_app(ConsoleSettings(metrics="token"))
 
+    def test_token_check_unavailable(self, engine, sessions):  # noqa: F811
+        app = app_with(engine, metrics="token")
+        app.state.sessions = mock.Mock(side_effect=OperationalError("x", {}, None))
+        response = TestClient(app).get(
+            "/metrics", headers={"Authorization": "Bearer t"}
+        )
+        assert response.status_code == 503
+
+    def test_token_with_auth_off(self, engine, sessions):  # noqa: F811
+        # no sign-in still means a scrape needs its token
+        app = app_with(engine, metrics="token", auth="none")
+        client = TestClient(app)
+        assert client.get("/metrics").status_code == 401
+        token = add_token(sessions, "metrics")
+        headers = {"Authorization": f"Bearer {token}"}
+        assert client.get("/metrics", headers=headers).status_code == 200
+
     def test_errors_are_counted(self, engine, sessions):  # noqa: F811
         app = app_with(engine, metrics="token")
 
@@ -451,6 +554,8 @@ class TestEndpoint:
         )
         observe = app.state.metrics.observe_reconcile
         assert observe in app.state.reconciler.observers
+        events = app.state.metrics.observe_event
+        assert events in app.state.events.observers
 
     def test_port_without_a_database(self):
         app = create_app(ConsoleSettings(metrics="port"))
@@ -467,6 +572,15 @@ class TestEndpoint:
             response = wait_for(f"http://127.0.0.1:{port}/metrics")
             assert response.status_code == 200
             assert httpx.get(f"http://127.0.0.1:{port}/livez").status_code == 404
+
+    def test_listener_port_in_use(self):
+        with socket.socket() as taken:
+            taken.bind(("127.0.0.1", 0))
+            taken.listen()
+            port = taken.getsockname()[1]
+            listener = MetricsListener(Metrics(None, GROUPS, 3600), "127.0.0.1", port)
+            with pytest.raises(RuntimeError, match="unable to serve metrics"):
+                listener.start()
 
     def test_listener_stop_before_start(self):
         MetricsListener(Metrics(None, GROUPS, 3600), "127.0.0.1", 0).stop()

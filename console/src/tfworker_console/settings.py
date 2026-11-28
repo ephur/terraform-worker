@@ -37,6 +37,9 @@ class ConsoleSettings(BaseSettings):
     metrics_port: int = 9090
     # label per-definition metrics by definition; turn off for very large fleets
     metrics_definition_label: bool = True
+    # seconds a scrape's fleet metrics are reused, so scrapes don't load the
+    # database
+    metrics_cache_seconds: float = 30.0
     # a lock with no fresh worker lease is shown as stale once older than this
     lock_stale_after: float = 7200.0
 

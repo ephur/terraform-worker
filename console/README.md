@@ -221,10 +221,13 @@ collector. It is off by default:
 | `TFWORKER_CONSOLE_METRICS_HOST` | `0.0.0.0` | Where the `port` listener binds. |
 | `TFWORKER_CONSOLE_METRICS_PORT` | `9090` | The `port` listener's port. Keep it inside the cluster. |
 | `TFWORKER_CONSOLE_METRICS_DEFINITION_LABEL` | `true` | `false` drops the `definition` label for very large fleets. |
+| `TFWORKER_CONSOLE_METRICS_CACHE_SECONDS` | `30` | How long a computed set of fleet metrics is served before the projection is read again. |
 
 Fleet metrics come from the projection when scraped, so every replica reports
-the same values: scrape one replica, or deduplicate. They are cached for 10
-seconds, and the endpoint never reconciles or reads the stores. Labels are
+the same values: scrape one replica, or deduplicate. They are cached (30
+seconds by default), and the endpoint never reconciles or reads the stores.
+Every deployment reports every health, both lock states and a pending plan
+count, so a recovery reads as 0 rather than as a series that went away. Labels are
 `store`, `deployment`, `group` and `definition` only, so cardinality is bounded
 by the fleet; run ids, plan ids, users and resource addresses never become
 labels.
@@ -235,8 +238,8 @@ labels.
 | `tfworker_console_pending_plans` | store, deployment, group | Saved plans waiting to be applied (not previews or expired ones). |
 | `tfworker_console_oldest_pending_plan_age_seconds` | store, deployment, group | Age of the oldest of them. |
 | `tfworker_console_locks` | store, deployment, group, state | Held state locks, `live` or `stale`. |
-| `tfworker_console_last_apply_age_seconds` | store, deployment, group, definition | Seconds since the last apply, when it succeeded. Without the definition label, the oldest in the deployment. |
-| `tfworker_console_applies` | store | Definition applies in the last 7 days. |
+| `tfworker_console_last_apply_age_seconds` | store, deployment, group, definition | Seconds since the last successful apply. When the last apply failed, the run records the console still holds say when one last succeeded; with none, there is no sample. Without the definition label, the oldest in the deployment. |
+| `tfworker_console_applies` | store | Definition applies in the last 7 days; 0 for a store with none. |
 | `tfworker_console_local_module_applies` | store | Of those, applies that used a module from a local path: a trend to watch, not an alert. |
 | `tfworker_console_store_last_reconcile_timestamp_seconds` | store | When the store last finished reconciling, on any replica. |
 | `tfworker_console_store_reconcile_ok` | store | 1 when that reconcile had no errors. |
@@ -246,12 +249,16 @@ Console metrics are each replica's own:
 
 | Metric | Labels | Meaning |
 | --- | --- | --- |
-| `tfworker_console_http_requests_total` | route, method, status | Requests answered, by route template such as `/definitions/{name:path}`. |
-| `tfworker_console_http_request_duration_seconds` | route, method | Latency histogram. |
-| `tfworker_console_reconcile_duration_seconds` | store | How long this replica's last reconcile of the store took. |
+| `tfworker_console_http_requests_total` | route, method, status | Requests answered, by route template such as `/definitions/{name:path}` (`unmatched` for no route). Methods other than the standard ones are counted as `other`. Probes and scrapes are counted too. |
+| `tfworker_console_http_request_duration_seconds` | route, method | Latency histogram, measured to the start of the response (a streamed body isn't included). |
+| `tfworker_console_reconcile_last_duration_seconds` | store | How long this replica's last reconcile of the store took, not counting time waiting for another reconcile of it. |
 | `tfworker_console_reconcile_objects_read_total` | store | Objects read while reconciling. |
-| `tfworker_console_reconcile_errors_total` | store | Objects, deployments or whole reconciles that failed. |
+| `tfworker_console_reconcile_errors_total` | store | Objects, deployments or whole reconciles that failed, including a reconcile that stopped with an error. |
 | `tfworker_console_events_total` | type, outcome | [Events](#events) taken from the queue: `applied`, `unchanged`, `ignored`, `dropped`, `busy` or `failed`. |
+
+In `token` mode a scrape answers 503 when the database can't be reached to
+check the token. With `port`, a port that is already in use stops the console
+from starting rather than leaving it without metrics.
 
 A Datadog agent check, with the token in a secret:
 

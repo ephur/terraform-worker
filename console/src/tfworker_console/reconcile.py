@@ -160,15 +160,22 @@ class Reconciler:
         The store's row is locked for the transaction, so two reconcilers of
         the same store (the schedule and the CLI, or two replicas) take turns.
         """
-        started = time.monotonic()
         with self.turn(name):
-            summary = self._reconcile(name)
+            started = time.monotonic()
+            try:
+                summary = self._reconcile(name)
+            except Exception as e:
+                self._observe(StoreSummary(store=name, errors=[str(e)]), started)
+                raise
+        self._observe(summary, started)
+        return summary
+
+    def _observe(self, summary: StoreSummary, started: float) -> None:
         for observer in self.observers:
             try:
                 observer(summary, time.monotonic() - started)
             except Exception as e:
                 log.warning(f"a reconcile observer failed: {e}")
-        return summary
 
     def _reconcile(self, name: str) -> StoreSummary:
         store = self.stores[name]
