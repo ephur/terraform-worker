@@ -23,6 +23,8 @@ from tfworker.exceptions import (
     TFWorkerException,
 )
 from tfworker.locking import StateLocker
+from tfworker.phases import PhaseDispatcher
+from tfworker.reporting import RunRecorder
 from tfworker.util.duration import parse_duration
 from tfworker.util.provenance import current_run_id
 from tfworker.util.system import pipe_exec, pipe_exec_logged
@@ -83,6 +85,41 @@ class TerraformCommand(BaseCommand):
         if not hasattr(self, "_skips_notified"):
             self._skips_notified: Set[Tuple[str, TerraformAction]] = set()
         return self._skips_notified
+
+    @property
+    def lock_waits(self) -> Dict[str, float]:
+        """Seconds each definition's running phase waited for its state lock."""
+        if not hasattr(self, "_lock_waits"):
+            self._lock_waits: Dict[str, float] = {}
+        return self._lock_waits
+
+    @property
+    def phases(self) -> PhaseDispatcher:
+        """The core components told about each phase, such as run reporting."""
+        if not hasattr(self, "_phases"):
+            recorder = RunRecorder.from_app_state(self.app_state)
+            self._phases = PhaseDispatcher([recorder] if recorder else [])
+        return self._phases
+
+    def _dispatch_phase(
+        self,
+        name: str,
+        action: TerraformAction,
+        stage: TerraformStage,
+        result: Optional["TerraformResult"] = None,
+    ) -> None:
+        """Tell core components that a phase of a definition started, finished or failed."""
+        lock_wait = None
+        if stage != TerraformStage.PRE:
+            lock_wait = self.lock_waits.pop(name, None)
+        self.phases.phase(
+            action,
+            stage,
+            self.app_state.definitions[name],
+            self.app_state.working_dir,
+            result=result,
+            lock_wait=lock_wait,
+        )
 
     def prep_providers(self) -> None:
         """
@@ -621,6 +658,7 @@ class TerraformCommand(BaseCommand):
         if (name, action) in self.skips_notified:
             return
         self.skips_notified.add((name, action))
+        self.phases.skip(action, self.app_state.definitions[name], reason)
         self.app_state.handlers.exec_skip(
             action=action,
             deployment=self.app_state.deployment,
@@ -901,6 +939,7 @@ class TerraformCommand(BaseCommand):
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
+        self._dispatch_phase(name, action, TerraformStage.PRE)
 
         log.trace(
             f"executing {TerraformStage.PRE} {action.value} hooks for definition {name}"
@@ -953,6 +992,7 @@ class TerraformCommand(BaseCommand):
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
+        self._dispatch_phase(name, action, TerraformStage.POST, result)
 
         if action == TerraformAction.APPLY:
             if definition.plan_file is not None:
@@ -994,6 +1034,7 @@ class TerraformCommand(BaseCommand):
             )
         except Exception as e:
             log.error(f"error-stage handler error on definition {name}: {e}")
+        self._dispatch_phase(name, action, TerraformStage.ERROR, result)
 
     def _exec_terraform_pre_plan(self, name: str) -> bool:
         """
@@ -1019,6 +1060,7 @@ class TerraformCommand(BaseCommand):
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
+        self._dispatch_phase(name, TerraformAction.PLAN, TerraformStage.PRE)
 
         log.trace(f"executing pre plan hooks for definition {name}")
         if not self._exec_hook(
@@ -1092,6 +1134,7 @@ class TerraformCommand(BaseCommand):
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
+        self._dispatch_phase(name, TerraformAction.PLAN, TerraformStage.POST, result)
 
         log.trace(f"executing post plan hooks for definition {name}")
         if not self._exec_hook(
@@ -1168,7 +1211,7 @@ class TerraformCommand(BaseCommand):
                 action, name, definition.get_target_path(self.app_state.working_dir)
             )
         finally:
-            definition.lock_wait_seconds = time.monotonic() - started
+            self.lock_waits[name] = time.monotonic() - started
         try:
             return self._run(name, action, lock_deadline=deadline)
         finally:
