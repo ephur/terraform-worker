@@ -33,7 +33,6 @@ worker [OPTIONS] COMMAND [ARGS]...
 | `--backend-plans` / `--no-backend-plans` | `WORKER_BACKEND_PLANS` | `--no-backend-plans` | Store plans in the backend |
 | `--backend-prefix` | `WORKER_BACKEND_PREFIX` | `terraform/state/{deployment}` | Prefix to use in backend storage bucket for all terraform states |
 | `--backend-region` |  | `us-east-1` | Region where terraform root/lock bucket exists |
-| `--backend-use-all-remotes` / `--no-backend-use-all-remotes` | `WORKER_BACKEND_USE_ALL_REMOTES` | `--no-backend-use-all-remotes` | Generate remote data sources based on all definition paths present in the backend |
 | `--config-file` (repeatable) | `WORKER_CONFIG_FILE` | `./worker.yaml` | Path to one or more configuration files |
 | `--config-var` (repeatable) |  |  | key=value to be supplied as jinja variables in config_file under "var" dictionary, can be specified multiple times |
 | `--create-backend-bucket` / `--no-create-backend-bucket` |  | `--create-backend-bucket` | Create the backend bucket if it does not exist |
@@ -178,7 +177,6 @@ worker terraform [OPTIONS] DEPLOYMENT
 | `--plan-ttl` | `WORKER_PLAN_TTL` | `7d` | How long a saved plan may be applied after it was made, such as 12h or 7d |
 | `--provider-cache` | `WORKER_PROVIDER_CACHE` |  | Directory to be used as a cache for provider plugins |
 | `--require-plan-manifest` / `--no-require-plan-manifest` | `WORKER_REQUIRE_PLAN_MANIFEST` | `--no-require-plan-manifest` | Refuse to apply a saved plan that has no manifest (plans saved by older workers) |
-| `--show-output` / `--no-show-output` | `WORKER_SHOW_OUTPUT` | `--show-output` | Show output from terraform commands |
 | `--stream-output` / `--no-stream-output` | `WORKER_STREAM_OUTPUT` | `--stream-output` | Stream the output from terraform command |
 | `--strict-locking` / `--no-strict-locking` | `WORKER_STRICT_LOCKING` | `--strict-locking` | Enable strict locking for terraform providers (fail if pinned providers do not meet constraints) |
 | `--target` (repeatable) | `WORKER_TARGET` |  | Target specific resources for apply/destroy, can be specified multiple times |
