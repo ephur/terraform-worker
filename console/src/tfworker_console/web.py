@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from tfworker.util.duration import format_duration
 
 from . import db, queries
 from .api import get_now, get_scope, get_session, stale_after
@@ -18,6 +19,7 @@ from .queries import Scope
 templates = Jinja2Templates(
     directory=str(resources.files("tfworker_console") / "templates")
 )
+templates.env.globals["format_duration"] = format_duration
 router = APIRouter(include_in_schema=False)
 
 
@@ -40,11 +42,13 @@ def _render(request: Request, name: str, session: Session, scope: Scope, **conte
             "partial": partial,
             "scope": scope,
             "stores": sorted({store for store, _ in deployments}),
+            "groups": scope.resolver.names,
             "all_deployments": sorted({name for _, name in deployments}),
             # appended to links so the scope follows navigation
             "scope_query": urlencode(
                 [("store", s) for s in scope.stores]
                 + [("deployment", d) for d in scope.deployments]
+                + [("group", g) for g in scope.groups]
             ),
             **context,
         },
@@ -62,6 +66,22 @@ def fleet_page(
 ):
     return _render(
         request, "fleet.html", session, scope, fleet=queries.fleet(session, scope, now)
+    )
+
+
+@router.get("/groups", response_class=HTMLResponse)
+def groups_page(
+    request: Request,
+    session: Session = Depends(get_session),
+    scope: Scope = Depends(get_scope),
+    now: datetime = Depends(get_now),
+):
+    return _render(
+        request,
+        "groups.html",
+        session,
+        scope,
+        group_views=queries.groups(session, scope, now),
     )
 
 

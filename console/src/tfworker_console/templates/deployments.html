@@ -3,14 +3,14 @@
 {% block content %}
 <h1>Deployments</h1>
 <table>
-  <tr><th>Deployment</th><th>Store</th><th>Definitions</th><th>Failing</th><th>Drifted</th><th>Pending</th><th>Locked</th><th>Prefix</th><th>Last seen</th></tr>
+  <tr><th>Deployment</th><th>Group</th><th>Store</th><th>Definitions</th><th>Failing</th><th>Drifted</th><th>Pending</th><th>Locked</th><th>Prefix</th><th>Last seen</th></tr>
   {% for d in deployments %}
   <tr>
-    <td><a href="/?store={{ d.store | urlencode }}&amp;deployment={{ d.deployment | urlencode }}">{{ d.deployment }}</a>{% if d.record_name %} <span class="muted">({{ d.record_name }})</span>{% endif %}</td><td>{{ d.store }}</td><td>{{ d.definitions }}</td>
+    <td><a href="/?store={{ d.store | urlencode }}&amp;deployment={{ d.deployment | urlencode }}">{{ d.deployment }}</a>{% if d.record_name %} <span class="muted">({{ d.record_name }})</span>{% endif %}</td><td>{{ d.group }}</td><td>{{ d.store }}</td><td>{{ d.definitions }}</td>
     <td class="h-failing">{{ d.counts.failing or '' }}</td><td class="h-drifted">{{ d.counts.drifted or '' }}</td>
     <td class="h-pending">{{ d.counts.pending or '' }}</td><td class="h-locked">{{ d.counts.locked or '' }}</td>
     <td><code>{{ d.prefix }}</code></td><td class="muted">{{ d.last_seen.strftime('%Y-%m-%d %H:%M') }}</td>
   </tr>
-  {% else %}<tr><td colspan="9" class="muted">No deployments yet. Run a reconcile.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="10" class="muted">No deployments yet. Run a reconcile.</td></tr>{% endfor %}
 </table>
 {% endblock %}

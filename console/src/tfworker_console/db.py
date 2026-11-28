@@ -43,6 +43,8 @@ class Deployment(Base):
     record_name: Mapped[Optional[str]] = mapped_column(String(255))
     # "record" when run records name the deployment differently, else "template"
     discovered_from: Mapped[str] = mapped_column(String(16))
+    # the deployment group it is in, kept current from the groups file
+    group_name: Mapped[Optional[str]] = mapped_column(String(64), index=True)
     first_seen: Mapped[datetime]
     last_seen: Mapped[datetime]
 

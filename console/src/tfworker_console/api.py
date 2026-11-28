@@ -20,13 +20,18 @@ def get_session(request: Request):
 
 
 def get_scope(
+    request: Request,
+    session: Session = Depends(get_session),
     store: List[str] = Query(default=[], description="Only these stores"),
     deployment: List[str] = Query(default=[], description="Only these deployments"),
+    group: List[str] = Query(default=[], description="Only these deployment groups"),
 ) -> Scope:
     # the screens' pickers send an empty value for "all"
     return Scope(
         stores=[name for name in store if name],
         deployments=[name for name in deployment if name],
+        groups=[name for name in group if name],
+        resolver=request.app.state.groups,
     )
 
 
@@ -70,6 +75,16 @@ def fleet(
 ):
     """Health counts, and every definition that is not ok, exceptions first."""
     return queries.fleet(session, scope, now)
+
+
+@router.get("/groups", response_model=List[queries.GroupView])
+def groups(
+    session: Session = Depends(get_session),
+    scope: Scope = Depends(get_scope),
+    now: datetime = Depends(get_now),
+):
+    """Deployment groups in sort order, with policy, members and health counts."""
+    return queries.groups(session, scope, now)
 
 
 @router.get("/deployments", response_model=List[queries.DeploymentSummary])
