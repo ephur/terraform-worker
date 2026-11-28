@@ -7,6 +7,8 @@ Revises: 0004
 import sqlalchemy as sa
 from alembic import op
 
+from tfworker_console.sqltypes import Timestamp
+
 revision = "0005"
 down_revision = "0004"
 branch_labels = None
@@ -17,7 +19,7 @@ def upgrade() -> None:
     op.create_table(
         "audit_log",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("at", Timestamp(), nullable=False),
         sa.Column("actor", sa.String(length=255), nullable=False),
         sa.Column("actor_kind", sa.String(length=16), nullable=False),
         sa.Column("action", sa.String(length=32), nullable=False),
