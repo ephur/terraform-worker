@@ -1,5 +1,6 @@
 import math
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -37,6 +38,10 @@ if TYPE_CHECKING:
 
 # terraform prints this when it gives up waiting for a held state lock
 LOCK_ERROR_MARKER = b"Error acquiring the state lock"
+
+
+# guards lazily created state that worker threads can touch first
+_LAZY_LOCK = threading.Lock()
 
 
 class TerraformCommand(BaseCommand):
@@ -89,8 +94,10 @@ class TerraformCommand(BaseCommand):
     @property
     def lock_waits(self) -> Dict[str, float]:
         """Seconds each definition's running phase waited for its state lock."""
-        if not hasattr(self, "_lock_waits"):
-            self._lock_waits: Dict[str, float] = {}
+        # first touched from the parallel init threads, so create it only once
+        with _LAZY_LOCK:
+            if not hasattr(self, "_lock_waits"):
+                self._lock_waits: Dict[str, float] = {}
         return self._lock_waits
 
     @property
@@ -109,9 +116,11 @@ class TerraformCommand(BaseCommand):
         result: Optional["TerraformResult"] = None,
     ) -> None:
         """Tell core components that a phase of a definition started, finished or failed."""
-        lock_wait = None
-        if stage != TerraformStage.PRE:
-            lock_wait = self.lock_waits.pop(name, None)
+        # taken at every stage, so a wait left by an earlier phase that never
+        # finished is dropped at the next PRE rather than reported again
+        lock_wait = self.lock_waits.pop(name, None)
+        if stage == TerraformStage.PRE:
+            lock_wait = None
         self.phases.phase(
             action,
             stage,
@@ -650,7 +659,8 @@ class TerraformCommand(BaseCommand):
 
     def _notify_skip(self, name: str, action: TerraformAction, reason: str) -> None:
         """
-        Tell handlers that a phase passed over a definition without running terraform.
+        Tell handlers and core components that a phase passed over a definition
+        without running terraform.
 
         Each definition is reported at most once per action: the apply phase
         can reach a definition the plan phase already passed over.
@@ -667,7 +677,7 @@ class TerraformCommand(BaseCommand):
         )
 
     def _notify_halted(self, names: List[str], action: TerraformAction) -> None:
-        """Tell handlers about the definitions an earlier failure kept the phase from reaching."""
+        """Report the definitions an earlier failure kept the phase from reaching as skipped."""
         for name in names:
             self._notify_skip(
                 name, action, f"{action.value} halted by an earlier failure"
@@ -991,6 +1001,8 @@ class TerraformCommand(BaseCommand):
             )
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
+            # terraform succeeded; record that before the handler ends the run
+            self._dispatch_phase(name, action, TerraformStage.POST, result)
             self.ctx.exit(2)
         self._dispatch_phase(name, action, TerraformStage.POST, result)
 
@@ -1133,6 +1145,10 @@ class TerraformCommand(BaseCommand):
             )
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
+            # terraform succeeded; record that before the handler ends the run
+            self._dispatch_phase(
+                name, TerraformAction.PLAN, TerraformStage.POST, result
+            )
             self.ctx.exit(2)
         self._dispatch_phase(name, TerraformAction.PLAN, TerraformStage.POST, result)
 
