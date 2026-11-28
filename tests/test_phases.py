@@ -34,11 +34,6 @@ class Broken(PhaseListener):
     setup = phase = skip = teardown = _boom
 
 
-def test_empty_dispatcher_is_falsy():
-    assert not PhaseDispatcher()
-    assert PhaseDispatcher([PhaseListener()])
-
-
 def test_base_listener_ignores_everything():
     dispatcher = PhaseDispatcher([PhaseListener()])
     dispatcher.setup("dep")

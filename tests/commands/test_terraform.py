@@ -2585,7 +2585,7 @@ class TestPhaseDispatch:
 
     def test_off_without_reporting(self, tmp_path):
         cmd = make_command(tmp_path)
-        assert not cmd.phases
+        assert cmd.phases.listeners == []
         assert cmd.phases is cmd.phases
 
     def test_recorder_when_reporting_is_configured(self, tmp_path):
@@ -2603,8 +2603,12 @@ class TestPhaseDispatch:
         phases = mocker.patch.object(cmd, "_phases", create=True)
         mocker.patch.object(cmd, "_exec_hook", return_value=True)
         result = TerraformResult(0, b"", b"")
-        mocker.patch.object(cmd, "_run_locked", return_value=result)
-        cmd.lock_waits["def"] = 3.0
+
+        def run_locked(name, action):
+            cmd.lock_waits[name] = 3.0
+            return result
+
+        mocker.patch.object(cmd, "_run_locked", side_effect=run_locked)
         cmd._exec_terraform_action("def", TerraformAction.APPLY)
         assert self._calls(phases) == [
             (TerraformAction.APPLY, TerraformStage.PRE),
@@ -2648,3 +2652,110 @@ class TestPhaseDispatch:
         phases.skip.assert_called_once_with(
             TerraformAction.PLAN, cmd.app_state.definitions["def"], "no changes"
         )
+
+    def test_post_handler_error_still_records_success(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        phases = mocker.patch.object(cmd, "_phases", create=True)
+        mocker.patch.object(cmd, "_exec_hook", return_value=True)
+        mocker.patch.object(
+            cmd, "_run_locked", return_value=TerraformResult(0, b"", b"")
+        )
+
+        def fail_post(**kw):
+            if kw["stage"] == TerraformStage.POST:
+                raise HandlerError("slack down")
+
+        cmd.app_state.handlers.exec_handlers.side_effect = fail_post
+        with pytest.raises(SystemExit):
+            cmd._exec_terraform_action("def", TerraformAction.APPLY)
+        assert self._calls(phases)[-1] == (TerraformAction.APPLY, TerraformStage.POST)
+        cmd.ctx.exit.assert_called_once_with(2)
+
+    def test_post_plan_handler_error_still_records_success(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        phases = mocker.patch.object(cmd, "_phases", create=True)
+        mocker.patch.object(cmd, "_exec_hook", return_value=True)
+        mocker.patch.object(cmd, "_generate_plan_output_json")
+        mocker.patch.object(
+            cmd, "_run_locked", return_value=TerraformResult(2, b"", b"")
+        )
+        cmd.app_state.handlers.exec_handlers.side_effect = HandlerError("down")
+        with pytest.raises(SystemExit):
+            cmd._exec_terraform_plan("def")
+        assert self._calls(phases) == [(TerraformAction.PLAN, TerraformStage.POST)]
+
+    def test_pre_drops_a_stale_lock_wait(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        phases = mocker.patch.object(cmd, "_phases", create=True)
+        cmd.lock_waits["def"] = 9.0
+        cmd._dispatch_phase("def", TerraformAction.APPLY, TerraformStage.PRE)
+        assert phases.phase.call_args.kwargs["lock_wait"] is None
+        assert "def" not in cmd.lock_waits
+
+    def test_order_is_handlers_then_core_then_hooks(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        order = []
+        phases = mocker.patch.object(cmd, "_phases", create=True)
+        phases.phase.side_effect = lambda a, s, *r, **k: order.append(("core", s))
+        cmd.app_state.handlers.exec_handlers.side_effect = lambda **k: order.append(
+            ("handlers", k["stage"])
+        )
+
+        def hook(definition, action, stage, result=None):
+            order.append(("hooks", stage))
+            return True
+
+        mocker.patch.object(cmd, "_exec_hook", side_effect=hook)
+        mocker.patch.object(
+            cmd, "_run_locked", return_value=TerraformResult(0, b"", b"")
+        )
+        cmd._exec_terraform_action("def", TerraformAction.APPLY)
+        pre, post = TerraformStage.PRE, TerraformStage.POST
+        assert order == [
+            ("handlers", pre),
+            ("core", pre),
+            ("hooks", pre),
+            ("handlers", post),
+            ("core", post),
+            ("hooks", post),
+        ]
+
+    @pytest.mark.parametrize("stage", [TerraformStage.PRE, TerraformStage.POST])
+    def test_hook_failure_is_core_error(self, tmp_path, mocker, stage):
+        cmd = make_command(tmp_path)
+        phases = mocker.patch.object(cmd, "_phases", create=True)
+        mocker.patch.object(
+            cmd, "_exec_hook", side_effect=lambda d, a, s, r=None: s != stage
+        )
+        mocker.patch.object(
+            cmd, "_run_locked", return_value=TerraformResult(0, b"", b"")
+        )
+        cmd._exec_terraform_action("def", TerraformAction.APPLY, exit_on_error=False)
+        action, last = self._calls(phases)[-1]
+        assert (action, last) == (TerraformAction.APPLY, TerraformStage.ERROR)
+        assert phases.phase.call_args.kwargs["result"].exit_code == 2
+
+    def test_lock_unavailable_is_core_error_with_wait(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        phases = mocker.patch.object(cmd, "_phases", create=True)
+        mocker.patch.object(cmd, "_exec_hook", return_value=True)
+        locker = with_locking(cmd)
+        locker.acquire.side_effect = LockUnavailableError("held")
+        cmd._exec_terraform_action("def", TerraformAction.APPLY, exit_on_error=False)
+        assert self._calls(phases)[-1] == (TerraformAction.APPLY, TerraformStage.ERROR)
+        assert phases.phase.call_args.kwargs["lock_wait"] is not None
+
+    def test_init_failure_is_core_error(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        phases = mocker.patch.object(cmd, "_phases", create=True)
+        cmd._record_init_failure("def", "prepare failed")
+        assert self._calls(phases) == [(TerraformAction.INIT, TerraformStage.ERROR)]
+
+    def test_core_error_survives_a_failing_error_handler(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        phases = mocker.patch.object(cmd, "_phases", create=True)
+        cmd.app_state.handlers.exec_handlers.side_effect = RuntimeError("boom")
+        cmd._exec_error_handlers(
+            "def", TerraformAction.PLAN, TerraformResult(1, b"", b"")
+        )
+        assert self._calls(phases) == [(TerraformAction.PLAN, TerraformStage.ERROR)]

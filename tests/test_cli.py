@@ -197,6 +197,7 @@ class TestCliCommands:
         assert result.exit_code == 1
         tfc.prep_providers.assert_not_called()
         tfc.app_state.handlers.exec_teardown.assert_not_called()
+        tfc.phases.teardown.assert_called_once_with("dep")
 
     def test_terraform_core_phases_wrap_the_run(self, mocker):
         """Core listeners start before handlers and finish before handler teardown."""
