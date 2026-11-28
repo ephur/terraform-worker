@@ -9,20 +9,15 @@ deployment is the prefix segment its state lives under.
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import (
-    JSON,
-    DateTime,
-    ForeignKeyConstraint,
-    String,
-    create_engine,
-    event,
-)
+from sqlalchemy import JSON, ForeignKeyConstraint, String, create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
+from .sqltypes import Timestamp
+
 
 class Base(DeclarativeBase):
-    type_annotation_map = {datetime: DateTime(timezone=True), dict: JSON}
+    type_annotation_map = {datetime: Timestamp, dict: JSON}
 
 
 class Store(Base):
