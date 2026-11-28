@@ -1,14 +1,14 @@
-"""Report handler for terraform-worker.
+"""
+Run reporting: a durable record of each run beside the state it touched.
 
-Writes a durable record of each run beside the state it touched, so a
-dashboard or a script can answer when a definition was last planned or
+A dashboard or a script can then answer when a definition was last planned or
 applied, how long it took, what is pending and what failed. The worker never
 serves these records; it only writes them.
 
 Two kinds of object are written under ``<prefix>/_tfworker/``:
 
-- ``runs/YYYY/MM/DD/<record_id>.json``: one immutable ``tfworker.run/v1`` record
-  per run, written when the run ends, even when it failed.
+- ``runs/YYYY/MM/DD/<record_id>.json``: one immutable ``tfworker.run/v1``
+  record per run, written when the run ends, even when it failed.
 - ``status/<definition>.json``: the latest ``tfworker.status/v1`` snapshot of
   each definition, updated with a conditional write and retried when another
   run updated it first.
@@ -16,13 +16,13 @@ Two kinds of object are written under ``<prefix>/_tfworker/``:
 Records hold resource addresses, actions, counts and timings. They never hold
 attribute values from plans or state.
 
-Example configuration::
+Reporting is core, configured by the top-level ``reporting`` block and off
+when it is absent::
 
-    handlers:
-      report:
-        resources: true        # record changed resource addresses in run records
-        state_serials: true    # read state lineage and serial around plan and apply
-        tracked_ref: origin/main   # default: the remote's default branch
+    reporting:
+      resources: true        # record changed resource addresses in run records
+      state_serials: true    # read state lineage and serial around plan and apply
+      tracked_ref: origin/main   # default: the remote's default branch
 """
 
 import json
@@ -32,34 +32,32 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Dict, Optional, Union
-
-import click
-from pydantic import BaseModel, ConfigDict, Field
+from typing import TYPE_CHECKING, Callable, Dict, Optional
 
 import tfworker.report.events as events
 import tfworker.util.log as log
+from tfworker.custom_types.config_file import ReportingOptions
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import BackendError, ReportConflictError
-from tfworker.report import (
+from tfworker.phases import PhaseListener
+from tfworker.report.events import RUN_EVENT, STATUS_EVENT
+from tfworker.report.models import (
+    LOCAL_MODULE_TAG,
+    STATUS_SCHEMA,
     ChangeSummary,
     DefinitionResult,
     DefinitionStatus,
     PhaseResult,
     Provenance,
     RunRecord,
-    new_ulid,
 )
-from tfworker.report.events import RUN_EVENT, STATUS_EVENT
-from tfworker.report.models import LOCAL_MODULE_TAG, STATUS_SCHEMA
 from tfworker.report.status import merge_status
+from tfworker.report.ulid import new_ulid
 from tfworker.util.provenance import current_run_id, module_sources, run_provenance
 from tfworker.util.system import strip_ansi
 
-from .base import BaseHandler
-from .registry import HandlerRegistry
-
 if TYPE_CHECKING:  # pragma: no cover
+    from tfworker.app_state import AppState
     from tfworker.commands.terraform import TerraformResult
     from tfworker.definitions.model import Definition
 
@@ -67,35 +65,15 @@ if TYPE_CHECKING:  # pragma: no cover
 _BOX = re.compile(r"^[\s│╷╵]+")
 REASON_LIMIT = 300
 
-REPORTED_ACTIONS = [
-    TerraformAction.INIT,
-    TerraformAction.PLAN,
-    TerraformAction.APPLY,
-    TerraformAction.DESTROY,
-]
 
-
-class ReportConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    resources: bool = True
-    state_serials: bool = True
-    tracked_ref: Optional[str] = None
-    status_retries: int = Field(5, ge=1)
-
-
-@HandlerRegistry.register("report")
-class ReportHandler(BaseHandler):
+class RunRecorder(PhaseListener):
     """Records each run and each definition's latest status beside its state."""
 
-    actions = REPORTED_ACTIONS
-    config_model = ReportConfig
-    # run last at PRE and POST, so other handlers' work counts in the timings
-    default_priority = {action: 1000 for action in REPORTED_ACTIONS}
+    name = "run reporting"
 
-    def __init__(self, config: ReportConfig):
-        self.config = config
-        self._app_state = None
+    def __init__(self, options: ReportingOptions, app_state: "AppState"):
+        self.options = options
+        self.app_state = app_state
         self._lock = threading.Lock()
         self._results: Dict[str, DefinitionResult] = {}
         self._phase_starts: Dict[tuple, datetime] = {}
@@ -104,15 +82,19 @@ class ReportHandler(BaseHandler):
         self._started_at: Optional[datetime] = None
         self._deployment: Optional[str] = None
         self._record_id = new_ulid()
-        self._warned_not_ready = False
         self._now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
         self._sleep: Callable[[float], None] = time.sleep
 
-    @property
-    def app_state(self):
-        if self._app_state is None:
-            self._app_state = click.get_current_context().obj
-        return self._app_state
+    @classmethod
+    def from_app_state(cls, app_state: "AppState") -> Optional["RunRecorder"]:
+        """The recorder when `reporting` is configured and the backend can hold records."""
+        options = getattr(app_state.loaded_config, "reporting", None)
+        if options is None:
+            return None
+        if not getattr(app_state.backend, "report_storage", False):
+            log.warn("reporting is configured but the backend cannot store reports")
+            return None
+        return cls(options, app_state)
 
     @property
     def backend(self):
@@ -124,50 +106,25 @@ class ReportHandler(BaseHandler):
             self._run_id, self._run_id_generated = current_run_id(self.app_state)
         return self._run_id
 
-    def is_ready(self) -> bool:
-        backend = getattr(self.app_state, "backend", None)
-        ready = bool(getattr(backend, "report_storage", False))
-        if not ready and backend is not None and not self._warned_not_ready:
-            log.warn("the backend cannot store reports; the report handler is off")
-            self._warned_not_ready = True
-        return ready
-
-    def setup(self, deployment, definitions, working_dir, terraform_options) -> None:
+    def setup(self, deployment: str) -> None:
         self._deployment = deployment
         self._started_at = self._now()
         log.info(f"recording this run as {self.run_id}")
 
-    def execute(
-        self,
-        action: TerraformAction,
-        stage: TerraformStage,
-        deployment: str,
-        definition: "Definition",
-        working_dir: str,
-        result: Union["TerraformResult", None] = None,
-    ) -> None:
-        # reporting must never change the outcome of a run
-        try:
-            self._execute(action, stage, definition, working_dir, result)
-        except Exception as e:
-            log.warn(
-                f"unable to record {action.value} {stage.value} for "
-                f"{definition.name}: {type(e).__name__}: {e}"
-            )
-
-    def _execute(
+    def phase(
         self,
         action: TerraformAction,
         stage: TerraformStage,
         definition: "Definition",
         working_dir: str,
-        result: Optional["TerraformResult"],
+        result: Optional["TerraformResult"] = None,
+        lock_wait: Optional[float] = None,
     ) -> None:
         self._ensure_entry(definition.name)
         if stage == TerraformStage.PRE:
             with self._lock:
                 self._phase_starts[(definition.name, action)] = self._now()
-            if action == TerraformAction.PLAN and self.config.state_serials:
+            if action == TerraformAction.PLAN and self.options.state_serials:
                 lineage = self._state_version(definition.name)
                 with self._lock:
                     entry = self._results[definition.name]
@@ -192,7 +149,7 @@ class ReportHandler(BaseHandler):
                 )
             return
 
-        phase = self._phase(action, definition, result, succeeded)
+        phase = self._phase(action, definition, result, succeeded, lock_wait)
         with self._lock:
             self._results[definition.name].phases[action.value] = phase
 
@@ -206,7 +163,7 @@ class ReportHandler(BaseHandler):
                 self._results[definition.name].module_sources = sources
         if action in (TerraformAction.APPLY, TerraformAction.DESTROY):
             applied = None
-            if self.config.state_serials:
+            if self.options.state_serials:
                 version = self._state_version(definition.name)
                 applied = version[1] if version else None
             with self._lock:
@@ -216,7 +173,9 @@ class ReportHandler(BaseHandler):
                     if LOCAL_MODULE_TAG not in entry.tags:
                         entry.tags.append(LOCAL_MODULE_TAG)
 
-    def skip(self, action, deployment, definition, reason) -> None:
+    def skip(
+        self, action: TerraformAction, definition: "Definition", reason: str
+    ) -> None:
         self._ensure_entry(definition.name)
         with self._lock:
             entry = self._results[definition.name]
@@ -225,7 +184,7 @@ class ReportHandler(BaseHandler):
                     action=action.value, status="skipped", reason=reason
                 )
 
-    def teardown(self, deployment: str, working_dir: str) -> None:
+    def teardown(self, deployment: str) -> None:
         with self._lock:
             # a phase that started but never finished: the run stopped under it
             for (name, action), started in self._phase_starts.items():
@@ -264,6 +223,7 @@ class ReportHandler(BaseHandler):
         definition: "Definition",
         result: Optional["TerraformResult"],
         succeeded: bool,
+        lock_wait: Optional[float],
     ) -> PhaseResult:
         with self._lock:
             started = self._phase_starts.pop((definition.name, action), None)
@@ -272,8 +232,6 @@ class ReportHandler(BaseHandler):
         duration = getattr(result, "duration", None)
         if duration is None and started is not None:
             duration = (finished - started).total_seconds()
-        wait = definition.lock_wait_seconds
-        definition.lock_wait_seconds = None
         return PhaseResult(
             action=action.value,
             status="succeeded" if succeeded else "failed",
@@ -282,7 +240,7 @@ class ReportHandler(BaseHandler):
             duration_seconds=duration,
             exit_code=getattr(result, "exit_code", None),
             reason=None if succeeded else self._failure_reason(result),
-            lock_wait_seconds=wait,
+            lock_wait_seconds=lock_wait,
         )
 
     @staticmethod
@@ -314,7 +272,7 @@ class ReportHandler(BaseHandler):
         except (OSError, ValueError) as e:
             log.warn(f"unable to read plan changes for {definition.name}: {e}")
             return None
-        return summary if self.config.resources else summary.counts_only()
+        return summary if self.options.resources else summary.counts_only()
 
     def _state_version(self, name: str):
         try:
@@ -324,7 +282,7 @@ class ReportHandler(BaseHandler):
             return None
 
     def _provenance(self) -> Provenance:
-        return run_provenance(self.app_state, self.config.tracked_ref)
+        return run_provenance(self.app_state, self.options.tracked_ref)
 
     def _record(self, results) -> RunRecord:
         tf = self.app_state.terraform_options
@@ -371,7 +329,7 @@ class ReportHandler(BaseHandler):
 
     def _write_status(self, record: RunRecord, result: DefinitionResult) -> None:
         path = f"status/{result.definition}.json"
-        for attempt in range(self.config.status_retries):
+        for attempt in range(self.options.status_retries):
             if attempt:
                 self._sleep(random.uniform(0.05, 0.25) * 2**attempt)
             try:
@@ -412,7 +370,7 @@ class ReportHandler(BaseHandler):
                 return
         log.warn(
             f"gave up updating the status {path} after "
-            f"{self.config.status_retries} conflicting writes"
+            f"{self.options.status_retries} conflicting writes"
         )
 
 

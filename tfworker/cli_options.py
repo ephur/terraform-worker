@@ -99,7 +99,7 @@ class CLIOptionsRoot(FreezableBaseModel):
     run_label: Optional[List[str]] = Field(
         None,
         json_schema_extra={"env": "WORKER_RUN_LABELS"},
-        description="key=value recorded on the run by the report handler, such as origin=ci; repeatable, or comma separated",
+        description="key=value recorded on the run by run reporting, such as origin=ci; repeatable, or comma separated",
     )
     create_backend_bucket: bool = Field(
         True, description="Create the backend bucket if it does not exist"
@@ -314,7 +314,7 @@ class CLIOptionsTerraform(FreezableBaseModel):
     intent: Optional[str] = Field(
         None,
         json_schema_extra={"env": "WORKER_INTENT"},
-        description="Optional: what the run's plans are for (deploy, preview or drift), recorded by the report handler",
+        description="Optional: what the run's plans are for (deploy, preview or drift), recorded by run reporting",
     )
     lock_timeout: Optional[str] = Field(
         None,
