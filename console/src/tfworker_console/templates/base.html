@@ -23,6 +23,10 @@
     .health { font-weight: 600; } .h-failing { color: var(--failing); } .h-drifted { color: var(--drifted); }
     .h-pending { color: var(--pending); } .h-locked, .h-stale { color: var(--locked); } .h-ok, .h-live { color: var(--ok); }
     .counts span { margin-right: 16px; } code { font-size: 12px; }
+    form.act { display: inline-flex; gap: 4px; margin: 0 4px 4px 0; } form.act input { width: 9em; }
+    .notice { padding: 6px 10px; border: 1px solid var(--line); border-left-width: 4px; }
+    .notice.ok { border-left-color: var(--ok); } .notice.bad { border-left-color: var(--failing); }
+    .outcome-refused, .outcome-forbidden, .outcome-failed { color: var(--failing); }
     .dev-banner { background: var(--drifted); color: #fff; padding: 6px 16px; font-weight: 600; }
   </style>
 </head>
@@ -31,7 +35,7 @@
 <header>
   <strong>tfworker console</strong>
   <a href="/{% if scope_query %}?{{ scope_query }}{% endif %}">Fleet</a><a href="/groups{% if scope_query %}?{{ scope_query }}{% endif %}">Groups</a><a href="/deployments{% if scope_query %}?{{ scope_query }}{% endif %}">Deployments</a><a href="/plans{% if scope_query %}?{{ scope_query }}{% endif %}">Plans</a>
-  <a href="/locks{% if scope_query %}?{{ scope_query }}{% endif %}">Locks</a><a href="/runs{% if scope_query %}?{{ scope_query }}{% endif %}">Runs</a><a href="/tracking/local-modules{% if scope_query %}?{{ scope_query }}{% endif %}">Local modules</a>
+  <a href="/locks{% if scope_query %}?{{ scope_query }}{% endif %}">Locks</a><a href="/runs{% if scope_query %}?{{ scope_query }}{% endif %}">Runs</a><a href="/tracking/local-modules{% if scope_query %}?{{ scope_query }}{% endif %}">Local modules</a><a href="/audit{% if scope_query %}?{{ scope_query }}{% endif %}">Audit</a>
   <form class="picker" hx-get="{{ request.url.path }}" hx-target="main" hx-push-url="true" hx-trigger="change">
     <select name="group" aria-label="Group">
       <option value="">All groups</option>

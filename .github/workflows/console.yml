@@ -96,7 +96,7 @@ jobs:
       - name: Run the projection tests against Postgres
         env:
           TFWORKER_CONSOLE_TEST_DATABASE_URL: postgresql+psycopg://postgres:console@localhost:5432/console
-        run: uv run --package tfworker-console pytest -p no:warnings --no-cov tests/test_reconcile.py tests/test_api.py tests/test_groups.py tests/test_auth.py tests/test_demo.py tests/test_dialects.py
+        run: uv run --package tfworker-console pytest -p no:warnings --no-cov tests/test_reconcile.py tests/test_api.py tests/test_groups.py tests/test_auth.py tests/test_demo.py tests/test_actions.py tests/test_dialects.py
 
   image:
     name: Console image builds

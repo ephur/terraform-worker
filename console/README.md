@@ -296,3 +296,55 @@ Integrations send `Authorization: Bearer <token>` to `/api/v1`:
 
 The token is printed once; the console keeps only its SHA-256 hash.
 Rebuilding the projection keeps accounts and tokens.
+
+## Plan and lock actions
+
+Operators curate saved plans from `/plans`, or with the API. Each action
+reads the plan's manifest again from the store and moves it with the same
+conditional write the worker uses, so a run taking the plan at the same
+moment either wins or makes the action fail cleanly. The move is recorded in
+the manifest's history with who made it and why.
+
+| Action | API | What it does |
+|---|---|---|
+| Re-check | `POST /api/v1/plans/{store}/{plan_id}/recheck` | compares the plan with its state now; marks it `stale` when the state moved on or is gone, `expired` past its expiry, and leaves it pending otherwise |
+| Expire | `POST /api/v1/plans/{store}/{plan_id}/expire` | marks a plan `expired` once it is past its own expiry or its group's plan TTL |
+| Discard | `POST /api/v1/plans/{store}/{plan_id}/discard` with `{"reason": "..."}` | marks a pending plan `discarded`; the reason is required |
+
+Each action needs the operator role on the plan's group, and works only on
+a pending plan. A plan that leaves pending also loses its plan file and log,
+as when the worker retires one; its manifest stays as the record. The console
+only deletes a plan file that sits under the plan's own definition in its
+deployment, and a re-check only reads that definition's own state, whatever
+the manifest names, so a forged manifest can't reach another deployment.
+
+A state lock can be force-unlocked from `/locks`, or with
+`POST /api/v1/locks/{store}/{deployment}/{definition}/force-unlock` and
+`{"lock_id": "...", "confirm": "<definition>"}`, only when it is provably
+dead:
+- its holder's worker lease stopped beating, or
+- it has no lease and is older than `TFWORKER_CONSOLE_LOCK_STALE_AFTER`.
+
+The console reads the lock and lease from the store again rather than
+trusting the last reconcile, and removes the lock only if it is still the
+same object, so a lock taken in the meantime is left alone. The dead
+holder's lease is removed with it if it is unchanged; if that fails, the
+unlock still counts as done and says so. The group's `force_unlock` policy says
+whether operators or only admins may do it, and the person must type the
+definition's name to confirm.
+
+Every attempt is written to the audit log, including those refused for a
+role, a live lock or a plan that is no longer pending. The entry is written
+as `started` before the store is touched and then given its outcome, so an
+entry left `started` means the console stopped partway through.
+`GET /api/v1/audit` and `/audit` show it, newest first, to whoever may see
+the deployment's group. The audit log is kept when the projection is rebuilt.
+
+The console writes only plan manifests and their index entries under
+`<prefix>/_tfworker/`, retired plan files and logs, `*.tflock` objects and
+`*.tfworker-lease.*` objects. Re-checking a plan reads its state file. The
+console's role needs `s3:GetObject` on the state files for re-checks, and
+`s3:PutObject` and `s3:DeleteObject` on those keys. The read-only reconciler
+needs none of these. Actions are refused while the console shows the demo. On the screens, each
+action sends the browser back to `/plans` or `/locks` with the outcome, so
+reloading doesn't repeat it.

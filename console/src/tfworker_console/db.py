@@ -223,7 +223,39 @@ class ApiToken(Base):
     last_used: Mapped[Optional[datetime]]
 
 
-# tables a rebuild empties; users and tokens are not part of the projection
+class AuditEntry(Base):
+    """
+    One admin action, or an attempt at one, and what came of it.
+
+    Not part of the projection: a rebuild keeps it, since nothing in the
+    stores could bring it back.
+    """
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(index=True)
+    actor: Mapped[str] = mapped_column(String(255))
+    # "user", "token" or "dev"
+    actor_kind: Mapped[str] = mapped_column(String(16))
+    # plan.recheck, plan.expire, plan.discard or lock.force_unlock
+    action: Mapped[str] = mapped_column(String(32))
+    store: Mapped[str] = mapped_column(String(128))
+    deployment: Mapped[str] = mapped_column(String(255))
+    definition: Mapped[str] = mapped_column(String(255))
+    # the group the deployment was in at the time, which scopes who sees it
+    group_name: Mapped[str] = mapped_column(String(64), index=True)
+    # the plan id or lock id acted on
+    target: Mapped[str] = mapped_column(String(255))
+    # started while the action runs, then done, unchanged, refused, forbidden
+    # or failed; an entry left started means the console stopped mid-action
+    outcome: Mapped[str] = mapped_column(String(16))
+    reason: Mapped[Optional[str]] = mapped_column(String(2048))
+    detail: Mapped[Optional[str]] = mapped_column(String(2048))
+
+
+# tables a rebuild empties; users, tokens and the audit log are not part of
+# the projection
 PROJECTION = (
     "stores",
     "deployments",

@@ -5,14 +5,15 @@ from importlib import resources
 from typing import Optional
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from tfworker.util.duration import format_duration
 
 from . import db, queries
+from .actions import ActionError
 from .api import get_now, get_scope, get_session, stale_after
 from .queries import Scope
 
@@ -43,6 +44,7 @@ def _render(request: Request, name: str, session: Session, scope: Scope, **conte
             "partial": partial,
             "principal": getattr(request.state, "principal", None),
             "dev_mode": request.app.state.settings.auth == "none",
+            "actions_enabled": request.app.state.actions is not None,
             "scope": scope,
             "stores": sorted({store for store, _ in deployments}),
             "groups": [
@@ -144,7 +146,47 @@ def plans_page(
         session,
         scope,
         status=status,
+        notice=request.session.pop("notice", None),
         plans=queries.plans(session, scope, now, status or None),
+    )
+
+
+def _act(request: Request, page: str, act) -> RedirectResponse:
+    """
+    Run an action for a screen, then send the browser back to the screen
+    with the outcome, so a reload doesn't repeat the action.
+    """
+    actions = request.app.state.actions
+    if actions is None:
+        notice = {"ok": False, "text": "the console is not connected to any stores"}
+    else:
+        try:
+            notice = {"ok": True, "text": act(actions).message}
+        except ActionError as e:
+            notice = {"ok": False, "text": str(e)}
+    request.session["notice"] = notice
+    target = page + (f"?{request.url.query}" if request.url.query else "")
+    return RedirectResponse(target, status_code=303)
+
+
+# the scope's query parameters are named store and deployment, so the path's
+# are named apart from them
+@router.post("/plans/{plan_store}/{plan_id}/{action}", response_class=HTMLResponse)
+def plan_action(
+    plan_store: str,
+    plan_id: str,
+    action: str,
+    request: Request,
+    reason: str = Form(""),
+    scope: Scope = Depends(get_scope),
+    now: datetime = Depends(get_now),
+):
+    return _act(
+        request,
+        "/plans",
+        lambda actions: actions.plan(
+            request.state.principal, plan_store, plan_id, action, now, reason[:1000]
+        ),
     )
 
 
@@ -163,7 +205,48 @@ def locks_page(
         session,
         scope,
         state=state,
+        notice=request.session.pop("notice", None),
         locks=queries.locks(session, scope, now, stale, state or None),
+    )
+
+
+@router.post(
+    "/locks/{lock_store}/{lock_deployment}/{definition:path}/force-unlock",
+    response_class=HTMLResponse,
+)
+def force_unlock(
+    lock_store: str,
+    lock_deployment: str,
+    definition: str,
+    request: Request,
+    lock_id: str = Form(..., max_length=255),
+    confirm: str = Form(""),
+    scope: Scope = Depends(get_scope),
+    now: datetime = Depends(get_now),
+):
+    return _act(
+        request,
+        "/locks",
+        lambda actions: actions.force_unlock(
+            request.state.principal,
+            lock_store,
+            lock_deployment,
+            definition,
+            lock_id,
+            confirm,
+            now,
+        ),
+    )
+
+
+@router.get("/audit", response_class=HTMLResponse)
+def audit_page(
+    request: Request,
+    session: Session = Depends(get_session),
+    scope: Scope = Depends(get_scope),
+):
+    return _render(
+        request, "audit.html", session, scope, entries=queries.audit(session, scope)
     )
 
 

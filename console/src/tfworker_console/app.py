@@ -13,6 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from tfworker.report import PLAN_SCHEMA, RUN_SCHEMA, STATUS_SCHEMA
 
 from . import api, demo, login, version, web
+from .actions import Actions
 from .auth import OIDCClient, load_roles
 from .db import engine_for, session_factory
 from .groups import load_groups
@@ -147,6 +148,7 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
     app.state.settings = settings
     app.state.sessions = None
     app.state.reconciler = None
+    app.state.actions = None
     app.state.groups = load_groups(settings.groups_file)
     if settings.demo:
         if not settings.database_url:
@@ -185,6 +187,13 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
             if settings.demo
             else Reconciler(stores, app.state.sessions, groups=app.state.groups)
         )
+        if not settings.demo:
+            app.state.actions = Actions(
+                {store.name: store for store in stores},
+                app.state.sessions,
+                app.state.groups,
+                settings.lock_stale_after,
+            )
         if (
             app.state.reconciler is not None
             and settings.reconcile_interval > 0
