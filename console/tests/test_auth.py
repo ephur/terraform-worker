@@ -586,6 +586,10 @@ def sso_sign_in(client, provider, next="/plans"):
 
 
 class TestSSO:
+    def test_probes_need_no_sign_in(self, sso):
+        assert sso.get("/livez").status_code == 200
+        assert sso.get("/readyz").status_code == 200
+
     def test_pkce_flow_and_role_mapping(self, sso, provider, sessions):  # noqa: F811
         assert "Sign in with SSO" in sso.get("/login").text
         done = sso_sign_in(sso, provider)

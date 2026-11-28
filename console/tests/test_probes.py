@@ -3,6 +3,7 @@ from unittest import mock
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from tfworker_console import db
@@ -41,6 +42,16 @@ class TestReadiness:
         ready, checks = readiness.check()
         assert not ready
         assert checks["schema"] == f"at 0003, this console expects {readiness.head}"
+
+    def test_ahead_of_head(self, engine):
+        # a newer console migrated the database during a rollout
+        upgrade(engine)
+        with engine.begin() as connection:
+            connection.execute(text("UPDATE alembic_version SET version_num = '9999'"))
+        readiness = Readiness(engine)
+        ready, checks = readiness.check()
+        assert not ready
+        assert checks["schema"] == f"at 9999, this console expects {readiness.head}"
 
     def test_unreachable_names_only_the_error_type(self, engine):
         readiness = Readiness(engine)
