@@ -4,7 +4,6 @@ from .collection import HandlersCollection  # pragma: no cover # noqa
 from .datadog import DatadogConfig, DatadogHandler  # pragma: no cover # noqa
 from .github import GithubConfig, GithubHandler  # pragma: no cover # noqa
 from .openai import OpenAIConfig, OpenAIHandler  # pragma: no cover # noqa
-from .report import ReportConfig, ReportHandler  # pragma: no cover # noqa
 from .results import BaseHandlerResult  # pragma: no cover # noqa
 from .s3 import S3Handler  # pragma: no cover # noqa
 from .slack import SlackConfig, SlackHandler  # pragma: no cover # noqa

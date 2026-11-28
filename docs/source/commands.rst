@@ -282,7 +282,7 @@ another process holds. It takes seconds or a duration such as ``90s``, ``10m`` o
    triple: terraform; options; --intent
 
 The **\\-\\-intent** option (``WORKER_INTENT``) optionally says what the run's plans are for: ``deploy``,
-``preview`` or ``drift``. The report handler records it, and a ``preview`` or ``drift`` plan never becomes
+``preview`` or ``drift``. Run reporting records it, and a ``preview`` or ``drift`` plan never becomes
 a pending plan. See :ref:`reporting`.
 
 \\-\\-show-output / \\-\\-no-show-output

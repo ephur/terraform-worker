@@ -8,11 +8,13 @@ from moto import mock_aws
 
 from tfworker.backends.s3 import S3Backend
 from tfworker.commands.terraform import TerraformResult
+from tfworker.custom_types.config_file import ReportingOptions
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.definitions.model import Definition
 from tfworker.exceptions import BackendError, ReportConflictError
-from tfworker.handlers.report import ReportConfig, ReportHandler
+from tfworker.phases import PhaseDispatcher
 from tfworker.report import DefinitionStatus, RunRecord
+from tfworker.reporting import RunRecorder
 
 T0 = datetime(2026, 11, 27, 12, 0, tzinfo=timezone.utc)
 INIT, PLAN, APPLY, DESTROY = (
@@ -49,8 +51,7 @@ def backend(mock_authenticators):
 
 
 def make_handler(backend, tmp_path, run_id=None, plan=True, apply=False, **opts):
-    handler = ReportHandler(ReportConfig(**opts))
-    handler._app_state = SimpleNamespace(
+    app_state = SimpleNamespace(
         backend=backend,
         deployment="test-deployment",
         root_options=SimpleNamespace(
@@ -64,8 +65,9 @@ def make_handler(backend, tmp_path, run_id=None, plan=True, apply=False, **opts)
         ),
         terraform_version=(1, 13, 0),
     )
+    handler = RunRecorder(ReportingOptions(**opts), app_state)
     handler._now = Clock()
-    handler.setup("test-deployment", None, str(tmp_path), None)
+    handler.setup("test-deployment")
     return handler
 
 
@@ -81,16 +83,20 @@ def result(code, stderr=b""):
     )
 
 
-def run_phase(handler, action, definition, tmp_path, code=0, stderr=b""):
-    handler.execute(action, PRE, "test-deployment", definition, str(tmp_path))
+def run_phase(
+    handler, action, definition, tmp_path, code=0, stderr=b"", lock_wait=None
+):
+    # through a dispatcher, as the terraform command calls it
+    phases = PhaseDispatcher([handler])
+    phases.phase(action, PRE, definition, str(tmp_path))
     stage = ERROR if code == 1 else POST
-    handler.execute(
+    phases.phase(
         action,
         stage,
-        "test-deployment",
         definition,
         str(tmp_path),
-        result(code, stderr),
+        result=result(code, stderr),
+        lock_wait=lock_wait,
     )
 
 
@@ -138,10 +144,9 @@ class TestRuns:
         put_state(backend, 3)
         handler = make_handler(backend, tmp_path, run_id="run-1")
         definition = make_definition(tmp_path)
-        definition.lock_wait_seconds = 12.5
-        run_phase(handler, INIT, definition, tmp_path)
+        run_phase(handler, INIT, definition, tmp_path, lock_wait=12.5)
         plan_with_changes(handler, definition, tmp_path)
-        handler.teardown("test-deployment", str(tmp_path))
+        handler.teardown("test-deployment")
 
         record = run_record(backend, "run-1")
         assert record.status == "succeeded"
@@ -199,7 +204,7 @@ class TestRuns:
         plan_with_changes(handler, definition, tmp_path)
         put_state(backend, 4)
         run_phase(handler, APPLY, definition, tmp_path)
-        handler.teardown("test-deployment", str(tmp_path))
+        handler.teardown("test-deployment")
 
         (result_,) = run_record(backend, "run-2").definitions
         assert result_.applied_serial == 4
@@ -228,7 +233,7 @@ class TestRuns:
                 b"\x1b[31m\xe2\x95\xb5\x1b[0m\x1b[0m\n"
             ),
         )
-        handler.teardown("test-deployment", str(tmp_path))
+        handler.teardown("test-deployment")
 
         record = run_record(backend, "run-3")
         assert record.status == "failed"
@@ -243,9 +248,9 @@ class TestRuns:
         handler = make_handler(backend, tmp_path, run_id="run-4")
         ran, skipped = make_definition(tmp_path), make_definition(tmp_path, "def2")
         run_phase(handler, PLAN, ran, tmp_path)
-        handler.skip(PLAN, "test-deployment", skipped, "no changes since last plan")
-        handler.skip(PLAN, "test-deployment", ran, "ignored, already ran")
-        handler.teardown("test-deployment", str(tmp_path))
+        handler.skip(PLAN, skipped, "no changes since last plan")
+        handler.skip(PLAN, ran, "ignored, already ran")
+        handler.teardown("test-deployment")
 
         record = run_record(backend, "run-4")
         phases = {r.definition: r.phases["plan"] for r in record.definitions}
@@ -258,13 +263,13 @@ class TestRuns:
     def test_generated_run_id(self, backend, tmp_path):
         handler = make_handler(backend, tmp_path)
         run_phase(handler, PLAN, make_definition(tmp_path), tmp_path)
-        handler.teardown("test-deployment", str(tmp_path))
+        handler.teardown("test-deployment")
         assert len(handler.run_id) == 26
         assert run_record(backend, handler.run_id).run_id_generated is True
 
     def test_nothing_ran(self, backend, tmp_path):
         handler = make_handler(backend, tmp_path, run_id="run-5")
-        handler.teardown("test-deployment", str(tmp_path))
+        handler.teardown("test-deployment")
         assert backend.read_report("status/def1.json") is None
 
     def test_resources_off(self, backend, tmp_path):
@@ -273,7 +278,7 @@ class TestRuns:
         )
         definition = make_definition(tmp_path)
         plan_with_changes(handler, definition, tmp_path)
-        handler.teardown("test-deployment", str(tmp_path))
+        handler.teardown("test-deployment")
         (result_,) = run_record(backend, "run-6").definitions
         assert result_.changes.add == 1
         assert result_.changes.resources == []
@@ -282,23 +287,23 @@ class TestRuns:
     def test_record_is_never_replaced(self, backend, tmp_path):
         first = make_handler(backend, tmp_path, run_id="first")
         run_phase(first, PLAN, make_definition(tmp_path), tmp_path)
-        first.teardown("test-deployment", str(tmp_path))
+        first.teardown("test-deployment")
         second = make_handler(backend, tmp_path, run_id="second")
         second._record_id = first._record_id
         run_phase(second, PLAN, make_definition(tmp_path), tmp_path, code=1)
-        second.teardown("test-deployment", str(tmp_path))
+        second.teardown("test-deployment")
         assert run_record(backend, "first").status == "succeeded"
         assert run_records(backend, "second") == []
 
     def test_plan_and_apply_jobs_share_a_run_id(self, backend, tmp_path):
         plan_job = make_handler(backend, tmp_path, run_id="shared")
         plan_with_changes(plan_job, make_definition(tmp_path), tmp_path)
-        plan_job.teardown("test-deployment", str(tmp_path))
+        plan_job.teardown("test-deployment")
         apply_job = make_handler(
             backend, tmp_path, run_id="shared", plan=False, apply=True
         )
         run_phase(apply_job, APPLY, make_definition(tmp_path), tmp_path)
-        apply_job.teardown("test-deployment", str(tmp_path))
+        apply_job.teardown("test-deployment")
         records = run_records(backend, "shared")
         assert sorted(r.actions[0] for r in records) == ["apply", "plan"]
         assert status(backend).pending_plan is None
@@ -306,8 +311,8 @@ class TestRuns:
     def test_interrupted_phase_is_failed(self, backend, tmp_path):
         handler = make_handler(backend, tmp_path, run_id="cut")
         definition = make_definition(tmp_path)
-        handler.execute(PLAN, PRE, "test-deployment", definition, str(tmp_path))
-        handler.teardown("test-deployment", str(tmp_path))
+        handler.phase(PLAN, PRE, definition, str(tmp_path))
+        handler.teardown("test-deployment")
         record = run_record(backend, "cut")
         assert record.status == "failed"
         assert record.definitions[0].phases["plan"].reason.startswith("the run stopped")
@@ -317,9 +322,7 @@ class TestRuns:
         definition = make_definition(tmp_path)
         run_phase(handler, APPLY, definition, tmp_path)
         synthesized = TerraformResult.synthesized(1, "post-apply hook failed")
-        handler.execute(
-            APPLY, ERROR, "test-deployment", definition, str(tmp_path), synthesized
-        )
+        handler.phase(APPLY, ERROR, definition, str(tmp_path), synthesized)
         apply = handler._results["def1"].phases["apply"]
         assert apply.status == "failed"
         assert apply.duration_seconds == 42
@@ -327,9 +330,7 @@ class TestRuns:
 
     def test_failed_enrichment_still_records_phase(self, backend, tmp_path, mocker):
         handler = make_handler(backend, tmp_path, run_id="enrich")
-        mocker.patch(
-            "tfworker.handlers.report.module_sources", side_effect=ValueError("bad")
-        )
+        mocker.patch("tfworker.reporting.module_sources", side_effect=ValueError("bad"))
         run_phase(handler, INIT, make_definition(tmp_path), tmp_path)
         assert handler._results["def1"].phases["init"].status == "succeeded"
 
@@ -368,9 +369,7 @@ class TestConcurrency:
 
         backend.read_report = read_then_wait
         threads = [
-            threading.Thread(
-                target=h.teardown, args=("test-deployment", str(tmp_path)), name=f"w{i}"
-            )
+            threading.Thread(target=h.teardown, args=("test-deployment",), name=f"w{i}")
             for i, h in enumerate((first, second))
         ]
         for t in threads:
@@ -386,7 +385,7 @@ class TestConcurrency:
         """Both writers race the If-Match path; the loser re-reads and merges."""
         seed = make_handler(backend, tmp_path, run_id="seed")
         run_phase(seed, INIT, make_definition(tmp_path), tmp_path)
-        seed.teardown("test-deployment", str(tmp_path))
+        seed.teardown("test-deployment")
         first = make_handler(backend, tmp_path, run_id="plan-run")
         plan_with_changes(first, make_definition(tmp_path), tmp_path)
         second = make_handler(
@@ -418,9 +417,7 @@ class TestConcurrency:
 
         backend.read_report = read_then_wait
         threads = [
-            threading.Thread(
-                target=h.teardown, args=("test-deployment", str(tmp_path)), name=f"w{i}"
-            )
+            threading.Thread(target=h.teardown, args=("test-deployment",), name=f"w{i}")
             for i, h in enumerate((first, second))
         ]
         for t in threads:
@@ -440,7 +437,7 @@ class TestConcurrency:
         run_phase(handler, PLAN, make_definition(tmp_path), tmp_path)
         write = mocker.patch.object(backend, "write_report")
         write.side_effect = [None, ReportConflictError("x"), ReportConflictError("x")]
-        handler.teardown("test-deployment", str(tmp_path))
+        handler.teardown("test-deployment")
         assert write.call_count == 3
         assert len(sleeps) == 1
 
@@ -455,7 +452,7 @@ class TestErrorsNeverBreakRuns:
         run_phase(handler, PLAN, definition, tmp_path)
         mocker.patch.object(backend, "write_report", side_effect=BackendError("denied"))
         mocker.patch.object(backend, "read_report", side_effect=BackendError("denied"))
-        handler.teardown("test-deployment", str(tmp_path))
+        handler.teardown("test-deployment")
 
     def test_unexpected_errors_are_logged(self, backend, tmp_path, mocker):
         handler = make_handler(backend, tmp_path, run_id="r")
@@ -466,7 +463,7 @@ class TestErrorsNeverBreakRuns:
         backend.write_report("status/def1.json", '{"schema": "tfworker.status/v2"}')
         handler = make_handler(backend, tmp_path, run_id="r")
         run_phase(handler, PLAN, make_definition(tmp_path), tmp_path)
-        handler.teardown("test-deployment", str(tmp_path))
+        handler.teardown("test-deployment")
         assert (
             backend.read_report("status/def1.json")[0]
             == '{"schema": "tfworker.status/v2"}'
@@ -476,7 +473,7 @@ class TestErrorsNeverBreakRuns:
         backend.write_report("status/def1.json", "not json")
         handler = make_handler(backend, tmp_path, run_id="r")
         run_phase(handler, PLAN, make_definition(tmp_path), tmp_path)
-        handler.teardown("test-deployment", str(tmp_path))
+        handler.teardown("test-deployment")
         assert status(backend).last_plan.run_id == "r"
 
     def test_unreadable_plan_json(self, backend, tmp_path):
@@ -484,39 +481,50 @@ class TestErrorsNeverBreakRuns:
         definition = make_definition(tmp_path)
         definition.needs_apply = True
         run_phase(handler, PLAN, definition, tmp_path, code=2)
-        handler.teardown("test-deployment", str(tmp_path))
+        handler.teardown("test-deployment")
         assert run_record(backend, "r").definitions[0].changes is None
 
 
 class TestReadiness:
-    def test_ready_with_report_storage(self, backend, tmp_path):
-        handler = make_handler(backend, tmp_path)
-        assert handler.is_ready()
-        handler._app_state.backend = SimpleNamespace()
-        assert not handler.is_ready()
-        assert handler._warned_not_ready
-        assert not handler.is_ready()
+    def test_off_unless_configured(self, backend):
+        state = SimpleNamespace(loaded_config=SimpleNamespace(), backend=backend)
+        assert RunRecorder.from_app_state(state) is None
+        state.loaded_config.reporting = None
+        assert RunRecorder.from_app_state(state) is None
 
-    def test_app_state_from_click(self, mocker):
-        ctx = mocker.MagicMock()
-        mocker.patch("click.get_current_context", return_value=ctx)
-        assert ReportHandler(ReportConfig()).app_state is ctx.obj
+    def test_on_with_report_storage(self, backend):
+        state = SimpleNamespace(
+            loaded_config=SimpleNamespace(reporting=ReportingOptions()),
+            backend=backend,
+        )
+        recorder = RunRecorder.from_app_state(state)
+        assert recorder.app_state is state
+        assert recorder.options.resources
+
+    def test_off_without_report_storage(self, mocker):
+        warn = mocker.patch("tfworker.reporting.log.warn")
+        state = SimpleNamespace(
+            loaded_config=SimpleNamespace(reporting=ReportingOptions()),
+            backend=SimpleNamespace(),
+        )
+        assert RunRecorder.from_app_state(state) is None
+        assert "cannot store reports" in warn.call_args.args[0]
 
     def test_provenance_variants(self, backend, tmp_path, mocker):
         handler = make_handler(backend, tmp_path)
-        root = handler._app_state.root_options
+        root = handler.app_state.root_options
         root.backend_plans = False
         root.config_file = str(tmp_path / "worker.yaml")
-        handler._app_state.terraform_options.plan_file_path = "/plans"
-        handler._app_state.terraform_version = "1.9.0"
+        handler.app_state.terraform_options.plan_file_path = "/plans"
+        handler.app_state.terraform_version = "1.9.0"
         provenance = handler._provenance()
         assert provenance.plan_storage == "local"
         assert provenance.terraform_version == "1.9.0"
-        handler._app_state.terraform_options.plan_file_path = None
+        handler.app_state.terraform_options.plan_file_path = None
         root.config_file = []
         assert handler._provenance().plan_storage == "run"
         mocker.patch(
-            "tfworker.handlers.report.metadata.version",
+            "tfworker.reporting.metadata.version",
             side_effect=__import__("importlib").metadata.PackageNotFoundError,
         )
         mocker.patch("getpass.getuser", side_effect=KeyError("uid"))
@@ -525,17 +533,17 @@ class TestReadiness:
         assert provenance.user is None
 
     def test_failure_reason_without_stderr(self):
-        assert ReportHandler._failure_reason(None) is None
-        assert ReportHandler._failure_reason(SimpleNamespace(stderr=b"\n \n")) is None
+        assert RunRecorder._failure_reason(None) is None
+        assert RunRecorder._failure_reason(SimpleNamespace(stderr=b"\n \n")) is None
         assert (
-            ReportHandler._failure_reason(SimpleNamespace(stderr=b"plain\n")) == "plain"
+            RunRecorder._failure_reason(SimpleNamespace(stderr=b"plain\n")) == "plain"
         )
 
     def test_phase_without_result(self, backend, tmp_path):
         handler = make_handler(backend, tmp_path, run_id="r")
         definition = make_definition(tmp_path)
-        handler.execute(DESTROY, PRE, "d", definition, str(tmp_path))
-        handler.execute(DESTROY, ERROR, "d", definition, str(tmp_path), None)
+        handler.phase(DESTROY, PRE, definition, str(tmp_path))
+        handler.phase(DESTROY, ERROR, definition, str(tmp_path), None)
         phase = handler._results["def1"].phases["destroy"]
         assert phase.status == "failed"
         assert phase.duration_seconds == 1
