@@ -69,8 +69,6 @@ class Definition(BaseModel):
 
     # Internals, these should not be set by the user
     ready: bool = False
-    # seconds spent waiting for the state lock this action (see tfworker.locking)
-    lock_wait_seconds: Optional[float] = None
     needs_apply: bool = False
     plan_failed: bool = False
     # preparation (copy/template/terraform get) or terraform init failed

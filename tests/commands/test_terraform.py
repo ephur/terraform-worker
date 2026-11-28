@@ -2456,7 +2456,7 @@ class TestStateLocker:
         )
         run.assert_called_once_with("def", TerraformAction.PLAN, lock_deadline=500.0)
         locker.release.assert_called_once_with("def")
-        assert cmd.app_state.definitions["def"].lock_wait_seconds >= 0
+        assert cmd.lock_waits["def"] >= 0
 
     def test_released_when_terraform_raises(self, tmp_path, mocker):
         cmd = make_command(tmp_path)
@@ -2493,9 +2493,11 @@ class TestLockUnavailable:
         self._locked(cmd, LockUnavailableError("still locked"))
         run = mocker.patch.object(cmd, "_run")
         hook = mocker.patch.object(cmd, "_exec_hook")
+        phases = mocker.patch.object(cmd, "_phases", create=True)
         cmd._exec_terraform_plan("def")
         definition = cmd.app_state.definitions["def"]
-        assert definition.lock_wait_seconds is not None
+        assert phases.phase.call_args.kwargs["lock_wait"] is not None
+        assert "def" not in cmd.lock_waits
         assert definition.plan_failed is True
         assert definition.needs_apply is False
         run.assert_not_called()
@@ -2573,3 +2575,76 @@ class TestLockUnavailable:
         cmd = make_command(tmp_path)
         with_locking(cmd, on_timeout="fail_run")
         assert not cmd._lock_held_failure("def", TerraformResult(1, b"", b"boom"))
+
+
+class TestPhaseDispatch:
+    """Core components hear about each phase alongside the handlers."""
+
+    def _calls(self, phases):
+        return [(c.args[0], c.args[1]) for c in phases.phase.call_args_list]
+
+    def test_off_without_reporting(self, tmp_path):
+        cmd = make_command(tmp_path)
+        assert not cmd.phases
+        assert cmd.phases is cmd.phases
+
+    def test_recorder_when_reporting_is_configured(self, tmp_path):
+        from tfworker.custom_types.config_file import ReportingOptions
+        from tfworker.reporting import RunRecorder
+
+        cmd = make_command(tmp_path)
+        cmd.app_state.loaded_config.reporting = ReportingOptions()
+        cmd.app_state.backend = SimpleNamespace(report_storage=True)
+        (listener,) = cmd.phases.listeners
+        assert isinstance(listener, RunRecorder)
+
+    def test_action_pre_and_post(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        phases = mocker.patch.object(cmd, "_phases", create=True)
+        mocker.patch.object(cmd, "_exec_hook", return_value=True)
+        result = TerraformResult(0, b"", b"")
+        mocker.patch.object(cmd, "_run_locked", return_value=result)
+        cmd.lock_waits["def"] = 3.0
+        cmd._exec_terraform_action("def", TerraformAction.APPLY)
+        assert self._calls(phases) == [
+            (TerraformAction.APPLY, TerraformStage.PRE),
+            (TerraformAction.APPLY, TerraformStage.POST),
+        ]
+        pre, post = phases.phase.call_args_list
+        assert pre.kwargs["lock_wait"] is None
+        assert post.kwargs == {"result": result, "lock_wait": 3.0}
+        assert "def" not in cmd.lock_waits
+
+    def test_action_failure_is_error(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        phases = mocker.patch.object(cmd, "_phases", create=True)
+        mocker.patch.object(cmd, "_exec_hook", return_value=True)
+        mocker.patch.object(
+            cmd, "_run_locked", return_value=TerraformResult(1, b"", b"boom")
+        )
+        cmd._exec_terraform_action("def", TerraformAction.INIT, exit_on_error=False)
+        assert self._calls(phases)[-1] == (TerraformAction.INIT, TerraformStage.ERROR)
+
+    def test_plan_pre_and_post(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        phases = mocker.patch.object(cmd, "_phases", create=True)
+        mocker.patch.object(cmd, "_exec_hook", return_value=True)
+        mocker.patch.object(cmd, "_generate_plan_output_json")
+        mocker.patch.object(
+            cmd, "_run_locked", return_value=TerraformResult(2, b"", b"")
+        )
+        assert cmd._exec_terraform_pre_plan("def")
+        cmd._exec_terraform_plan("def")
+        assert self._calls(phases) == [
+            (TerraformAction.PLAN, TerraformStage.PRE),
+            (TerraformAction.PLAN, TerraformStage.POST),
+        ]
+
+    def test_skip(self, tmp_path, mocker):
+        cmd = make_command(tmp_path)
+        phases = mocker.patch.object(cmd, "_phases", create=True)
+        cmd._notify_skip("def", TerraformAction.PLAN, "no changes")
+        cmd._notify_skip("def", TerraformAction.PLAN, "no changes")
+        phases.skip.assert_called_once_with(
+            TerraformAction.PLAN, cmd.app_state.definitions["def"], "no changes"
+        )
