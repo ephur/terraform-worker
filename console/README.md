@@ -189,7 +189,7 @@ A values file for SSO, with stores read through IRSA:
   taking turns per store. Each replica lists every store, so the S3 cost
   grows with replicas. The CronJob's own reconcile metrics aren't scraped, but
   `tfworker_console_store_last_reconcile_timestamp_seconds` and
-  `store_reconcile_ok` come from the projection and report either way.
+  `tfworker_console_store_reconcile_ok` come from the projection and report either way.
 - **Events.** `events.enabled` with `events.queueUrl` (and `roleArn` and
   `region` when needed) turns on [event ingest](#events) in the web pods.
 - **Metrics.** `metrics.mode: port` serves `/metrics` on a separate container
