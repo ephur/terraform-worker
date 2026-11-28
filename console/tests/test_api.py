@@ -777,7 +777,9 @@ class TestReconcileEndpoint:
 def test_utc_datetime_type():
     from sqlalchemy.dialects import postgresql, sqlite
 
-    column = db.UTCDateTime()
+    from tfworker_console.sqltypes import Timestamp
+
+    column = Timestamp()
     pg, lite = postgresql.dialect(), sqlite.dialect()
     eastern = datetime(2026, 11, 27, 7, 0, tzinfo=timezone(timedelta(hours=-5)))
     assert column.process_bind_param(None, pg) is None
