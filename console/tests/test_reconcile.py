@@ -800,7 +800,10 @@ class TestCli:
         path = tmp_path / "stores.yaml"
         path.write_text(json.dumps({"stores": [s.model_dump() for s in two_stores]}))
         monkeypatch.setenv("TFWORKER_CONSOLE_STORES_FILE", str(path))
-        monkeypatch.setenv("TFWORKER_CONSOLE_DATABASE_URL", str(engine.url))
+        monkeypatch.setenv(
+            "TFWORKER_CONSOLE_DATABASE_URL",
+            engine.url.render_as_string(hide_password=False),
+        )
 
     def test_upgrade(self, tmp_path, monkeypatch):
         monkeypatch.setenv(
@@ -867,7 +870,9 @@ class TestScheduler:
         path = tmp_path / "stores.yaml"
         path.write_text(json.dumps({"stores": [s.model_dump() for s in two_stores]}))
         settings = ConsoleSettings(
-            database_url=str(engine.url), stores_file=str(path), reconcile_interval=3600
+            database_url=engine.url.render_as_string(hide_password=False),
+            stores_file=str(path),
+            reconcile_interval=3600,
         )
         with TestClient(create_app(settings)) as client:
             assert client.get("/healthz").status_code == 200

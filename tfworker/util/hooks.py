@@ -670,7 +670,7 @@ def _check_env_var_size(
             f"Environment variable {var_name} is {var_size:,} bytes{encoding_note}, "
             f"which exceeds the typical {current_shell} limit of {limit:,} bytes. "
             f"This may cause issues in hook scripts. "
-            f"Consider using --b64-encode-hook-values or restructuring the data."
+            f"Consider using --b64-encode or restructuring the data."
         )
     elif var_size > warning_threshold:
         encoding_note = " (base64 encoded)" if b64_encode else ""

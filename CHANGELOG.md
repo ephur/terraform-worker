@@ -9,6 +9,9 @@
 - `terraform_vars` are now written to `worker_generated.auto.tfvars.json` instead of `worker_generated.auto.tfvars` (#186). Values keep their YAML types and are no longer interpolated by terraform, so quotes, backslashes, `${` and `%{` are passed through as-is. Booleans and numbers inside lists and maps are now real values instead of strings, and a YAML null now leaves the variable unset instead of passing `"None"`. Hooks that parse `TF_VAR_*` lists or maps as JSON will see the same change.
 - Definition names may no longer start with `_` (#219). Those names are reserved for worker metadata stored beside state, such as `<prefix>/_tfworker/`.
 - `--backend-use-all-remotes` now only counts `<prefix>/<definition>/terraform.tfstate` as a definition (#219). Before, any key under the prefix added its parent directory, so saved plans under a `--run-id` directory and anything else in the bucket produced bogus remotes.
+- Removed CLI options that had no purpose of their own (#257):
+  - `worker terraform --show-output/--no-show-output` (`WORKER_SHOW_OUTPUT`) was never read. Terraform output is controlled by `--stream-output` and the per-definition `squelch_plan_output` / `squelch_apply_output` settings.
+  - The root `worker --backend-use-all-remotes` flag duplicated the `worker terraform` option of the same name. It only took effect because root options are copied into `worker_options`, which then set the terraform option. `worker --backend-use-all-remotes terraform ...` is now a usage error; give the flag after `terraform` instead. `WORKER_BACKEND_USE_ALL_REMOTES` and `backend_use_all_remotes` in the config file's `worker_options` keep working unchanged.
 
 ## Features
 - Report events as CloudEvents (#217). With `format: cloudevents`, the `sqs` handler publishes run records, definition status, plan manifests and lock waits (`io.tfworker.run.v1`, `io.tfworker.status.v1`, `io.tfworker.plan.v1`, `io.tfworker.lock.waiting`) to SQS queues and/or an EventBridge bus (`event_bus`), routed by `types` patterns. Event data is what was written to the bucket, and a publishing failure is logged without failing the run. Existing `sqs` configurations are unchanged. See "Streaming events".
@@ -36,6 +39,7 @@
 - The Dockerfile builds again (#201): Python 3.13-slim, the worker installed with uv from `uv.lock`, and Terraform as a `TERRAFORM_VERSION` build arg (default 1.17.2) whose checksum is verified. CI now builds the image and smoke-tests it.
 - `--config-var` values containing `=` no longer crash definition preparation or get dropped from config templates (#187).
 - The snyk handler's `args`, `cache_dir`, `exit_code`, `handler_debug`, `quiet`, `severity` and `skip_dirs` options and the trivy handler's `handler_debug` were never read, and are removed; a config that still sets them loads as before (#258).
+- The hook env var size warning now names the real `--b64-encode` flag instead of `--b64-encode-hook-values` (#257).
 - `terraform get` now runs with `--terraform-bin` and the same authenticator environment as init, plan and apply, instead of the `terraform` on `PATH` with no credentials (#185).
 
 ## Features and changes
