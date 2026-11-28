@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 class TrivyConfig(BaseModel):
     args: dict = Field(
-        default={},
+        default_factory=dict,
         description="Extra trivy options, each key passed as --<key> <value>.",
     )
     cache_dir: str = Field(
@@ -45,7 +45,7 @@ class TrivyConfig(BaseModel):
     )
     severity: str = Field(default="HIGH,CRITICAL", description="Passed as --severity.")
     skip_dirs: list = Field(
-        default=["**/examples"],
+        default_factory=lambda: ["**/examples"],
         description="Passed as --skip-dirs when scanning a definition's source.",
     )
     template: str = Field(
