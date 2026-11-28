@@ -103,8 +103,11 @@ def reconcile(stores, rebuild) -> None:
         if stores:
             raise click.UsageError("--rebuild reconciles every store")
         summaries = reconciler.rebuild()
+    elif stores:
+        summaries = [reconciler.reconcile(name) for name in stores]
     else:
-        summaries = [reconciler.reconcile(name) for name in stores or reconciler.stores]
+        # every store, and a store no longer configured is forgotten
+        summaries = reconciler.reconcile_all()
     click.echo(json.dumps([asdict(summary) for summary in summaries], indent=2))
     if any(summary.errors for summary in summaries):
         raise SystemExit(1)

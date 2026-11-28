@@ -98,6 +98,39 @@ jobs:
           TFWORKER_CONSOLE_TEST_DATABASE_URL: postgresql+psycopg://postgres:console@localhost:5432/console
         run: uv run --package tfworker-console pytest -p no:warnings --no-cov tests/test_reconcile.py tests/test_api.py tests/test_groups.py tests/test_auth.py tests/test_demo.py tests/test_actions.py tests/test_dialects.py tests/test_ingest.py tests/test_metrics.py
 
+  chart:
+    name: Console Helm chart
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Install dependencies
+        run: uv sync --locked --package tfworker-console
+
+      - name: Lint the chart tests
+        run: |
+          uv run --package tfworker-console black --check chart/tests
+          uv run --package tfworker-console isort --check chart/tests
+          uv run --package tfworker-console flake8 --ignore E203,E501,W503 chart/tests
+
+      - name: Render and check the chart
+        run: uv run --package tfworker-console pytest -p no:warnings -p no:cacheprovider --no-cov chart/tests
+
   image:
     name: Console image builds
     runs-on: ubuntu-latest

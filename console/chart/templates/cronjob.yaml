@@ -1,0 +1,53 @@
+{{- if eq .Values.reconcile.mode "cronJob" }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "console.fullname" . | trunc 42 | trimSuffix "-" }}-reconcile
+  labels:
+    {{- include "console.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.reconcile.schedule | quote }}
+  # a reconcile that outlasts the schedule is not started twice
+  concurrencyPolicy: Forbid
+  # a run that couldn't start within this long is skipped, not queued up
+  startingDeadlineSeconds: {{ .Values.reconcile.startingDeadlineSeconds }}
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # a hung run would hold up every later one
+      activeDeadlineSeconds: {{ .Values.reconcile.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "console.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: reconcile
+            {{- with .Values.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "console.serviceAccountName" . }}
+          automountServiceAccountToken: false
+          {{- include "console.podSpecCommon" . | trim | nindent 10 }}
+          containers:
+            - name: reconcile
+              image: {{ include "console.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["reconcile"]
+              env:
+                {{- include "console.commonEnv" . | nindent 16 }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              resources:
+                {{- toYaml (.Values.reconcile.resources | default .Values.resources) | nindent 16 }}
+              volumeMounts:
+                {{- include "console.volumeMounts" . | nindent 16 }}
+          volumes:
+            {{- include "console.volumes" . | nindent 12 }}
+{{- end }}

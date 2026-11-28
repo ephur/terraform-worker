@@ -1,0 +1,171 @@
+# Values for the tfworker-console chart. See console/README.md#helm-chart.
+
+image:
+  # No image is published yet: build console/Dockerfile and push it to your
+  # registry.
+  repository: tfworker-console
+  # defaults to the chart's appVersion
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+replicaCount: 2
+
+serviceAccount:
+  create: true
+  # defaults to the release's full name
+  name: ""
+  # for IRSA, eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/console
+  annotations: {}
+
+# The console keeps its projection in Postgres. The chart bundles none; give
+# it a Secret holding the SQLAlchemy URL, such as
+# postgresql+psycopg://console:password@db:5432/console
+database:
+  existingSecret: ""
+  key: database-url
+
+auth:
+  # oidc: SSO plus local break-glass accounts; local: passwords only;
+  # none: no sign-in, everyone an admin (refused unless allowNone is true)
+  mode: oidc
+  allowNone: false
+  # the URL people reach the console at; required for oidc
+  publicUrl: ""
+  # signs session cookies; a Secret key holding a long random string
+  secretKey:
+    existingSecret: ""
+    key: secret-key
+  # with oidc, only break-glass accounts may sign in with a password
+  ssoEnforced: false
+  sessionMaxAge: 28800
+  oidc:
+    issuer: ""
+    clientId: ""
+    clientSecret:
+      existingSecret: ""
+      key: client-secret
+    scopes: "openid profile email groups"
+    groupsClaim: groups
+    usernameClaim: preferred_username
+  # the roles file mapping SSO groups to roles (see console/README.md), as
+  # YAML here or in an existing ConfigMap under roles.yaml
+  roles: {}
+  rolesConfigMap: ""
+
+# The backend stores to read (see console/README.md#stores-and-the-projection),
+# as YAML here or in an existing ConfigMap under stores.yaml.
+stores: {}
+storesConfigMap: ""
+# Deployment groups, as YAML here or in an existing ConfigMap under groups.yaml.
+groups: {}
+groupsConfigMap: ""
+
+# How stores are reached. With IRSA, annotate the service account and leave
+# credentials out of the stores file (or give a role_arn to assume from it).
+# For named profiles, put AWS config and credentials files in a Secret; they
+# are mounted read-only and the stores file names the profile.
+awsProfiles:
+  existingSecret: ""
+  configKey: config
+  credentialsKey: credentials
+
+reconcile:
+  # inPod: every web replica reconciles on an interval, taking turns per
+  # store; cronJob: web replicas only serve and a CronJob reconciles, one run
+  # at a time
+  mode: cronJob
+  interval: 300
+  schedule: "*/5 * * * *"
+  # a run that hasn't started this long after its time is skipped
+  startingDeadlineSeconds: 300
+  # a run is stopped after this long, so a hung one can't hold up the rest
+  activeDeadlineSeconds: 1800
+  # the CronJob's own resources
+  resources: {}
+
+migrations:
+  # a pre-install and pre-upgrade Job runs `tfworker-console db upgrade`;
+  # turn it off to migrate another way. The console stays unready until the
+  # schema is at its head.
+  enabled: true
+  resources: {}
+
+# Event ingest from the sqs handler's CloudEvents (console/README.md#events).
+events:
+  enabled: false
+  queueUrl: ""
+  roleArn: ""
+  region: ""
+
+metrics:
+  # off; token (on the console's port, for a bearer token with the metrics
+  # role); or port (no auth, on a separate port inside the cluster)
+  mode: "off"
+  port: 9090
+  definitionLabel: true
+  # prometheus.io/* annotations on the pods, for port mode without a
+  # ServiceMonitor
+  podAnnotations: true
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+    # for token mode: a Secret holding a metrics-role API token
+    tokenSecret:
+      name: ""
+      key: token
+
+lockStaleAfter: 7200
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  #  - host: console.example.com
+  #    paths: ["/"]
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# start-up reads the database before serving: liveness waits this many 5s
+# startup probes (5 minutes) before it may restart a pod
+startupFailureThreshold: 60
+# the in-pod reconcile and event consumer stop within 30s
+terminationGracePeriodSeconds: 45
+tmpSizeLimit: 256Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+# more TFWORKER_CONSOLE_* or other variables for every console container,
+# the migration Job included (PGSSLMODE, a CA bundle path, proxies)
+extraEnv: []
+# more volumes and mounts for every console container, such as a CA bundle
+extraVolumes: []
+extraVolumeMounts: []

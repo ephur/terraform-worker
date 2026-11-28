@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "console.fullname" . }}
+  labels:
+    {{- include "console.labels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "console.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+{{- if eq (include "console.metricsMode" .) "port" }}
+---
+# the unauthenticated metrics port gets its own in-cluster Service, so a
+# LoadBalancer or NodePort console never exposes it
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "console.fullname" . | trunc 55 | trimSuffix "-" }}-metrics
+  labels:
+    {{- include "console.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "console.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+  ports:
+    - name: metrics
+      port: {{ int64 .Values.metrics.port }}
+      targetPort: metrics
+{{- end }}

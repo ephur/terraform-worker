@@ -1,0 +1,18 @@
+{{- include "console.validate" . -}}
+{{- $inline := dict -}}
+{{- if and .Values.stores (not .Values.storesConfigMap) }}{{ $_ := set $inline "stores.yaml" .Values.stores }}{{ end -}}
+{{- if and .Values.groups (not .Values.groupsConfigMap) }}{{ $_ := set $inline "groups.yaml" .Values.groups }}{{ end -}}
+{{- if and .Values.auth.roles (not .Values.auth.rolesConfigMap) }}{{ $_ := set $inline "roles.yaml" .Values.auth.roles }}{{ end -}}
+{{- if $inline }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "console.configMapName" . }}
+  labels:
+    {{- include "console.labels" . | nindent 4 }}
+data:
+  {{- range $file, $content := $inline }}
+  {{ $file }}: |
+    {{- toYaml $content | nindent 4 }}
+  {{- end }}
+{{- end }}

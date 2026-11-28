@@ -104,6 +104,136 @@ ready replicas:
   ones leave rotation together, and the console is unavailable until the new
   ones pass. Expect a short gap on any release that adds a migration.
 
+## Helm chart
+
+`console/chart` deploys the console to Kubernetes. No image or packaged chart
+is published yet, so build `console/Dockerfile`, push it to your registry and
+set `image.repository` and `image.tag`. Installed from the repository, the
+chart's version is `0.0.0-dev` and the image tag defaults to that too, so set
+`image.tag`. A release packages the chart with its `console-v*` version:
+`helm package console/chart --version 0.3.0 --app-version 0.3.0`. The chart bundles no database. Give it
+Postgres through a Secret holding the SQLAlchemy URL, plus a Secret for the
+session key:
+
+    kubectl create secret generic console-db \
+      --from-literal=database-url='postgresql+psycopg://console:password@db:5432/console'
+    kubectl create secret generic console-session \
+      --from-literal=secret-key="$(openssl rand -base64 48)"
+    helm install console console/chart -f values.yaml
+
+A values file for SSO, with stores read through IRSA:
+
+    image:
+      repository: registry.example.com/tfworker-console
+      tag: 0.3.0
+    database:
+      existingSecret: console-db
+    auth:
+      mode: oidc
+      publicUrl: https://console.example.com
+      secretKey:
+        existingSecret: console-session
+      oidc:
+        issuer: https://sso.example.com
+        clientId: console
+        clientSecret:
+          existingSecret: console-oidc
+      roles:
+        role_mappings:
+          - claim: platform
+            role: admin
+    serviceAccount:
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/console
+    stores:
+      stores:
+        - name: prod
+          region: us-east-1
+          bucket: tfstate-prod
+          prefix: terraform/{deployment}
+    ingress:
+      enabled: true
+      className: nginx
+      hosts:
+        - host: console.example.com
+
+[`values.yaml`](chart/values.yaml) documents every value. In short:
+
+- **Config files.** `stores`, `groups` and `auth.roles` take the file's YAML
+  inline, rendered into a ConfigMap. Changing one rolls the pods. Or name an
+  existing ConfigMap with `storesConfigMap`, `groupsConfigMap` or
+  `auth.rolesConfigMap`, holding `stores.yaml`, `groups.yaml` or `roles.yaml`.
+  The chart can't see a change to your own ConfigMap. The next CronJob run
+  picks it up, but the web pods read their files at startup, so restart them
+  (`kubectl rollout restart`).
+- **AWS credentials.** Use IRSA (annotate the service account), or put an AWS
+  `config` and `credentials` file in a Secret named by
+  `awsProfiles.existingSecret`. That Secret is mounted read-only, and the
+  stores file names the profile.
+- **Migrations.** A `pre-install,pre-upgrade` hook Job runs
+  `tfworker-console db upgrade` before the new pods start, and the pods
+  themselves never migrate. Set `migrations.enabled=false` to migrate another
+  way; the pods stay unready until the schema is at their head (see
+  [Probes](#probes)). There are no down-migrations. Once an upgrade has
+  migrated, the last release's pods can't turn ready again, so `helm rollback`
+  (or `--atomic`) across a migration leaves the console unready. Back up the
+  database before an upgrade that migrates, and recover by rolling forward
+  or by restoring that backup.
+- **Reconciling.** With `reconcile.mode: cronJob` (the default), the web pods
+  only serve, and a CronJob runs `tfworker-console reconcile` on
+  `reconcile.schedule`. It is never run twice at once. A run is skipped if
+  it can't start within `reconcile.startingDeadlineSeconds`, and stopped
+  after `reconcile.activeDeadlineSeconds`, so a hung one can't hold up the
+  rest. Each run also forgets stores no longer in the stores file. With
+  `inPod`, every web replica reconciles every `reconcile.interval` seconds,
+  taking turns per store. Each replica lists every store, so the S3 cost
+  grows with replicas. The CronJob's own reconcile metrics aren't scraped, but
+  `tfworker_console_store_last_reconcile_timestamp_seconds` and
+  `tfworker_console_store_reconcile_ok` come from the projection and report either way.
+- **Events.** `events.enabled` with `events.queueUrl` (and `roleArn` and
+  `region` when needed) turns on [event ingest](#events) in the web pods.
+- **Metrics.** `metrics.mode: port` serves `/metrics` on a separate container
+  port (9090) behind its own ClusterIP Service, `<release>-metrics`, so a
+  LoadBalancer or NodePort console never exposes it. The pods get
+  `prometheus.io/*` annotations unless a ServiceMonitor is enabled. `token`
+  serves it on the console's port to a metrics-role token. With
+  `metrics.serviceMonitor.enabled`, the chart adds a Prometheus Operator
+  ServiceMonitor. In token mode it reads the token from
+  `metrics.serviceMonitor.tokenSecret`. Every replica reports the same fleet
+  metrics, so deduplicate on the `instance` label or aggregate with `max`.
+- **Probes.** Liveness is `/livez` and readiness is `/readyz`. A startup
+  probe on `/livez` gives the pod `startupFailureThreshold` × 5 seconds
+  (5 minutes by default) to start. A console that can't reach its database
+  doesn't start serving, so this keeps an unreachable database from being
+  read as a dead pod and restarted over and over.
+- **Extras.** `extraEnv`, `extraVolumes` and `extraVolumeMounts` reach every
+  console container, the migration Job included, for example `PGSSLMODE`
+  and a CA bundle.
+- **Hardening.** Pods run as uid 10001 with a read-only root filesystem, no
+  capabilities and the runtime's default seccomp profile, and without a
+  Kubernetes API token. `/tmp` is an emptyDir limited to `tmpSizeLimit`.
+
+The chart refuses, at install time, settings the console would refuse:
+
+- no database Secret
+- `auth.mode: none` without `auth.allowNone: true`
+- OIDC without an issuer, client id or public URL
+- a ServiceMonitor with metrics off, or in token mode without a token Secret
+- events without stores
+- a file set both inline and by ConfigMap
+- an ingress with no hosts
+
+After installing, create the first admin from a pod, as the install notes
+show:
+
+    kubectl exec -it deploy/console-tfworker-console -- \
+      tfworker-console users create admin --role admin --break-glass
+
+The chart's tests render it with `helm template` and check the manifests. Run
+them from `console/` with helm on `PATH`:
+
+    uv run pytest chart/tests -p no:cacheprovider --no-cov
+
 ## Stores and the projection
 
 The console reads the run records, status snapshots, plan manifests and
@@ -129,7 +259,7 @@ for example `postgresql+psycopg://console@db/console`). It is a projection:
 every row can be rebuilt from the stores.
 
     tfworker-console db upgrade              # create or migrate the schema
-    tfworker-console reconcile               # project every store now
+    tfworker-console reconcile               # every store; forgets removed stores
     tfworker-console reconcile --store prod  # one store
     tfworker-console reconcile --rebuild     # empty the projection, then reconcile
 
