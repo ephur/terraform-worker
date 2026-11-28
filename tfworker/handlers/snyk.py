@@ -24,7 +24,7 @@ class SnykConfig(BaseModel):
     path: str = Field(default="/usr/bin/snyk", description="Path to the snyk binary.")
     required: bool = Field(
         default=False,
-        description="Stop the run when snyk is missing or a scan fails; a failed scan also removes the saved plan.",
+        description="Stop the run when a scan fails, removing the saved plan; otherwise a failed scan is only logged.",
     )
     skip_planfile: bool = Field(
         default=False, description="Skip the scan of the plan after planning."
@@ -34,7 +34,7 @@ class SnykConfig(BaseModel):
         description="Skip both scans of every definition, the source before planning and the plan after it.",
     )
     stream_output: bool = Field(default=True, description="Stream snyk's output.")
-    exempt_definitions: list[str] = Field(
+    exempt_definitions: list = Field(
         default_factory=list, description="Definitions that are never scanned."
     )
 

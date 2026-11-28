@@ -159,7 +159,7 @@ The BitbucketHandler class is meant to interact with bitbucket cloud.
 | `project` | string | required | Name of the project that holds the repository. |
 | `repository` | string | required | Name of the repository. |
 | `pull_request` | string | required | The pull request number to add the comment to. |
-| `pr_text` | string | built in | Comment posted for each plan with changes; str.format placeholders: {deployment}, {definition} and {text}, the plan output. |
+| `pr_text` | string | built in | Comment posted for each plan with changes; str.format placeholders: {deployment}, {definition} and {text}, the planned changes from the plan output. |
 
 ### handlers.datadog
 
@@ -214,7 +214,7 @@ Analyze terraform plans using OpenAI.
 | --- | --- | --- | --- |
 | `tasks` | map of object | built in | Tasks to run on each plan with changes, keyed by summary, cost_payload or cost_estimate; a summary task when unset. |
 | `send_plan_file` | boolean | `false` | Send the plan JSON instead of the plan's text output. |
-| `required` | boolean | `false` | Stop the run when the handler cannot start or a request fails. |
+| `required` | boolean | `false` | Mark the handler's errors as terminating; every OpenAI handler error currently stops the run either way (#269). |
 
 #### handlers.openai.tasks.&lt;task&gt;
 
@@ -262,11 +262,11 @@ The SnykHandler will execute a snyk scan on a specified terraform plan file
 | --- | --- | --- | --- |
 | `debug` | boolean | `false` | Log the snyk command line at debug level. |
 | `path` | string | `/usr/bin/snyk` | Path to the snyk binary. |
-| `required` | boolean | `false` | Stop the run when snyk is missing or a scan fails; a failed scan also removes the saved plan. |
+| `required` | boolean | `false` | Stop the run when a scan fails, removing the saved plan; otherwise a failed scan is only logged. |
 | `skip_planfile` | boolean | `false` | Skip the scan of the plan after planning. |
 | `skip_definition` | boolean | `true` | Skip both scans of every definition, the source before planning and the plan after it. |
 | `stream_output` | boolean | `true` | Stream snyk's output. |
-| `exempt_definitions` | list of string |  | Definitions that are never scanned. |
+| `exempt_definitions` | list |  | Definitions that are never scanned. |
 
 ### handlers.sqs
 
@@ -306,7 +306,7 @@ The TrivyHandler will execute a trivy scan on a specified terraform plan file
 | `format` | string |  | Passed as --format; with template, template is passed as --template. |
 | `path` | string | `/usr/bin/trivy` | Path to the trivy binary. |
 | `quiet` | boolean | `true` | Pass --quiet. |
-| `required` | boolean | `false` | Stop the run when trivy is missing or a scan fails; a failed plan scan also removes the saved plan. |
+| `required` | boolean | `false` | Stop the run when a scan fails, removing a scanned plan; otherwise a failed scan is only logged. |
 | `severity` | string | `HIGH,CRITICAL` | Passed as --severity. |
 | `skip_dirs` | list | `[**/examples]` | Passed as --skip-dirs when scanning a definition's source. |
 | `template` | string | built in | Template passed as --template when format is template. |

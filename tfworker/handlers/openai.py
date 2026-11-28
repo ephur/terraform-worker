@@ -143,7 +143,7 @@ class OpenAIConfig(BaseModel):
     )
     required: bool = Field(
         default=False,
-        description="Stop the run when the handler cannot start or a request fails.",
+        description="Mark the handler's errors as terminating; every OpenAI handler error currently stops the run either way (#269).",
     )
 
     model_config = {

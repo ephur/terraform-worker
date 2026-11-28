@@ -29,7 +29,7 @@ class BitbucketConfig(BaseModel):
     )
     pr_text: str = Field(
         default="Terraform Plan Output for {deployment} / {definition} \n---\n\n```\n{text}\n```",
-        description="Comment posted for each plan with changes; str.format placeholders: {deployment}, {definition} and {text}, the plan output.",
+        description="Comment posted for each plan with changes; str.format placeholders: {deployment}, {definition} and {text}, the planned changes from the plan output.",
     )
 
 

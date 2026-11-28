@@ -41,7 +41,7 @@ class TrivyConfig(BaseModel):
     quiet: bool = Field(default=True, description="Pass --quiet.")
     required: bool = Field(
         default=False,
-        description="Stop the run when trivy is missing or a scan fails; a failed plan scan also removes the saved plan.",
+        description="Stop the run when a scan fails, removing a scanned plan; otherwise a failed scan is only logged.",
     )
     severity: str = Field(default="HIGH,CRITICAL", description="Passed as --severity.")
     skip_dirs: list = Field(
