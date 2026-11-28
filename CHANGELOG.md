@@ -39,6 +39,7 @@
 - The Dockerfile builds again (#201): Python 3.13-slim, the worker installed with uv from `uv.lock`, and Terraform as a `TERRAFORM_VERSION` build arg (default 1.17.2) whose checksum is verified. CI now builds the image and smoke-tests it.
 - `--config-var` values containing `=` no longer crash definition preparation or get dropped from config templates (#187).
 - The hook env var size warning now names the real `--b64-encode` flag instead of `--b64-encode-hook-values` (#257).
+- Hook remote vars that reference a nested output key, such as `network.outputs.subnets.private` or `network.outputs.subnets["private"][0]`, now resolve to the value at that key instead of failing every hook of the definition with `Output 'subnets.private' not found` (#256).
 - `terraform get` now runs with `--terraform-bin` and the same authenticator environment as init, plan and apply, instead of the `terraform` on `PATH` with no credentials (#185).
 
 ## Features and changes
