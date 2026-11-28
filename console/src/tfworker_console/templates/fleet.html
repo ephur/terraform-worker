@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% from "_event.html" import event %}
+{% block title %}Fleet · tfworker console{% endblock %}
+{% block content %}
+<h1>Fleet</h1>
+<p class="counts">{% for health, n in fleet.counts.items() %}<span class="health h-{{ health }}">{{ n }} {{ health }}</span>{% endfor %}</p>
+{% if fleet.exceptions %}
+<table>
+  <tr><th>Health</th><th>Definition</th><th>Deployment</th><th>Store</th><th>Last apply</th><th>Last failure</th><th>Pending plan</th></tr>
+  {% for h in fleet.exceptions %}
+  <tr>
+    <td class="health h-{{ h.health }}">{{ h.health }}{% if h.locked and h.health != 'locked' %} · locked{% endif %}</td>
+    <td><a href="/definitions/{{ h.definition | urlencode }}{% if scope_query %}?{{ scope_query }}{% endif %}">{{ h.definition }}</a></td>
+    <td>{{ h.deployment }}</td><td>{{ h.store }}</td>
+    <td>{{ event(h.last_apply) }}</td><td>{{ event(h.last_failure) }}</td><td>{{ event(h.pending_plan) }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<p>Every definition is ok.</p>{% endif %}
+{% endblock %}

@@ -59,3 +59,32 @@ still land.
 The reconciler never reads state files. It needs `s3:ListBucket` on the
 prefix, and `s3:GetObject` on `<prefix>/_tfworker/*`, `*.tflock` and
 `*.tfworker-lease.*`.
+
+## Screens and the read API
+
+The console serves a screen for each view, and the same data as JSON under
+`/api/v1` (OpenAPI at `/docs`). Every view takes `store` and `deployment`
+query parameters, repeatable, to narrow it; the picker at the top of each
+screen sets them, and htmx swaps the content in place.
+
+| Screen | API | Shows |
+|---|---|---|
+| `/` | `GET /api/v1/fleet` | health counts, then every definition that is failing, drifted, pending or locked |
+| `/deployments` | `GET /api/v1/deployments` | each deployment, its record name and its health counts |
+| `/definitions/{name}` | `GET /api/v1/definitions/{name}` and `.../timeline` | one definition across deployments: health, pending plan, previews, lock, recent runs, module versions and skew, and a timeline of phases and plan changes |
+| `/plans` | `GET /api/v1/plans` | plan manifests, filtered by `status` and `definition` |
+| `/locks` | `GET /api/v1/locks` | held locks; `live` when the holder's lease is fresh, `stale` when it stopped or, without a lease, after `TFWORKER_CONSOLE_LOCK_STALE_AFTER` seconds (7200) |
+| `/runs` | `GET /api/v1/runs`, `GET /api/v1/runs/{store}/{record_id}` | run records, and the full record |
+| `/tracking/local-modules` | `GET /api/v1/tracking/local-modules` | the weekly share of applies that used a module from a local path |
+
+Health is worst first. A definition is *failing* when its newest failure is
+newer than its newest successful plan or apply, *drifted* while a drift check
+found changes, and *pending* while a saved plan is pending and unexpired. Lock
+state is judged as of the reconcile that saw it, and each lock shows how long
+ago that was. Times are stored and returned in UTC on every database.
+
+`POST /api/v1/reconcile[?store=NAME]` reconciles now instead of waiting for
+the schedule and returns each store's summary. Until roles arrive (#237) the
+console has no access control, so serve it only where everyone who can reach
+it may see every store.
+

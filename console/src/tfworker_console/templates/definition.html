@@ -1,0 +1,35 @@
+{% extends "base.html" %}{% from "_event.html" import event %}
+{% block title %}{{ view.definition }} · tfworker console{% endblock %}
+{% block content %}
+<h1>{{ view.definition }}</h1>
+<table>
+  <tr><th>Deployment</th><th>Health</th><th>Last apply</th><th>Pending plan</th><th>Previews</th><th>Lock</th><th>Recent runs</th></tr>
+  {% for d in view.deployments %}
+  <tr>
+    <td>{{ d.health.deployment }} <span class="muted">{{ d.health.store }}</span></td>
+    <td class="health h-{{ d.health.health }}">{{ d.health.health }}</td>
+    <td>{{ event(d.health.last_apply) }}</td>
+    <td>{% if d.pending_plan %}<code>{{ d.pending_plan.plan_id }}</code> +{{ d.pending_plan.add }} ~{{ d.pending_plan.change }} -{{ d.pending_plan.destroy_count }}{% else %}<span class="muted">-</span>{% endif %}</td>
+    <td>{% for p in d.previews %}<code>{{ p.plan_id }}</code> {% else %}<span class="muted">-</span>{% endfor %}</td>
+    <td>{% if d.lock %}<span class="h-{{ d.lock.state }}">{{ d.lock.state }}</span> {{ d.lock.who }}{% else %}<span class="muted">-</span>{% endif %}</td>
+    <td>{% for r in d.recent_runs %}<a href="/api/v1/runs/{{ r.store | urlencode }}/{{ r.record_id | urlencode }}">{{ r.started_at.strftime('%m-%d %H:%M') }}</a> {{ r.status }}<br>{% else %}<span class="muted">-</span>{% endfor %}</td>
+  </tr>
+  {% endfor %}
+</table>
+<h2>Modules</h2>
+<table>
+  <tr><th>Module</th><th>Versions</th></tr>
+  {% for m in view.modules %}
+  <tr><td>{{ m.key }}{% if m.skewed %} <span class="h-drifted">skewed</span>{% endif %}</td>
+      <td>{% for v in m.versions %}{{ v.deployment }}: <code>{{ v.source }}{% if v.ref %}@{{ v.ref }}{% endif %}</code> <span class="muted">{{ (v.sha or '')[:10] }}</span><br>{% endfor %}</td></tr>
+  {% else %}<tr><td colspan="2" class="muted">No module sources recorded.</td></tr>{% endfor %}
+</table>
+<h2>Timeline</h2>
+<table>
+  <tr><th>When</th><th>Deployment</th><th>What</th><th>Status</th><th>Run</th></tr>
+  {% for e in timeline %}
+  <tr><td>{{ e.at.strftime('%Y-%m-%d %H:%M') }}</td><td>{{ e.deployment }}</td><td>{{ e.action }}</td>
+      <td>{{ e.status }}{% if e.detail %} <span class="muted">{{ e.detail }}</span>{% endif %}</td><td class="muted">{{ e.run_id or '' }}</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

@@ -58,3 +58,34 @@ def test_mysql_timestamps_keep_microseconds():
         assert "DATETIME(fsp=6)" not in sql
         assert "DATETIME(6)" in sql
         assert not re.search(r"DATETIME(?!\(6\))", sql)
+
+
+class TestTimestamp:
+    def test_naive_engines_get_naive_utc(self):
+        from datetime import datetime, timedelta, timezone
+
+        from tfworker_console.sqltypes import Timestamp
+
+        ts = Timestamp()
+        local = datetime(2026, 1, 1, 6, tzinfo=timezone(timedelta(hours=-6)))
+        for name in ("mysql", "sqlite"):
+            stored = ts.process_bind_param(local, DIALECTS[name])
+            assert stored == datetime(2026, 1, 1, 12)
+            assert stored.tzinfo is None
+        kept = ts.process_bind_param(local, DIALECTS["postgresql"])
+        assert kept.tzinfo == timezone.utc and kept.hour == 12
+        assert ts.process_bind_param(None, DIALECTS["mysql"]) is None
+        naive = ts.process_bind_param(datetime(2026, 1, 1, 12), DIALECTS["postgresql"])
+        assert naive.tzinfo == timezone.utc
+
+    def test_values_read_back_as_utc(self):
+        from datetime import datetime, timedelta, timezone
+
+        from tfworker_console.sqltypes import Timestamp
+
+        ts = Timestamp()
+        read = ts.process_result_value(datetime(2026, 1, 1, 12), DIALECTS["mysql"])
+        assert read.tzinfo == timezone.utc
+        aware = datetime(2026, 1, 1, 6, tzinfo=timezone(timedelta(hours=-6)))
+        assert ts.process_result_value(aware, DIALECTS["postgresql"]).hour == 12
+        assert ts.process_result_value(None, DIALECTS["mysql"]) is None

@@ -322,6 +322,24 @@ class TestReconcile:
             assert session.get(db.Status, ("dev", "sandbox", "net")) is None
             assert session.get(db.Run, ("dev", "R1")) is not None
 
+    def test_run_definitions_follow_their_record(self, two_stores, sessions):
+        reconciler = Reconciler(two_stores, sessions)
+        reconciler.reconcile("dev")
+        with sessions() as session:
+            (row,) = session.scalars(select(db.RunDefinition))
+            assert (row.store, row.record_id, row.definition, row.deployment) == (
+                "dev",
+                "R1",
+                "net",
+                "sandbox",
+            )
+            assert row.local_modules is False and row.module_sources == []
+        boto3.client("s3", region_name="us-west-2").delete_object(
+            Bucket="dev-state", Key="tf/sandbox/_tfworker/runs/2026/11/27/R1.json"
+        )
+        reconciler.reconcile("dev")
+        assert count(sessions, db.RunDefinition) == 0
+
     def test_rebuild_from_empty(self, two_stores, sessions):
         reconciler = Reconciler(two_stores, sessions)
         reconciler.reconcile_all()

@@ -15,3 +15,5 @@ class ConsoleSettings(BaseSettings):
     stores_file: Optional[str] = None
     # seconds between scheduled reconciles while serving; 0 turns them off
     reconcile_interval: float = 300.0
+    # a lock with no fresh worker lease is shown as stale once older than this
+    lock_stale_after: float = 7200.0

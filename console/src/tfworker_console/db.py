@@ -9,7 +9,7 @@ deployment is the prefix segment its state lives under.
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, ForeignKeyConstraint, String, create_engine, event
+from sqlalchemy import JSON, ForeignKeyConstraint, Index, String, create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -75,6 +75,32 @@ class Run(Base):
     started_at: Mapped[datetime] = mapped_column(index=True)
     finished_at: Mapped[Optional[datetime]]
     body: Mapped[dict]
+
+
+class RunDefinition(Base):
+    """One definition's part of a run record, so views can filter in SQL."""
+
+    __tablename__ = "run_definitions"
+    __table_args__ = (
+        Index(
+            "ix_run_definitions_lookup",
+            "store",
+            "definition",
+            "deployment",
+            "started_at",
+        ),
+    )
+
+    store: Mapped[str] = mapped_column(String(128), primary_key=True)
+    record_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    definition: Mapped[str] = mapped_column(String(255), primary_key=True)
+    deployment: Mapped[str] = mapped_column(String(255))
+    started_at: Mapped[datetime] = mapped_column(index=True)
+    # the DefinitionResult's phases, module_sources and tags
+    phases: Mapped[dict]
+    module_sources: Mapped[Optional[list]] = mapped_column(JSON)
+    tags: Mapped[Optional[list]] = mapped_column(JSON)
+    local_modules: Mapped[bool]
 
 
 class Status(Base):

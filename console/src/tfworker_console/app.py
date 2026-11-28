@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import FastAPI
 from tfworker.report import PLAN_SCHEMA, RUN_SCHEMA, STATUS_SCHEMA
 
-from . import version
+from . import api, version, web
 from .db import engine_for, session_factory
 from .reconcile import Reconciler
 from .scheduler import ReconcileScheduler
@@ -38,6 +38,9 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
             app_state["scheduler"] = ReconcileScheduler(
                 app.state.reconciler, settings.reconcile_interval
             )
+
+    app.include_router(api.router)
+    app.include_router(web.router)
 
     @app.get("/healthz")
     def healthz() -> dict:
