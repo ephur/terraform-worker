@@ -31,7 +31,7 @@
 - `terraform get` now runs with `--terraform-bin` and the same authenticator environment as init, plan and apply, instead of the `terraform` on `PATH` with no credentials (#185).
 
 ## Features and changes
-These landed after 0.13.0 and are summarized here; see the linked PRs and the docs for details.
+These landed after 0.13.0 and are summarized here; see the linked PRs for details.
 - **Handlers** gained ordering (priority plus declared dependencies) and a shared results registry, so one handler can use another's output.
   - **GitHub** (new, #180): per-definition check runs with a rollup, a deployment-scoped PR status comment, and plan/apply reporting.
   - **Slack** (#169, reworked in #180): a single live-updating Block Kit status board per run, with a threaded per-definition table.
@@ -51,6 +51,7 @@ These landed after 0.13.0 and are summarized here; see the linked PRs and the do
 - Packaging and dev tooling moved from Poetry to uv; the version now comes from git tags via hatch-vcs (#202).
 - CI runs lint (black, isort, flake8) and tests on Python 3.11 to 3.14 (#157), and builds and smoke-tests the Docker image (#212).
 - The coverage gate is raised from 60% to 93%, the measured level, and is set once in `pyproject.toml` for CI and `make` (#194).
+- Removed the unmaintained Sphinx documentation under `docs/` and the `sphinx` dev dependency (#251).
 - Pull requests to this repository are reviewed by Claude through `anthropics/claude-code-action`, posting as `claude[bot]`. The workflow runs only in `ephur/terraform-worker` and authenticates with workload identity federation (GitHub OIDC, no stored API key); it skips when the federation variables are not set, so forks are unaffected (#222).
 
 # Changes 0.12.0 -> 0.13.0 (2024-06...)

@@ -59,7 +59,6 @@ dev = [
     "pytest-socket>=0.8.1,<0.9",
     "pytest-timeout>=2.4.0,<3",
     "seed-isort-config>=2.2.0,<3",
-    "sphinx>=7.4.7,<8",
     "moto[sts,dynamodb,s3]>=5.2.2,<6",
     "mypy>=1.20.2,<2",
 ]
