@@ -302,7 +302,7 @@ warning. See :ref:`saved-plans`.
    triple: terraform; options; --intent
 
 The **\\-\\-intent** option (``WORKER_INTENT``) optionally says what the run's plans are for: ``deploy``,
-``preview`` or ``drift``. The report handler records it, and a ``preview`` or ``drift`` plan never becomes
+``preview`` or ``drift``. Run reporting records it, and a ``preview`` or ``drift`` plan never becomes
 a pending plan. With ``--backend-plans``, ``preview`` plans are saved apart under
 ``<prefix>/_tfworker/previews/`` and never applied by a later run. See :ref:`reporting`.
 
