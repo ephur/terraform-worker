@@ -66,7 +66,8 @@ def merge_status(
     # state; it must not come back as pending or as drift
     applied_before = status.last_apply.at if status.last_apply else None
 
-    for phase in result.phases.values():
+    # in run order, whatever order the record's phases map was written in
+    for phase in sorted(result.phases.values(), key=_phase_order):
         if phase.status == "skipped":
             continue
         event = _event(run, result, phase)
@@ -103,3 +104,11 @@ def merge_status(
                 if status.drift and event.at >= status.drift.at:
                     status.drift = None
     return status
+
+
+# a run plans before it applies, so a plan never undoes its own run's apply
+_PHASE_RANK = {"init": 0, "plan": 1, "apply": 2, "destroy": 2}
+
+
+def _phase_order(phase: PhaseResult) -> int:
+    return _PHASE_RANK.get(phase.action, len(_PHASE_RANK))
