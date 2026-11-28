@@ -27,11 +27,13 @@ import time
 from datetime import datetime, timezone
 from typing import Callable, Dict, Optional, Set
 
+import tfworker.report.events as events
 import tfworker.util.log as log
 from tfworker.backends.lock import LockInfo, WorkerLease
 from tfworker.custom_types.config_file import LockingOptions, OnStale, OnTimeout
 from tfworker.custom_types.terraform import TerraformAction
 from tfworker.exceptions import BackendError, LockUnavailableError
+from tfworker.report.events import LOCK_WAITING_EVENT
 from tfworker.util.duration import format_duration
 from tfworker.util.system import pipe_exec
 
@@ -97,12 +99,14 @@ class StateLocker:
         terraform_bin: str,
         env: Callable[[], Dict[str, str]],
         run_id: Optional[str] = None,
+        deployment: Optional[str] = None,
     ):
         self.options = options
         self.backend = backend
         self._terraform_bin = terraform_bin
         self._env = env
         self._run_id = run_id
+        self._deployment = deployment
         self._heartbeats: Dict[str, _Heartbeat] = {}
         self._host = socket.gethostname()
         self._now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
@@ -178,6 +182,8 @@ class StateLocker:
                 f"{name} state is locked {self._describe(lock, now)}; "
                 f"waiting up to {format_duration(remaining)} more"
             )
+            if attempt == 0:
+                self._announce_wait(name, lock, remaining)
             delay = min(self._poll_delay(attempt), remaining)
             attempt += 1
             self._sleep(delay)
@@ -206,6 +212,22 @@ class StateLocker:
             self.backend.delete_lease(name, self._host)
         except BackendError as e:
             log.warn(f"unable to remove the worker lease for {name}: {e}")
+
+    def _announce_wait(self, name: str, lock: LockInfo, remaining: float) -> None:
+        if not events.subscribed():
+            return
+        events.publish(
+            LOCK_WAITING_EVENT,
+            self._deployment,
+            name,
+            {
+                "deployment": self._deployment,
+                "definition": name,
+                "lock": lock.model_dump(mode="json"),
+                "wait_seconds": round(remaining, 3),
+            },
+            self._run_id,
+        )
 
     def _owns(self, lease: WorkerLease) -> bool:
         return lease.pid == os.getpid() and lease.run_id == self._run_id

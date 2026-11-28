@@ -71,6 +71,7 @@ def make_locker(backend, clock=None, started=None, **options):
         "/usr/bin/terraform",
         env=lambda: {"A": "1"},
         run_id="run-7",
+        deployment="dep",
     )
     clock = clock or Clock()
     locker._now = clock.now
@@ -438,3 +439,28 @@ class TestHeartbeat:
     def test_user_fallback(self, mocker):
         mocker.patch("getpass.getuser", side_effect=KeyError("uid"))
         assert StateLocker._user() == "unknown"
+
+
+class TestLockWaitingEvent:
+    def test_announced_once_per_wait(self, backend):
+        from types import SimpleNamespace
+
+        import tfworker.report.events as events
+
+        seen = []
+        events.subscribe(SimpleNamespace(send=seen.append))
+        backend.get_lock.side_effect = [_lock(), _lock(), None]
+        acquire(make_locker(backend, wait=600, poll_interval=10), APPLY)
+        (event,) = seen
+        assert event["type"] == "io.tfworker.lock.waiting"
+        assert event["subject"] == "def1"
+        assert event["source"] == "urn:tfworker:deployment:dep"
+        assert event["tfworkerrunid"] == "run-7"
+        assert event["data"]["lock"]["who"] == "runner@pod-1"
+        assert event["data"]["wait_seconds"] == 600
+
+    def test_nothing_built_without_sinks(self, backend, mocker):
+        publish = mocker.patch("tfworker.report.events.publish")
+        backend.get_lock.side_effect = [_lock(), None]
+        acquire(make_locker(backend))
+        publish.assert_not_called()

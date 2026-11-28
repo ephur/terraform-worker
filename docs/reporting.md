@@ -110,6 +110,34 @@ A run with `--intent preview` or `--intent drift` saves its backend plans under 
 }
 ```
 
+## Streaming events
+
+The records can also be pushed as [CloudEvents](https://cloudevents.io) 1.0, for dashboards, Argo Events sensors or alerting that should not poll the bucket. Set `format: cloudevents` on the `sqs` handler and give it queues, an EventBridge bus, or both:
+
+``` yaml
+handlers:
+  sqs:
+    format: cloudevents
+    queues:
+      https://sqs.us-east-1.amazonaws.com/123456789012/all-events:
+        types: ["*"]
+      https://sqs.us-east-1.amazonaws.com/123456789012/plans:
+        types: ["io.tfworker.plan.*"]
+    event_bus: tfworker
+    types: ["io.tfworker.run.v1", "io.tfworker.status.v1"]
+```
+
+Each event's `data` is exactly what was written, and an event is only sent after that write succeeded, so the bucket stays the source of truth and a consumer that missed events can reconcile from it. Plan events also cover manifests kept on disk with `--plan-file-path`, which only the run's own machine has. Run and status events need `reporting` configured, and lock events need `locking` configured (see [State locks](locking.md)). The event types are:
+
+- `io.tfworker.run.v1`: a `tfworker.run/v1` record, once per run.
+- `io.tfworker.status.v1`: a `tfworker.status/v1` snapshot, after each update. The `subject` is the definition.
+- `io.tfworker.plan.v1`: a `tfworker.plan/v1` manifest, each time it is written or changes status.
+- `io.tfworker.lock.waiting`: the worker started waiting for a held state lock. `data` has the deployment, definition, the lock's details and how long the worker will wait.
+
+Every event has `source` `urn:tfworker:deployment:<deployment>` and a `tfworkerrunid` extension attribute naming the run that caused it. `types` (shell-style patterns) filters which events are sent; the top-level `types` applies to the bus and to every queue without its own `types`, and a queue rule's own `types` replaces it for that queue. An empty list is rejected. SQS messages carry a `content-type` message attribute of `application/cloudevents+json`. On the bus, events are sent with `Source` `tfworker` (`event_source` changes it) and the event type as `DetailType`, with the whole envelope as `Detail`.
+
+A failure to publish is logged and never fails the run. Events are sent as they happen, so the clients give up after a 5 second connect timeout, a 10 second read timeout and two attempts. SQS and EventBridge both limit a message to 256 KiB, so a very large run record may be rejected; it is still in the bucket. Without `format: cloudevents`, the `sqs` handler keeps sending its original per-stage messages. Publishing needs `sqs:SendMessage` on the queues, `sqs:ListQueues`, and `events:PutEvents` and `events:DescribeEventBus` on the bus.
+
 ## IAM
 
 On top of what terraform needs, the backend credentials need `s3:GetObject` and `s3:PutObject` on `<prefix>/_tfworker/*` (plus `s3:DeleteObject` and `s3:ListBucket` there for the pending plan index), `s3:GetObject`, `s3:PutObject` and `s3:DeleteObject` on saved plans and their pointers, `s3:GetObject` on the state (for lineage and serial), and `sts:GetCallerIdentity` for the account id. Applying a plan from `--plan-file-path` with an S3 backend needs the `_tfworker` permissions too, since it marks the definition's pending backend plans stale.

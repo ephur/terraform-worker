@@ -22,15 +22,38 @@ Advanced configuration with per-queue rules::
               actions: [apply]
               results: [0]
 
+CloudEvents configuration, publishing the report events (run records,
+definition status, plan manifests and lock waits) to queues and an
+EventBridge bus::
+
+    handlers:
+      - name: sqs
+        options:
+          format: cloudevents
+          queues:
+            https://sqs.us-east-1.amazonaws.com/123456789012/all-events:
+              types: ["*"]
+            https://sqs.us-east-1.amazonaws.com/123456789012/plans:
+              types: [io.tfworker.plan.*]
+          event_bus: tfworker
+          types: [io.tfworker.run.v1, io.tfworker.status.v1]
+
+In the `cloudevents` format, `types` filters events by type (shell-style
+patterns). The top-level `types` applies to the bus and to every queue
+without its own `types`. The per-queue `actions`, `stages` and `results` do
+not apply.
 """
 
 import json
+from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
 import click
-from pydantic import BaseModel, Field
+from botocore.config import Config
+from pydantic import BaseModel, Field, model_validator
 
+import tfworker.report.events as events
 import tfworker.util.log as log
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import HandlerError
@@ -43,14 +66,18 @@ if TYPE_CHECKING:
     from tfworker.definitions.model import Definition
 
 
+CLOUDEVENTS_CONTENT_TYPE = "application/cloudevents+json"
+
+
 class QueueRule(BaseModel):
     actions: List[TerraformAction] | None = None
     stages: List[TerraformStage] | None = None
     results: List[int] | None = None
+    types: List[str] | None = Field(default=None, min_length=1)
 
 
 class SQSConfig(BaseModel):
-    queues: List[str] | Dict[str, QueueRule]
+    queues: List[str] | Dict[str, QueueRule] = Field(default_factory=list)
     actions: List[TerraformAction] | None = None
     stages: List[TerraformStage] | None = None
     results: List[int] | None = None
@@ -58,6 +85,30 @@ class SQSConfig(BaseModel):
         default=False,
         description="Include plan file content when sending post plan messages",
     )
+    format: Literal["legacy", "cloudevents"] = Field(
+        default="legacy",
+        description="legacy sends one message per terraform stage; cloudevents publishes the report events",
+    )
+    types: List[str] | None = Field(
+        default=None,
+        min_length=1,
+        description="CloudEvents types to publish (shell-style patterns); all when unset",
+    )
+    event_bus: Optional[str] = Field(
+        default=None, description="An EventBridge bus to publish CloudEvents to"
+    )
+    event_source: str = Field(
+        default="tfworker", description="The EventBridge Source of published events"
+    )
+
+    @model_validator(mode="after")
+    def _targets(self) -> "SQSConfig":
+        if self.format == "legacy":
+            if self.event_bus is not None or self.types is not None:
+                raise ValueError("event_bus and types need format: cloudevents")
+        elif not self.queues and not self.event_bus:
+            raise ValueError("cloudevents needs queues, an event_bus, or both")
+        return self
 
 
 @HandlerRegistry.register("sqs")
@@ -77,8 +128,14 @@ class SQSHandler(BaseHandler):
         self.config = config
         self._app_state = None
         self._sqs_client = None
+        self._events_client = None
         self._ready = False
-        self._validate_queues()
+        if self._queue_urls():
+            self._validate_queues()
+        if config.event_bus:
+            self._validate_event_bus()
+        if config.format == "cloudevents":
+            events.subscribe(self)
 
     @property
     def app_state(self):
@@ -92,8 +149,29 @@ class SQSHandler(BaseHandler):
             aws = self.app_state.authenticators.get("aws")
             if aws is None:
                 raise ValueError("AWS authenticator not available")
-            self._sqs_client = aws.session.client("sqs")
+            self._sqs_client = aws.session.client("sqs", config=self._client_config())
         return self._sqs_client
+
+    @property
+    def events_client(self):
+        if self._events_client is None:
+            aws = self.app_state.authenticators.get("aws")
+            if aws is None:
+                raise ValueError("AWS authenticator not available")
+            self._events_client = aws.session.client(
+                "events", config=self._client_config()
+            )
+        return self._events_client
+
+    def _client_config(self) -> Optional[Config]:
+        """Events are sent inline with the run, so a slow endpoint must give up quickly."""
+        if self.config.format != "cloudevents":
+            return None
+        return Config(
+            connect_timeout=5,
+            read_timeout=10,
+            retries={"total_max_attempts": 2, "mode": "standard"},
+        )
 
     def is_ready(self) -> bool:
         if not self._ready:
@@ -110,6 +188,8 @@ class SQSHandler(BaseHandler):
         working_dir: str,
         result: Union["TerraformResult", None] = None,
     ) -> None:  # pragma: no cover
+        if self.config.format == "cloudevents":
+            return
         queues = self._target_queues(action, stage, result)
         if not queues:
             return
@@ -121,6 +201,62 @@ class SQSHandler(BaseHandler):
                 self.sqs_client.send_message(QueueUrl=queue, MessageBody=message)
             except Exception as e:  # pragma: no cover - boto3 errors not easy in tests
                 log.error(f"Failed to send SQS message to {queue}: {e}")
+
+    def send(self, event: Dict[str, Any]) -> None:
+        """Publish one CloudEvent to every queue and bus whose types match it."""
+        body = json.dumps(event)
+        for queue in self._event_queues(event["type"]):
+            try:
+                self.sqs_client.send_message(
+                    QueueUrl=queue,
+                    MessageBody=body,
+                    MessageAttributes={
+                        "content-type": {
+                            "DataType": "String",
+                            "StringValue": CLOUDEVENTS_CONTENT_TYPE,
+                        }
+                    },
+                )
+            except Exception as e:
+                log.error(f"Failed to send {event['type']} event to {queue}: {e}")
+        if self.config.event_bus and _matches(event["type"], self.config.types):
+            self._put_event(event, body)
+
+    def _event_queues(self, event_type: str) -> List[str]:
+        if isinstance(self.config.queues, list):
+            if _matches(event_type, self.config.types):
+                return list(self.config.queues)
+            return []
+        return [
+            queue
+            for queue, rule in self.config.queues.items()
+            if _matches(
+                event_type, rule.types if rule.types is not None else self.config.types
+            )
+        ]
+
+    def _put_event(self, event: Dict[str, Any], body: str) -> None:
+        bus = self.config.event_bus
+        try:
+            response = self.events_client.put_events(
+                Entries=[
+                    {
+                        "Source": self.config.event_source,
+                        "DetailType": event["type"],
+                        "Detail": body,
+                        "EventBusName": bus,
+                    }
+                ]
+            )
+        except Exception as e:
+            log.error(f"Failed to put {event['type']} event on {bus}: {e}")
+            return
+        if response.get("FailedEntryCount"):
+            entry = (response.get("Entries") or [{}])[0]
+            log.error(
+                f"EventBridge rejected the {event['type']} event on {bus}: "
+                f"{entry.get('ErrorCode')} {entry.get('ErrorMessage')}"
+            )
 
     def _target_queues(
         self,
@@ -213,6 +349,14 @@ class SQSHandler(BaseHandler):
             return self.config.queues
         return list(self.config.queues.keys())
 
+    def _validate_event_bus(self) -> None:
+        try:
+            self.events_client.describe_event_bus(Name=self.config.event_bus)
+        except Exception as e:
+            raise HandlerError(
+                f"EventBridge bus {self.config.event_bus} not available: {e}"
+            )
+
     def _validate_queues(self) -> None:
         try:
             existing = self.sqs_client.list_queues().get("QueueUrls", [])
@@ -221,3 +365,7 @@ class SQSHandler(BaseHandler):
         missing = [q for q in self._queue_urls() if q not in existing]
         if missing:
             raise HandlerError(f"SQS queues not found: {', '.join(missing)}")
+
+
+def _matches(event_type: str, patterns: Optional[List[str]]) -> bool:
+    return patterns is None or any(fnmatchcase(event_type, p) for p in patterns)

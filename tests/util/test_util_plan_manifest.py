@@ -502,3 +502,65 @@ class TestMarkPendingStale:
                 raise BackendError("no")
 
         assert mark_pending_stale(Broken(None, 0), "net", T0, "r", "x") == 0
+
+
+def test_written_manifests_are_published(tmp_path):
+    from types import SimpleNamespace
+
+    import tfworker.report.events as events
+    from tfworker.report.plans import PlanManifest
+    from tfworker.util.plan_manifest import LocalManifestStore
+
+    seen = []
+    events.subscribe(SimpleNamespace(send=seen.append))
+    manifest = PlanManifest(
+        plan_id="P",
+        run_id="planner",
+        deployment="dep",
+        definition="def",
+        plan_key="k",
+        sha256="0" * 64,
+        size=1,
+        created_at=datetime(2026, 11, 27, tzinfo=timezone.utc),
+    )
+    store = LocalManifestStore()
+    key = str(tmp_path / "def.tfplan.manifest.json")
+    store.write(key, manifest)
+    store.write(key, manifest.moved("applying", run_id="applier"))
+    assert [e["tfworkerrunid"] for e in seen] == ["planner", "applier"]
+    assert seen[1]["type"] == "io.tfworker.plan.v1"
+    assert seen[1]["data"]["status"] == "applying"
+
+
+def test_s3_writes_publish_only_on_success():
+    from types import SimpleNamespace
+
+    import boto3
+    from moto import mock_aws
+
+    import tfworker.report.events as events
+    from tfworker.exceptions import ReportConflictError
+    from tfworker.report.plans import PlanManifest
+    from tfworker.util.plan_manifest import S3ManifestStore
+
+    seen = []
+    events.subscribe(SimpleNamespace(send=seen.append))
+    manifest = PlanManifest(
+        plan_id="P",
+        run_id="planner",
+        deployment="dep",
+        definition="def",
+        plan_key="prefix/def/terraform.tfplan",
+        sha256="0" * 64,
+        size=1,
+        created_at=datetime(2026, 11, 27, tzinfo=timezone.utc),
+    )
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="plan-bucket")
+        store = S3ManifestStore(s3, "plan-bucket", "prefix")
+        key = store.record_key("def", "P")
+        store.write(key, manifest, create_only=True)
+        with pytest.raises(ReportConflictError):
+            store.write(key, manifest, create_only=True)
+    assert [e["data"]["plan_id"] for e in seen] == ["P"]

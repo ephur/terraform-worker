@@ -266,11 +266,15 @@ Send execution details to AWS SQS.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `queues` | list of string or map of object | required |  |
+| `queues` | list of string or map of object |  |  |
 | `actions` | list of `plan` \| `apply` \| `destroy` \| `init` |  |  |
 | `stages` | list of `pre` \| `post` \| `error` |  |  |
 | `results` | list of integer |  |  |
 | `include_plan` | boolean | `false` | Include plan file content when sending post plan messages |
+| `format` | `legacy` \| `cloudevents` | `legacy` | legacy sends one message per terraform stage; cloudevents publishes the report events |
+| `types` | list of string |  | CloudEvents types to publish (shell-style patterns); all when unset |
+| `event_bus` | string |  | An EventBridge bus to publish CloudEvents to |
+| `event_source` | string | `tfworker` | The EventBridge Source of published events |
 
 ### handlers.trivy
 

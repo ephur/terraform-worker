@@ -34,11 +34,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Dict, Optional
 
+import tfworker.report.events as events
 import tfworker.util.log as log
 from tfworker.custom_types.config_file import ReportingOptions
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.exceptions import BackendError, ReportConflictError
 from tfworker.phases import PhaseListener
+from tfworker.report.events import RUN_EVENT, STATUS_EVENT
 from tfworker.report.models import (
     LOCAL_MODULE_TAG,
     STATUS_SCHEMA,
@@ -319,8 +321,11 @@ class RunRecorder(PhaseListener):
             log.info(f"run record written: {path}")
         except ReportConflictError:
             log.warn(f"run record {path} already exists; not replaced")
+            return
         except BackendError as e:
             log.warn(f"unable to write the run record {path}: {e}")
+            return
+        events.publish(RUN_EVENT, record.deployment, None, record, record.run_id)
 
     def _write_status(self, record: RunRecord, result: DefinitionResult) -> None:
         path = f"status/{result.definition}.json"
@@ -349,6 +354,13 @@ class RunRecorder(PhaseListener):
                     status.model_dump_json(by_alias=True),
                     if_match=etag,
                     create_only=found is None,
+                )
+                events.publish(
+                    STATUS_EVENT,
+                    status.deployment,
+                    status.definition,
+                    status,
+                    record.run_id,
                 )
                 return
             except ReportConflictError:

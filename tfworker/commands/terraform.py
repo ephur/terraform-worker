@@ -27,6 +27,7 @@ from tfworker.locking import StateLocker
 from tfworker.phases import PhaseDispatcher
 from tfworker.reporting import RunRecorder
 from tfworker.util.duration import parse_duration
+from tfworker.util.provenance import current_run_id
 from tfworker.util.system import pipe_exec, pipe_exec_logged
 from tfworker.util.terraform import quote_index_brackets
 
@@ -1203,7 +1204,8 @@ class TerraformCommand(BaseCommand):
                     self.app_state.backend,
                     self.app_state.terraform_options.terraform_bin,
                     env=lambda: terraform_env(self.app_state),
-                    run_id=getattr(self.app_state.root_options, "run_id", None),
+                    run_id=current_run_id(self.app_state)[0],
+                    deployment=self.app_state.deployment,
                 )
         return self._state_locker
 

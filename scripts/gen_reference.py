@@ -188,6 +188,8 @@ def _type_name(annotation) -> str:
         return f"map of {_type_name(args[1])}" if args else "map"
     if annotation is typing.Any:
         return "any"
+    if origin is typing.Literal:
+        return " \\| ".join(f"`{value}`" for value in args)
     if isinstance(annotation, type):
         if issubclass(annotation, enum.Enum):
             return " \\| ".join(f"`{m.value}`" for m in annotation)
