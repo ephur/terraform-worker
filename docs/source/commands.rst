@@ -264,6 +264,17 @@ or destroy. **\\-\\-no-fail-on-apply-error** reports the failures and lets the r
 
 By default, the **\\-\\-fail-on-apply-error** option is active.
 
+\\-\\-lock-timeout
+++++++++++++++++++
+
+.. index::
+   triple: terraform; options; --lock-timeout
+
+The **\\-\\-lock-timeout** option (``WORKER_LOCK_TIMEOUT``) sets how long terraform retries a state lock that
+another process holds. It takes seconds or a duration such as ``90s``, ``10m`` or ``1h30m``, and is passed as
+``-lock-timeout`` to plan, apply and destroy. Without it, terraform fails at once on a held lock. When
+``locking`` is configured, the time left of its wait is used instead; see :ref:`state-locks`.
+
 \\-\\-show-output / \\-\\-no-show-output
 ++++++++++++++++++++++++++++++++++++++++
 

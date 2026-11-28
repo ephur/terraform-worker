@@ -1,7 +1,8 @@
 import json
 import os
 from contextlib import closing
-from typing import TYPE_CHECKING, Generator, Union
+from typing import TYPE_CHECKING, Generator, Optional, Union
+from urllib.parse import quote
 
 import boto3.dynamodb
 import botocore
@@ -16,6 +17,9 @@ from tfworker.custom_types import JSONType
 from tfworker.exceptions import BackendError
 
 from .base import BaseBackend, validate_backend_empty
+from .lock import LockInfo, WorkerLease
+
+LEASE_SUFFIX = ".tfworker-lease"
 
 if TYPE_CHECKING:
     import boto3  # pragma: no cover  # noqa
@@ -46,6 +50,7 @@ class S3Backend(BaseBackend):
     """
 
     auth_tag = "aws"
+    lock_inspection = True
     plan_storage = True
     tag = "s3"
 
@@ -192,18 +197,111 @@ class S3Backend(BaseBackend):
         state_config.append(
             f'    key = "{rendered_prefix}/{deployment}/terraform.tfstate"'
         )
-        if tf_util.version_at_least(
-            self._app_state.terraform_version
-            or self._app_state.terraform_options.terraform_bin,
-            1,
-            12,
-        ):
+        if self._uses_lockfile():
             state_config.append("    use_lockfile = true")
         else:
             state_config.append(f'    dynamodb_table = "terraform-{self._deployment}"')
         state_config.append('    encrypt = "true"')
         state_config.append("  }\n")
         return "\n".join(state_config)
+
+    def _uses_lockfile(self) -> bool:
+        """True when terraform locks state with a `.tflock` object rather than DynamoDB."""
+        return tf_util.version_at_least(
+            self._app_state.terraform_version
+            or self._app_state.terraform_options.terraform_bin,
+            1,
+            12,
+        )
+
+    def _state_key(self, definition: str) -> str:
+        rendered_prefix = self._app_state.root_options.backend_prefix.format(
+            deployment=self._deployment
+        )
+        return f"{rendered_prefix}/{definition}/terraform.tfstate"
+
+    def _get_object_text(self, key: str) -> Optional[str]:
+        """Return an object's body from the backend bucket, or None if it does not exist."""
+        try:
+            obj = self._s3_client.get_object(
+                Bucket=self._app_state.root_options.backend_bucket, Key=key
+            )
+            with closing(obj["Body"]) as body:
+                return body.read().decode()
+        except botocore.exceptions.ClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                return None
+            raise BackendError(f"unable to read s3 object {key}: {e}") from e
+        except botocore.exceptions.BotoCoreError as e:
+            raise BackendError(f"unable to read s3 object {key}: {e}") from e
+
+    def get_lock(self, definition: str) -> Optional[LockInfo]:
+        state_key = self._state_key(definition)
+        if self._uses_lockfile():
+            text = self._get_object_text(f"{state_key}.tflock")
+            source = f"s3 lock file {state_key}.tflock"
+        else:
+            bucket = self._app_state.root_options.backend_bucket
+            source = f"dynamodb lock {bucket}/{state_key}"
+            try:
+                item = self._ddb_client.get_item(
+                    TableName=f"terraform-{self._deployment}",
+                    Key={"LockID": {"S": f"{bucket}/{state_key}"}},
+                    ConsistentRead=True,
+                ).get("Item")
+            except (
+                botocore.exceptions.ClientError,
+                botocore.exceptions.BotoCoreError,
+            ) as e:
+                raise BackendError(f"unable to read {source}: {e}") from e
+            text = (item or {}).get("Info", {}).get("S")
+        if not text:
+            return None
+        try:
+            return LockInfo.model_validate_json(text)
+        except ValueError as e:
+            raise BackendError(f"unable to parse {source}: {e}") from e
+
+    def _lease_key(self, definition: str, host: str) -> str:
+        return f"{self._state_key(definition)}{LEASE_SUFFIX}.{quote(host, safe='')}"
+
+    def get_lease(self, definition: str, host: str) -> Optional[WorkerLease]:
+        key = self._lease_key(definition, host)
+        text = self._get_object_text(key)
+        if not text:
+            return None
+        try:
+            return WorkerLease.model_validate_json(text)
+        except ValueError as e:
+            log.warn(f"ignoring unreadable worker lease {key}: {e}")
+            return None
+
+    def put_lease(self, lease: WorkerLease) -> None:
+        key = self._lease_key(lease.definition, lease.host)
+        try:
+            self._s3_client.put_object(
+                Bucket=self._app_state.root_options.backend_bucket,
+                Key=key,
+                Body=lease.model_dump_json().encode(),
+                ContentType="application/json",
+            )
+        except (
+            botocore.exceptions.ClientError,
+            botocore.exceptions.BotoCoreError,
+        ) as e:
+            raise BackendError(f"unable to write worker lease {key}: {e}") from e
+
+    def delete_lease(self, definition: str, host: str) -> None:
+        key = self._lease_key(definition, host)
+        try:
+            self._s3_client.delete_object(
+                Bucket=self._app_state.root_options.backend_bucket, Key=key
+            )
+        except (
+            botocore.exceptions.ClientError,
+            botocore.exceptions.BotoCoreError,
+        ) as e:
+            raise BackendError(f"unable to delete worker lease {key}: {e}") from e
 
     @staticmethod
     def filter_keys(
@@ -302,6 +400,11 @@ class S3Backend(BaseBackend):
         bucket = self._app_state.root_options.backend_bucket
 
         for s3_object in self.filter_keys(s3_paginator, bucket, prefix):
+            if LEASE_SUFFIX in s3_object.rsplit("/", 1)[-1]:
+                # a lease left by a worker that was killed; not a state
+                self._delete_with_versions(s3_object)
+                log.info(f"worker lease removed: {s3_object}")
+                continue
             backend_file = self._s3_client.get_object(Bucket=bucket, Key=s3_object)
             body = backend_file["Body"]
             with closing(backend_file["Body"]):

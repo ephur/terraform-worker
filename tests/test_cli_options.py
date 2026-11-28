@@ -207,6 +207,12 @@ class TestCLIOptionsTerraform:
         cli_options = c.CLIOptionsTerraform()
         assert cli_options is not None
 
+    def test_validate_lock_timeout(self):
+        assert c.CLIOptionsTerraform(lock_timeout="10m").lock_timeout == "10m"
+        assert c.CLIOptionsTerraform().lock_timeout is None
+        with pytest.raises(ValueError):
+            c.CLIOptionsTerraform(lock_timeout="soon")
+
     def test_validate_apply_and_destroy(self):
         with pytest.raises(ValueError):
             c.CLIOptionsTerraform(apply=True, destroy=True)

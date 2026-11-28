@@ -23,3 +23,42 @@ class TestBalidateBackendEmpty:
         state = "bad state"
         with pytest.raises(BackendError, match="not valid JSON"):
             validate_backend_empty(state)
+
+
+class TestLockInspectionDefaults:
+    def test_base_backend_lock_methods_not_implemented(self):
+        from tfworker.backends.base import BaseBackend
+
+        class Minimal(BaseBackend):
+            tag = "minimal"
+            auth_tag = "none"
+
+            def __init__(self):
+                pass
+
+            def hcl(self, name):
+                return ""
+
+            def data_hcl(self, remotes):
+                return ""
+
+            def clean(self, deployment, limit=None):
+                pass
+
+            @property
+            def remotes(self):
+                return []
+
+            def get_state(self, remote):
+                return {}
+
+        backend = Minimal()
+        assert backend.lock_inspection is False
+        for call in (
+            lambda: backend.get_lock("d"),
+            lambda: backend.get_lease("d", "h"),
+            lambda: backend.put_lease(None),
+            lambda: backend.delete_lease("d", "h"),
+        ):
+            with pytest.raises(NotImplementedError):
+                call()

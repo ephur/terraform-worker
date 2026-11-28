@@ -16,6 +16,7 @@ import tfworker.util.log as log
 from tfworker import constants as const
 from tfworker.backends import Backends
 from tfworker.custom_types import FreezableBaseModel
+from tfworker.util.duration import parse_duration
 from tfworker.util.terraform import get_terraform_version
 
 
@@ -290,6 +291,11 @@ class CLIOptionsTerraform(FreezableBaseModel):
         json_schema_extra={"env": "WORKER_FORCE_PLAN"},
         description="Plan even when a saved plan is available, replacing the saved plan",
     )
+    lock_timeout: Optional[str] = Field(
+        None,
+        json_schema_extra={"env": "WORKER_LOCK_TIMEOUT"},
+        description="How long terraform retries a held state lock, such as 90s or 10m (passed as -lock-timeout to plan, apply and destroy)",
+    )
     plan_file_path: Optional[str] = Field(
         None,
         json_schema_extra={"env": "WORKER_PLAN_FILE_PATH"},
@@ -482,6 +488,13 @@ class CLIOptionsTerraform(FreezableBaseModel):
     @classmethod
     def validate_plan_file_path(cls, fpath: Union[str, None]) -> Union[str, None]:
         return validate_existing_dir(fpath)
+
+    @field_validator("lock_timeout")
+    @classmethod
+    def validate_lock_timeout(cls, value: Union[str, None]) -> Union[str, None]:
+        if value is not None:
+            parse_duration(value)
+        return value
 
     @model_validator(mode="before")
     def validate_limit(cls, values):
