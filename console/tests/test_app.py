@@ -1,5 +1,6 @@
 from unittest import mock
 
+import pytest
 from click.testing import CliRunner
 from fastapi.testclient import TestClient
 
@@ -29,6 +30,9 @@ def test_settings_from_environment(monkeypatch):
 
 def test_serve_uses_settings(monkeypatch):
     monkeypatch.setenv("TFWORKER_CONSOLE_HOST", "0.0.0.0")
+    # serve writes its options to the environment; setting them here first
+    # makes monkeypatch restore them afterwards
+    monkeypatch.setenv("TFWORKER_CONSOLE_PORT", "8000")
     with mock.patch("tfworker_console.cli.uvicorn.run") as run:
         result = CliRunner().invoke(main, ["serve", "--port", "8081"])
     assert result.exit_code == 0, result.output
@@ -39,6 +43,18 @@ def test_serve_uses_settings(monkeypatch):
         port=8081,
         reload=False,
     )
+
+
+def test_serve_options_reach_the_app(monkeypatch):
+    # dev auth judges the host the app will really listen on
+    monkeypatch.setenv("TFWORKER_CONSOLE_AUTH", "none")
+    monkeypatch.setenv("TFWORKER_CONSOLE_HOST", "127.0.0.1")
+    monkeypatch.setenv("TFWORKER_CONSOLE_PORT", "8000")
+    with mock.patch("tfworker_console.cli.uvicorn.run"):
+        result = CliRunner().invoke(main, ["serve", "--host", "0.0.0.0"])
+    assert result.exit_code == 0, result.output
+    with pytest.raises(ValueError, match="only listens on loopback"):
+        create_app()
 
 
 def test_version_option():

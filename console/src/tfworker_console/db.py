@@ -9,7 +9,16 @@ deployment is the prefix segment its state lives under.
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, ForeignKeyConstraint, Index, String, create_engine, event
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    String,
+    create_engine,
+    event,
+)
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
@@ -155,6 +164,77 @@ class SeenObject(Base):
     deployment: Mapped[str] = mapped_column(String(255))
     # the projected row's id within its kind (record id, plan id or definition)
     ref: Mapped[str] = mapped_column(String(255))
+
+
+class User(Base):
+    """
+    A person who signs in. Local users have a password; SSO users are
+    recorded at sign-in so actions can be attributed to them.
+    """
+
+    __tablename__ = "users"
+
+    username: Mapped[str] = mapped_column(String(255), primary_key=True)
+    # "local" or "oidc"
+    source: Mapped[str] = mapped_column(String(16))
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255))
+    totp_secret: Mapped[Optional[str]] = mapped_column(String(64))
+    # may sign in with a password even while SSO is enforced
+    break_glass: Mapped[bool] = mapped_column(default=False)
+    disabled: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime]
+    last_login: Mapped[Optional[datetime]]
+    # SSO users: "<issuer>#<sub>", the identity the row belongs to
+    subject: Mapped[Optional[str]] = mapped_column(String(1024), unique=True)
+    # sessions carry this; bumping it signs the account out everywhere
+    session_version: Mapped[int] = mapped_column(default=0)
+    failed_logins: Mapped[int] = mapped_column(default=0)
+    locked_until: Mapped[Optional[datetime]]
+    # the newest one-time code step accepted, so a code works only once
+    totp_last_step: Mapped[Optional[int]] = mapped_column(BigInteger)
+
+
+class UserGrant(Base):
+    """A role a local user holds, on every group or only on some."""
+
+    __tablename__ = "user_grants"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(
+        String(255), ForeignKey("users.username", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(16))
+    # None means every group
+    groups: Mapped[Optional[list]] = mapped_column(JSON)
+
+
+class ApiToken(Base):
+    """A bearer token for an integration, stored only as its SHA-256."""
+
+    __tablename__ = "api_tokens"
+
+    name: Mapped[str] = mapped_column(String(128), primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    role: Mapped[str] = mapped_column(String(16))
+    groups: Mapped[Optional[list]] = mapped_column(JSON)
+    created_by: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime]
+    expires_at: Mapped[Optional[datetime]]
+    last_used: Mapped[Optional[datetime]]
+
+
+# tables a rebuild empties; users and tokens are not part of the projection
+PROJECTION = (
+    "stores",
+    "deployments",
+    "definitions",
+    "runs",
+    "run_definitions",
+    "statuses",
+    "plans",
+    "locks",
+    "seen_objects",
+)
 
 
 def engine_for(url: str) -> Engine:

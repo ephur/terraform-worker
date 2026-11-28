@@ -19,6 +19,12 @@ dependencies = [
     "pyyaml>=6.0.3,<7",
     "sqlalchemy>=2.0.30,<3",
     "uvicorn>=0.30,<1",
+    "argon2-cffi>=23.1,<26",
+    "pyotp>=2.9,<3",
+    "pyjwt[crypto]>=2.9,<3",
+    "httpx>=0.27,<1",
+    "itsdangerous>=2.2,<3",
+    "python-multipart>=0.0.9,<1",
 ]
 
 [project.scripts]

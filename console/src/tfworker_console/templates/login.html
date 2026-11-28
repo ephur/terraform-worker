@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · tfworker console</title>
+  <style>
+    :root { --fg: #1d2330; --muted: #5d6677; --line: #dde1e8; --bg: #fff; --accent: #2f5bd3; --failing: #b42318; }
+    @media (prefers-color-scheme: dark) {
+      :root { --fg: #e6e9ef; --muted: #9aa3b2; --line: #2c3240; --bg: #14171f; --accent: #7aa2ff; } }
+    body { font: 14px/1.45 system-ui, sans-serif; color: var(--fg); background: var(--bg); margin: 0;
+           display: flex; justify-content: center; padding: 64px 16px; }
+    main { width: 100%; max-width: 340px; }
+    label { display: block; margin: 12px 0 4px; color: var(--muted); }
+    input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--line);
+            background: var(--bg); color: var(--fg); border-radius: 4px; }
+    button, .sso { display: block; width: 100%; margin-top: 16px; padding: 9px; border-radius: 4px;
+                   border: 1px solid var(--accent); background: var(--accent); color: #fff;
+                   text-align: center; text-decoration: none; font: inherit; cursor: pointer; }
+    .error { color: var(--failing); margin-top: 12px; } .muted { color: var(--muted); }
+    details { margin-top: 24px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>tfworker console</h1>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {% if sso %}<a class="sso" href="/login/sso?next={{ next | urlencode }}">Sign in with SSO</a>{% endif %}
+  {% if sso_enforced %}<details><summary class="muted">Break-glass sign-in</summary>{% endif %}
+  <form method="post" action="/login">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label for="username">Username</label><input id="username" name="username" autocomplete="username" required>
+    <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required>
+    <label for="totp">One-time code <span class="muted">(if enabled)</span></label><input id="totp" name="totp" inputmode="numeric" autocomplete="one-time-code">
+    <button type="submit">Sign in</button>
+  </form>
+  {% if sso_enforced %}</details>{% endif %}
+</main>
+</body>
+</html>

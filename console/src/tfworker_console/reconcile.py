@@ -163,7 +163,8 @@ class Reconciler:
         """Empty the projection and reconcile every store from scratch."""
         with self.sessions() as session:
             for table in reversed(db.Base.metadata.sorted_tables):
-                session.execute(delete(table))
+                if table.name in db.PROJECTION:
+                    session.execute(delete(table))
             session.commit()
         return self.reconcile_all()
 

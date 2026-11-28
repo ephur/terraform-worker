@@ -23,9 +23,11 @@
     .health { font-weight: 600; } .h-failing { color: var(--failing); } .h-drifted { color: var(--drifted); }
     .h-pending { color: var(--pending); } .h-locked, .h-stale { color: var(--locked); } .h-ok, .h-live { color: var(--ok); }
     .counts span { margin-right: 16px; } code { font-size: 12px; }
+    .dev-banner { background: var(--drifted); color: #fff; padding: 6px 16px; font-weight: 600; }
   </style>
 </head>
 <body>
+{% if dev_mode %}<div class="dev-banner" role="alert">Authentication is off. Everyone who can reach this console is an admin.</div>{% endif %}
 <header>
   <strong>tfworker console</strong>
   <a href="/{% if scope_query %}?{{ scope_query }}{% endif %}">Fleet</a><a href="/groups{% if scope_query %}?{{ scope_query }}{% endif %}">Groups</a><a href="/deployments{% if scope_query %}?{{ scope_query }}{% endif %}">Deployments</a><a href="/plans{% if scope_query %}?{{ scope_query }}{% endif %}">Plans</a>
@@ -45,6 +47,8 @@
       {% for name in all_deployments %}<option {% if name in scope.deployments %}selected{% endif %}>{{ name }}</option>{% endfor %}
     </select>
   </form>
+  {% if principal %}<span class="who muted">{{ principal.name }}{% if principal.highest_role %} · {{ principal.highest_role }}{% endif %}</span>
+  {% if not dev_mode %}<form method="post" action="/logout"><button type="submit">Sign out</button></form>{% endif %}{% endif %}
 </header>
 <main>{{ self.content() }}</main>
 </body>

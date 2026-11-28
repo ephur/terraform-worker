@@ -8,7 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from . import queries
+from .auth import Principal
 from .queries import Scope
+from .security import require_admin, require_viewer
 
 
 def get_session(request: Request):
@@ -22,6 +24,7 @@ def get_session(request: Request):
 def get_scope(
     request: Request,
     session: Session = Depends(get_session),
+    principal: Principal = Depends(require_viewer),
     store: List[str] = Query(default=[], description="Only these stores"),
     deployment: List[str] = Query(default=[], description="Only these deployments"),
     group: List[str] = Query(default=[], description="Only these deployment groups"),
@@ -32,6 +35,7 @@ def get_scope(
         deployments=[name for name in deployment if name],
         groups=[name for name in group if name],
         resolver=request.app.state.groups,
+        allowed=principal.visible_groups(),
     )
 
 
@@ -49,14 +53,31 @@ def stale_after(request: Request) -> float:
 router = APIRouter(prefix="/api/v1", tags=["read"])
 
 
+@router.get("/me", tags=["auth"])
+def me(principal: Principal = Depends(require_viewer)) -> dict:
+    """Who the caller is and the roles they hold."""
+    return {
+        "name": principal.name,
+        "kind": principal.kind,
+        "role": principal.highest_role,
+        "grants": [grant.as_dict() for grant in principal.grants],
+    }
+
+
 @router.post("/reconcile", tags=["reconcile"])
-def reconcile(request: Request, store: Optional[str] = None) -> List[dict]:
+def reconcile(
+    request: Request,
+    store: Optional[str] = None,
+    principal: Principal = Depends(require_admin),
+) -> List[dict]:
     """
     Reconcile every store, or one, now instead of waiting for the schedule.
 
     It runs before the response returns and is safe to repeat: a store that is
-    already reconciling is waited for. Access control comes with roles (#237).
+    already reconciling is waited for. It needs the admin role on every group.
     """
+    if not principal.allows("admin"):
+        raise HTTPException(403, "reconciling needs the admin role on every group")
     reconciler = request.app.state.reconciler
     if reconciler is None:
         raise HTTPException(503, "the console has no database configured")
@@ -158,12 +179,21 @@ def runs(
 
 
 @router.get("/runs/{store}/{record_id}")
-def run(record_id: str, store: str, session: Session = Depends(get_session)) -> dict:
+def run(
+    record_id: str,
+    store: str,
+    request: Request,
+    session: Session = Depends(get_session),
+    principal: Principal = Depends(require_viewer),
+) -> dict:
     """The full tfworker.run/v1 record."""
-    body = queries.run(session, store, record_id)
-    if body is None:
+    row = session.get(queries.db.Run, (store, record_id))
+    # a record in a group the caller can't see is as missing as one that isn't
+    if row is None or not principal.allows(
+        "viewer", request.app.state.groups.of(store, row.deployment)
+    ):
         raise HTTPException(404, f"no run record {record_id} in {store}")
-    return body
+    return row.body
 
 
 @router.get("/tracking/local-modules", response_model=List[queries.WeekShare])
