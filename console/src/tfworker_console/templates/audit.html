@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Audit · tfworker console{% endblock %}
+{% block content %}
+<h1>Audit log</h1>
+<p class="muted">Every admin action and attempt, newest first.</p>
+<table>
+  <tr><th>When</th><th>Who</th><th>Action</th><th>Definition</th><th>Deployment</th><th>Group</th><th>Target</th><th>Outcome</th><th>Detail</th></tr>
+  {% for e in entries %}
+  <tr><td>{{ e.at.strftime('%Y-%m-%d %H:%M:%S') }}</td><td>{{ e.actor }}{% if e.actor_kind != 'user' %} <span class="muted">{{ e.actor_kind }}</span>{% endif %}</td><td>{{ e.action }}</td>
+      <td>{{ e.definition }}</td><td>{{ e.store }}/{{ e.deployment }}</td><td>{{ e.group }}</td><td><code>{{ e.target }}</code></td>
+      <td class="outcome-{{ e.outcome }}">{{ e.outcome }}</td><td>{% if e.reason %}“{{ e.reason }}” {% endif %}<span class="muted">{{ e.detail or '' }}</span></td></tr>
+  {% else %}<tr><td colspan="9" class="muted">No admin actions yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}

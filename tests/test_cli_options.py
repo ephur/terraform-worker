@@ -198,6 +198,33 @@ class TestCLIOptionsRoot:
             c.CLIOptionsRoot(working_dir=str(working_dir))
 
 
+class TestRunLabels:
+    def test_split_labels(self):
+        assert c.split_labels(None) is None
+        assert c.split_labels("a=1, b=2,,") == ["a=1", "b=2"]
+        assert c.split_labels(["a=1,b=", "c=x=y"]) == ["a=1", "b=", "c=x=y"]
+        assert c.split_labels([""]) is None
+        for bad in ("novalue", "=x"):
+            with pytest.raises(ValueError):
+                c.split_labels(bad)
+
+    def test_parse_labels(self):
+        assert c.parse_labels(["a=1", "b = 2", "c=x=y"]) == {
+            "a": "1",
+            "b": "2",
+            "c": "x=y",
+        }
+        assert c.parse_labels(None) == {}
+
+    def test_root_option(self):
+        assert c.CLIOptionsRoot(run_label="origin=ci,team=x").run_label == [
+            "origin=ci",
+            "team=x",
+        ]
+        with pytest.raises(ValueError):
+            c.CLIOptionsRoot(run_label=["broken"])
+
+
 class TestCLIOptionsTerraform:
     """
     Tests covering base CLIOptionsTerraform model and validation of its attributes
@@ -206,6 +233,19 @@ class TestCLIOptionsTerraform:
     def test_cli_options_terraform_model(self):
         cli_options = c.CLIOptionsTerraform()
         assert cli_options is not None
+
+    def test_validate_intent(self):
+        assert c.CLIOptionsTerraform(intent="preview").intent == "preview"
+        assert c.CLIOptionsTerraform().intent is None
+        with pytest.raises(ValueError):
+            c.CLIOptionsTerraform(intent="maybe")
+
+    @pytest.mark.parametrize("intent", ["preview", "drift"])
+    @pytest.mark.parametrize("action", ["apply", "destroy"])
+    def test_preview_and_drift_runs_cannot_apply(self, intent, action):
+        with pytest.raises(ValueError, match="cannot apply or destroy"):
+            c.CLIOptionsTerraform(intent=intent, **{action: True})
+        assert c.CLIOptionsTerraform(intent="deploy", **{action: True})
 
     def test_validate_lock_timeout(self):
         assert c.CLIOptionsTerraform(lock_timeout="10m").lock_timeout == "10m"

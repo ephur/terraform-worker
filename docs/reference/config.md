@@ -21,6 +21,7 @@ Keys allowed under `terraform`.
 | `handlers` | map of any |  | Handlers to turn on, keyed by handler name. |
 | `parallel_options` | object |  | How many definitions are prepared and initialized at once. |
 | `locking` | object |  | Wait for held state locks and keep a worker lease; off when unset. |
+| `reporting` | object |  | Write run records and definition status beside state; off when unset. |
 
 ## Sections
 
@@ -130,6 +131,17 @@ Waits for held state locks; off when the block is absent. Durations are seconds 
 | `on_timeout` | `fail_definition` \| `fail_run` | `fail_definition` | Fail the definition or the whole run when the wait runs out |
 | `actions` | list of `plan` \| `apply` \| `destroy` | `[plan, apply, destroy]` | The terraform actions that wait for the lock |
 
+### reporting
+
+Writes run records and per-definition status beside each state; off when the block is absent. See [Run reporting](../reporting.md).
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `resources` | boolean | `true` | Record changed resource addresses, not only counts |
+| `state_serials` | boolean | `true` | Read state lineage and serial around plan and apply |
+| `tracked_ref` | string |  | The ref provenance compares HEAD with; the remote's default branch when unset |
+| `status_retries` | integer | `5` | Attempts at a status update another run raced |
+
 ## Handlers
 
 Each key under `handlers` turns on the handler of that name with the
@@ -186,6 +198,14 @@ Report plan and apply progress and results to GitHub.
 | `wrap_width` | integer | `120` | Hard-wrap fenced plan and error output at this column so check run pages do not scroll horizontally. 0 disables wrapping. |
 | `required` | boolean | `false` |  |
 
+### handlers.local_plans
+
+Always on.
+
+Write and check manifests for plans saved with --plan-file-path.
+
+No options.
+
 ### handlers.openai
 
 Analyze terraform plans using OpenAI.
@@ -200,7 +220,7 @@ Analyze terraform plans using OpenAI.
 
 Always on.
 
-The S3Handler class is a handler for the s3 backend
+Save plans in the state bucket so a later run can apply them.
 
 No options.
 
@@ -246,11 +266,15 @@ Send execution details to AWS SQS.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `queues` | list of string or map of object | required |  |
+| `queues` | list of string or map of object |  |  |
 | `actions` | list of `plan` \| `apply` \| `destroy` \| `init` |  |  |
 | `stages` | list of `pre` \| `post` \| `error` |  |  |
 | `results` | list of integer |  |  |
 | `include_plan` | boolean | `false` | Include plan file content when sending post plan messages |
+| `format` | `legacy` \| `cloudevents` | `legacy` | legacy sends one message per terraform stage; cloudevents publishes the report events |
+| `types` | list of string |  | CloudEvents types to publish (shell-style patterns); all when unset |
+| `event_bus` | string |  | An EventBridge bus to publish CloudEvents to |
+| `event_source` | string | `tfworker` | The EventBridge Source of published events |
 
 ### handlers.trivy
 

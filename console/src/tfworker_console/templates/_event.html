@@ -1,0 +1,1 @@
+{% macro event(e) %}{% if e %}<span title="{{ e.at }}">{{ e.at.strftime('%Y-%m-%d %H:%M') }}</span> <span class="muted">+{{ e.add }} ~{{ e.change }} -{{ e.destroy }}</span>{% else %}<span class="muted">-</span>{% endif %}{% endmacro %}

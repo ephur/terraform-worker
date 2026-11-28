@@ -9,6 +9,7 @@ The worker runs a pipeline of terraform root modules ("definitions") from one co
 - [Running the worker](running.md): the plan, apply and destroy phases, failure handling, limits and saved plans.
 - [Hooks](hooks.md): scripts that run before and after each terraform action.
 - [State locks](locking.md): waiting for held locks and detecting stale ones.
+- [Run reporting](reporting.md): run records and per-definition status written beside each state.
 
 ## Reference
 

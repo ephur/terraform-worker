@@ -1,6 +1,6 @@
 import os
 import shutil
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import click
 from pydantic import (
@@ -86,15 +86,15 @@ class CLIOptionsRoot(FreezableBaseModel):
         const.DEFAULT_AWS_REGION,
         description="Region where terraform root/lock bucket exists",
     )
-    backend_use_all_remotes: bool = Field(
-        False,
-        json_schema_extra={"env": "WORKER_BACKEND_USE_ALL_REMOTES"},
-        description="Generate remote data sources based on all definition paths present in the backend",
-    )
     run_id: Optional[str] = Field(
         None,
         json_schema_extra={"env": "WORKER_RUN_ID"},
         description="When set, prefix remote plan files with this id",
+    )
+    run_label: Optional[List[str]] = Field(
+        None,
+        json_schema_extra={"env": "WORKER_RUN_LABELS"},
+        description="key=value recorded on the run by run reporting, such as origin=ci; repeatable, or comma separated",
     )
     create_backend_bucket: bool = Field(
         True, description="Create the backend bucket if it does not exist"
@@ -210,6 +210,11 @@ class CLIOptionsRoot(FreezableBaseModel):
         except KeyError:
             raise ValueError("Invalid log format")
 
+    @field_validator("run_label", mode="before")
+    @classmethod
+    def validate_run_label(cls, value):
+        return split_labels(value)
+
     @field_validator("backend_prefix")
     @classmethod
     def validate_backend_prefix(cls, prefix: str) -> str:
@@ -291,6 +296,21 @@ class CLIOptionsTerraform(FreezableBaseModel):
         json_schema_extra={"env": "WORKER_FORCE_PLAN"},
         description="Plan even when a saved plan is available, replacing the saved plan",
     )
+    plan_ttl: str = Field(
+        "7d",
+        json_schema_extra={"env": "WORKER_PLAN_TTL"},
+        description="How long a saved plan may be applied after it was made, such as 12h or 7d",
+    )
+    require_plan_manifest: bool = Field(
+        False,
+        json_schema_extra={"env": "WORKER_REQUIRE_PLAN_MANIFEST"},
+        description="Refuse to apply a saved plan that has no manifest (plans saved by older workers)",
+    )
+    intent: Optional[str] = Field(
+        None,
+        json_schema_extra={"env": "WORKER_INTENT"},
+        description="Optional: what the run's plans are for (deploy, preview or drift), recorded by run reporting",
+    )
     lock_timeout: Optional[str] = Field(
         None,
         json_schema_extra={"env": "WORKER_LOCK_TIMEOUT"},
@@ -300,11 +320,6 @@ class CLIOptionsTerraform(FreezableBaseModel):
         None,
         json_schema_extra={"env": "WORKER_PLAN_FILE_PATH"},
         description="Path to plan files, with plan it will save to this location, apply will read from it",
-    )
-    show_output: bool = Field(
-        True,
-        json_schema_extra={"env": "WORKER_SHOW_OUTPUT"},
-        description="Show output from terraform commands",
     )
     terraform_bin: Optional[str] = Field(
         None,
@@ -420,6 +435,19 @@ class CLIOptionsTerraform(FreezableBaseModel):
                     type="value_error",
                 )
             )
+        if values.get("intent") in ("preview", "drift") and (
+            values.get("apply") or values.get("destroy")
+        ):
+            errors.append(
+                InitErrorDetails(
+                    loc=("--intent", "--intent"),
+                    input=(values.get("intent")),
+                    ctx={
+                        "error": f"a {values.get('intent')} run cannot apply or destroy"
+                    },
+                    type="value_error",
+                )
+            )
         if values.get("plan") and values.get("plan_destroy"):
             errors.append(
                 InitErrorDetails(
@@ -489,6 +517,19 @@ class CLIOptionsTerraform(FreezableBaseModel):
     def validate_plan_file_path(cls, fpath: Union[str, None]) -> Union[str, None]:
         return validate_existing_dir(fpath)
 
+    @field_validator("intent")
+    @classmethod
+    def validate_intent(cls, value: Union[str, None]) -> Union[str, None]:
+        if value is not None and value not in INTENTS:
+            raise ValueError(f"intent must be one of {', '.join(INTENTS)}")
+        return value
+
+    @field_validator("plan_ttl")
+    @classmethod
+    def validate_plan_ttl(cls, value: str) -> str:
+        parse_duration(value)
+        return value
+
     @field_validator("lock_timeout")
     @classmethod
     def validate_lock_timeout(cls, value: Union[str, None]) -> Union[str, None]:
@@ -530,6 +571,36 @@ def validate_existing_dir(fpath: Union[str, None], empty=False) -> Union[str, No
     if empty and any(os.listdir(fpath)):
         raise ValueError(f"path {fpath} must be empty!")
     return fpath
+
+
+INTENTS = ("deploy", "preview", "drift")
+
+
+def split_labels(value) -> Union[List[str], None]:
+    """Accept repeated or comma separated key=value labels."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = [value]
+    labels = []
+    for item in value:
+        for label in str(item).split(","):
+            label = label.strip()
+            if not label:
+                continue
+            key, sep, _ = label.partition("=")
+            if not sep or not key.strip():
+                raise ValueError(f"run label {label!r} must be key=value")
+            labels.append(label)
+    return labels or None
+
+
+def parse_labels(labels: Union[List[str], None]) -> Dict[str, str]:
+    out = {}
+    for label in labels or []:
+        key, _, value = label.partition("=")
+        out[key.strip()] = value.strip()
+    return out
 
 
 def validate_limit(values):

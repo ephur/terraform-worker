@@ -1,5 +1,6 @@
 import math
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -16,13 +17,17 @@ from tfworker.commands.base import BaseCommand
 from tfworker.custom_types.terraform import TerraformAction, TerraformStage
 from tfworker.definitions import Definition
 from tfworker.exceptions import (
+    DefinitionRefusedError,
     HandlerError,
     HookError,
     LockUnavailableError,
     TFWorkerException,
 )
 from tfworker.locking import StateLocker
+from tfworker.phases import PhaseDispatcher
+from tfworker.reporting import RunRecorder
 from tfworker.util.duration import parse_duration
+from tfworker.util.provenance import current_run_id
 from tfworker.util.system import pipe_exec, pipe_exec_logged
 from tfworker.util.terraform import quote_index_brackets
 
@@ -33,6 +38,10 @@ if TYPE_CHECKING:
 
 # terraform prints this when it gives up waiting for a held state lock
 LOCK_ERROR_MARKER = b"Error acquiring the state lock"
+
+
+# guards lazily created state that worker threads can touch first
+_LAZY_LOCK = threading.Lock()
 
 
 class TerraformCommand(BaseCommand):
@@ -81,6 +90,45 @@ class TerraformCommand(BaseCommand):
         if not hasattr(self, "_skips_notified"):
             self._skips_notified: Set[Tuple[str, TerraformAction]] = set()
         return self._skips_notified
+
+    @property
+    def lock_waits(self) -> Dict[str, float]:
+        """Seconds each definition's running phase waited for its state lock."""
+        # first touched from the parallel init threads, so create it only once
+        with _LAZY_LOCK:
+            if not hasattr(self, "_lock_waits"):
+                self._lock_waits: Dict[str, float] = {}
+        return self._lock_waits
+
+    @property
+    def phases(self) -> PhaseDispatcher:
+        """The core components told about each phase, such as run reporting."""
+        if not hasattr(self, "_phases"):
+            recorder = RunRecorder.from_app_state(self.app_state)
+            self._phases = PhaseDispatcher([recorder] if recorder else [])
+        return self._phases
+
+    def _dispatch_phase(
+        self,
+        name: str,
+        action: TerraformAction,
+        stage: TerraformStage,
+        result: Optional["TerraformResult"] = None,
+    ) -> None:
+        """Tell core components that a phase of a definition started, finished or failed."""
+        # taken at every stage, so a wait left by an earlier phase that never
+        # finished is dropped at the next PRE rather than reported again
+        lock_wait = self.lock_waits.pop(name, None)
+        if stage == TerraformStage.PRE:
+            lock_wait = None
+        self.phases.phase(
+            action,
+            stage,
+            self.app_state.definitions[name],
+            self.app_state.working_dir,
+            result=result,
+            lock_wait=lock_wait,
+        )
 
     def prep_providers(self) -> None:
         """
@@ -611,7 +659,8 @@ class TerraformCommand(BaseCommand):
 
     def _notify_skip(self, name: str, action: TerraformAction, reason: str) -> None:
         """
-        Tell handlers that a phase passed over a definition without running terraform.
+        Tell handlers and core components that a phase passed over a definition
+        without running terraform.
 
         Each definition is reported at most once per action: the apply phase
         can reach a definition the plan phase already passed over.
@@ -619,6 +668,7 @@ class TerraformCommand(BaseCommand):
         if (name, action) in self.skips_notified:
             return
         self.skips_notified.add((name, action))
+        self.phases.skip(action, self.app_state.definitions[name], reason)
         self.app_state.handlers.exec_skip(
             action=action,
             deployment=self.app_state.deployment,
@@ -627,7 +677,7 @@ class TerraformCommand(BaseCommand):
         )
 
     def _notify_halted(self, names: List[str], action: TerraformAction) -> None:
-        """Tell handlers about the definitions an earlier failure kept the phase from reaching."""
+        """Report the definitions an earlier failure kept the phase from reaching as skipped."""
         for name in names:
             self._notify_skip(
                 name, action, f"{action.value} halted by an earlier failure"
@@ -894,9 +944,12 @@ class TerraformCommand(BaseCommand):
                 definition=definition,
                 working_dir=self.app_state.working_dir,
             )
+        except DefinitionRefusedError as e:
+            return self._definition_refused(name, action, e, exit_on_error)
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
+        self._dispatch_phase(name, action, TerraformStage.PRE)
 
         log.trace(
             f"executing {TerraformStage.PRE} {action.value} hooks for definition {name}"
@@ -908,7 +961,7 @@ class TerraformCommand(BaseCommand):
         try:
             result = self._run_locked(name, action)
         except LockUnavailableError as e:
-            return self._lock_unavailable(name, action, e, exit_on_error)
+            return self._definition_refused(name, action, e, exit_on_error)
         if result.exit_code:
             log.error(f"error running terraform {action.value} for {name}")
             # If stream_output was disabled, show the captured output at error level
@@ -948,7 +1001,10 @@ class TerraformCommand(BaseCommand):
             )
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
+            # terraform succeeded; record that before the handler ends the run
+            self._dispatch_phase(name, action, TerraformStage.POST, result)
             self.ctx.exit(2)
+        self._dispatch_phase(name, action, TerraformStage.POST, result)
 
         if action == TerraformAction.APPLY:
             if definition.plan_file is not None:
@@ -990,6 +1046,7 @@ class TerraformCommand(BaseCommand):
             )
         except Exception as e:
             log.error(f"error-stage handler error on definition {name}: {e}")
+        self._dispatch_phase(name, action, TerraformStage.ERROR, result)
 
     def _exec_terraform_pre_plan(self, name: str) -> bool:
         """
@@ -1009,9 +1066,13 @@ class TerraformCommand(BaseCommand):
                 definition=definition,
                 working_dir=self.app_state.working_dir,
             )
+        except DefinitionRefusedError as e:
+            self._definition_refused(name, TerraformAction.PLAN, e, exit_on_error=False)
+            return False
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
             self.ctx.exit(2)
+        self._dispatch_phase(name, TerraformAction.PLAN, TerraformStage.PRE)
 
         log.trace(f"executing pre plan hooks for definition {name}")
         if not self._exec_hook(
@@ -1041,7 +1102,7 @@ class TerraformCommand(BaseCommand):
         try:
             result = self._run_locked(name, TerraformAction.PLAN)
         except LockUnavailableError as e:
-            self._lock_unavailable(name, TerraformAction.PLAN, e, exit_on_error=False)
+            self._definition_refused(name, TerraformAction.PLAN, e, exit_on_error=False)
             return
 
         if result.exit_code == 0:
@@ -1084,7 +1145,12 @@ class TerraformCommand(BaseCommand):
             )
         except HandlerError as e:
             log.error(f"handler error on definition {name}: {e}")
+            # terraform succeeded; record that before the handler ends the run
+            self._dispatch_phase(
+                name, TerraformAction.PLAN, TerraformStage.POST, result
+            )
             self.ctx.exit(2)
+        self._dispatch_phase(name, TerraformAction.PLAN, TerraformStage.POST, result)
 
         log.trace(f"executing post plan hooks for definition {name}")
         if not self._exec_hook(
@@ -1138,7 +1204,8 @@ class TerraformCommand(BaseCommand):
                     self.app_state.backend,
                     self.app_state.terraform_options.terraform_bin,
                     env=lambda: terraform_env(self.app_state),
-                    run_id=getattr(self.app_state.root_options, "run_id", None),
+                    run_id=current_run_id(self.app_state)[0],
+                    deployment=self.app_state.deployment,
                 )
         return self._state_locker
 
@@ -1154,9 +1221,13 @@ class TerraformCommand(BaseCommand):
         if locker is None or not locker.covers(action):
             return self._run(name, action)
         definition: Definition = self.app_state.definitions[name]
-        deadline = locker.acquire(
-            action, name, definition.get_target_path(self.app_state.working_dir)
-        )
+        started = time.monotonic()
+        try:
+            deadline = locker.acquire(
+                action, name, definition.get_target_path(self.app_state.working_dir)
+            )
+        finally:
+            self.lock_waits[name] = time.monotonic() - started
         try:
             return self._run(name, action, lock_deadline=deadline)
         finally:
@@ -1322,22 +1393,24 @@ class TerraformCommand(BaseCommand):
         )
         return self.state_locker is not None and self.state_locker.fail_run
 
-    def _lock_unavailable(
+    def _definition_refused(
         self,
         name: str,
         action: TerraformAction,
-        error: LockUnavailableError,
+        error: DefinitionRefusedError,
         exit_on_error: bool,
     ) -> "TerraformResult":
         """
-        Record that a definition's state lock could not be acquired.
+        Record that terraform could not run for a definition: its state lock
+        stayed held, or a handler refused it, such as a saved plan that failed
+        the apply gate.
 
         It counts as a failure of that definition's plan, apply or destroy and
-        follows the phase's failure options, like a failing hook, unless
-        locking is set to stop the whole run.
+        follows the phase's failure options, like a failing hook, unless the
+        error asks for the whole run to stop.
         """
         definition: Definition = self.app_state.definitions[name]
-        log.error(f"state lock unavailable for definition {name}: {error.message}")
+        log.error(f"{error.kind} for definition {name}: {error.message}")
         result = TerraformResult.synthesized(1, error.message)
 
         if action == TerraformAction.PLAN:
@@ -1416,6 +1489,8 @@ class TerraformResult:
         self.finished_at = finished_at
         # monotonic seconds, immune to wall clock steps; set by _run
         self.elapsed: Optional[float] = None
+        # True when terraform never ran, such as a failed hook or a refusal
+        self.outside_terraform = False
 
     @classmethod
     def synthesized(cls, exit_code: int, message: str) -> "TerraformResult":
@@ -1424,7 +1499,9 @@ class TerraformResult:
         such as a failed hook. Its start and finish are the moment of failure.
         """
         now = datetime.now(timezone.utc)
-        return cls(exit_code, b"", message.encode(), started_at=now, finished_at=now)
+        result = cls(exit_code, b"", message.encode(), started_at=now, finished_at=now)
+        result.outside_terraform = True
+        return result
 
     @property
     def duration(self) -> Optional[float]:

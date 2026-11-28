@@ -9,6 +9,7 @@ from tfworker.cli_options import CLIOptionsClean, CLIOptionsRoot, CLIOptionsTerr
 from tfworker.commands.clean import CleanCommand
 from tfworker.commands.config import log_limiter
 from tfworker.commands.env import EnvCommand
+from tfworker.commands.plans import PLAN_STATUSES, PlansCommand
 from tfworker.commands.root import RootCommand
 from tfworker.commands.terraform import TerraformCommand
 from tfworker.exceptions import HandlerError
@@ -18,6 +19,7 @@ from tfworker.util.cli import (
     validate_deployment,
     validate_host,
 )
+from tfworker.util.duration import parse_duration
 
 
 @click.group()
@@ -114,6 +116,7 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
     log.info(f"building Deployment: {deployment}")
     log_limiter()
     tfc = TerraformCommand(deployment=deployment)
+    tfc.phases.setup(deployment)
 
     if tfc.app_state.handlers is not None:
         try:
@@ -125,6 +128,7 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
             )
         except HandlerError as e:
             log.error(f"handler setup failed: {e}")
+            tfc.phases.teardown(deployment)
             ctx.exit(1)
 
     run_failed = True
@@ -136,6 +140,7 @@ def terraform(ctx: click.Context, deployment: str, **kwargs):
         tfc.terraform_apply_or_destroy()
         run_failed = False
     finally:
+        tfc.phases.teardown(deployment)
         if tfc.app_state.handlers is not None:
             try:
                 # when the run already failed, teardown errors are only
@@ -166,6 +171,98 @@ def env(ctx: click.Context, deployment: str, **kwargs):
     RootCommand(deployment=deployment)
     env = EnvCommand(deployment=deployment)
     env.exec()
+
+
+@cli.group()
+def plans():
+    """
+    List, discard and sweep saved plans
+
+    Works on the manifests saved plans get in an S3 backend, under
+    `<prefix>/_tfworker/plans/`.
+    """
+
+
+def _deployment(f):
+    return click.argument(
+        "deployment", envvar="WORKER_DEPLOYMENT", callback=validate_deployment
+    )(f)
+
+
+def _duration(ctx, param, value):
+    if value is None:
+        return None
+    try:
+        seconds = parse_duration(value)
+    except ValueError as e:
+        raise click.BadParameter(str(e))
+    if seconds <= 0:
+        raise click.BadParameter("must be longer than zero")
+    return seconds
+
+
+@plans.command("list")
+@_deployment
+@click.option(
+    "--status",
+    "statuses",
+    multiple=True,
+    type=click.Choice(PLAN_STATUSES),
+    help="Only plans in this status; may be given more than once",
+)
+@click.option("--definition", "-d", help="Only plans for this definition")
+@click.option("--json", "as_json", is_flag=True, help="Print the manifests as JSON")
+def plans_list(deployment: str, statuses, definition, as_json):
+    """List saved plans, oldest first"""
+    RootCommand(deployment=deployment)
+    PlansCommand(deployment=deployment).list_plans(statuses, definition, as_json)
+
+
+@plans.command("discard")
+@_deployment
+@click.argument("plan_ids", nargs=-1, required=True)
+@click.option("--reason", required=True, help="Why the plans are discarded")
+@click.option("--definition", "-d", help="Only look for the plans in this definition")
+def plans_discard(deployment: str, plan_ids, reason, definition):
+    """Discard pending plans so no run can apply them"""
+    RootCommand(deployment=deployment)
+    PlansCommand(deployment=deployment).discard(plan_ids, reason, definition)
+
+
+@plans.command("gc")
+@_deployment
+@click.option(
+    "--dry-run", is_flag=True, help="Report what would be retired, change nothing"
+)
+@click.option(
+    "--applying-timeout",
+    callback=_duration,
+    help="Also mark plans applying for longer than this (such as 6h) failed",
+)
+@click.option(
+    "--all-records",
+    is_flag=True,
+    help="Check every plan record, not only those in the pending index",
+)
+@click.option(
+    "--discard-unconfigured",
+    is_flag=True,
+    help="Discard plans for definitions missing from the configuration, even when their state exists",
+)
+@click.option("--json", "as_json", is_flag=True, help="Print the result as JSON")
+def plans_gc(
+    deployment: str,
+    dry_run,
+    applying_timeout,
+    all_records,
+    discard_unconfigured,
+    as_json,
+):
+    """Retire saved plans that are stale, expired or orphaned"""
+    RootCommand(deployment=deployment)
+    PlansCommand(deployment=deployment).gc(
+        dry_run, applying_timeout, as_json, all_records, discard_unconfigured
+    )
 
 
 # @TODO: Command to list all definitions in the backend for a given deployment

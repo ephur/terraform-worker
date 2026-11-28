@@ -1,0 +1,134 @@
+name: Console
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "console/**"
+      - "tfworker/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".dockerignore"
+      - ".github/workflows/console.yml"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "console/**"
+      - "tfworker/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".dockerignore"
+      - ".github/workflows/console.yml"
+
+jobs:
+  console:
+    name: Console lint and test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.13"]
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked --package tfworker-console
+
+      - name: Check formatting (black)
+        run: uv run --package tfworker-console black --check src tests
+
+      - name: Check import order (isort)
+        run: uv run --package tfworker-console isort --check src tests
+
+      - name: Lint (flake8)
+        run: uv run --package tfworker-console flake8 --ignore E203,E501,W503 src tests
+
+      - name: Run tests
+        run: uv run --package tfworker-console pytest -p no:warnings
+
+      - name: Check coverage
+        run: uv run --package tfworker-console coverage report
+
+  postgres:
+    name: Console on Postgres
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: console
+          POSTGRES_DB: console
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked --package tfworker-console
+
+      - name: Run the projection tests against Postgres
+        env:
+          TFWORKER_CONSOLE_TEST_DATABASE_URL: postgresql+psycopg://postgres:console@localhost:5432/console
+        run: uv run --package tfworker-console pytest -p no:warnings --no-cov tests/test_reconcile.py tests/test_api.py tests/test_groups.py tests/test_auth.py tests/test_demo.py tests/test_actions.py tests/test_dialects.py
+
+  image:
+    name: Console image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the console image
+        run: docker build -f console/Dockerfile --build-arg CONSOLE_VERSION=0.0.0+ci -t tfworker-console:ci .
+
+      - name: Check the image runs and carries the version
+        run: |
+          docker run --rm tfworker-console:ci --version | tee version.txt
+          grep -q "0.0.0+ci" version.txt
+
+      - name: Serve the demo from the image
+        run: |
+          docker run -d --name console -p 127.0.0.1:8000:8000 \
+            -e TFWORKER_CONSOLE_AUTH=none \
+            -e TFWORKER_CONSOLE_AUTH_ALLOW_REMOTE_NONE=true \
+            -e TFWORKER_CONSOLE_DEMO=true \
+            tfworker-console:ci
+          for attempt in $(seq 30); do
+            curl -fsS http://127.0.0.1:8000/healthz && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/ | grep -q "Authentication is off"
+          curl -fsS http://127.0.0.1:8000/api/v1/fleet | tee fleet.json
+          grep -q '"failing":1' fleet.json
+
+      - name: Show the console's log
+        if: always()
+        run: |
+          docker logs console || true
+          docker rm -f console || true

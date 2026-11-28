@@ -7,6 +7,7 @@ import click
 import pytest
 from moto import mock_aws
 
+import tfworker.report.events as events
 import tfworker.util.log as log
 from tfworker.app_state import AppState
 from tfworker.authenticators import AuthenticatorsCollection
@@ -110,6 +111,9 @@ def mock_cli_options_terraform():
     mock_terraform.destroy = False
     mock_terraform.plan_file_path = None
     mock_terraform.force_plan = False
+    mock_terraform.plan_ttl = "7d"
+    mock_terraform.require_plan_manifest = False
+    mock_terraform.intent = None
     return mock_terraform
 
 
@@ -240,9 +244,16 @@ def reset_log_globals():
     JSON logging (or fails before restoring it) would otherwise change how
     every later test behaves.
     """
-    level, fmt = log.log_level, log.log_format
+    level, fmt, err = log.log_level, log.log_format, log.log_to_stderr
     context = dict(log._run_context)
     yield
-    log.log_level, log.log_format = level, fmt
+    log.log_level, log.log_format, log.log_to_stderr = level, fmt, err
     log.clear_context()
     log.set_context(**context)
+
+
+@pytest.fixture(autouse=True)
+def reset_event_sinks():
+    """Handlers subscribe to report events for the life of the process."""
+    yield
+    events.reset()

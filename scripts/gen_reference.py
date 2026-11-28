@@ -27,6 +27,7 @@ from tfworker.custom_types.config_file import (
     GlobalVars,
     LockingOptions,
     ParallelOptions,
+    ReportingOptions,
 )
 from tfworker.definitions.model import Definition, DefinitionRemoteOptions
 from tfworker.handlers.registry import HandlerRegistry
@@ -87,6 +88,9 @@ def _portable(value: str) -> str:
 
 def _option_default(param: click.Option) -> str:
     default = param.default
+    # click 8.2 marks an option with no default with an enum sentinel
+    if type(default).__name__ == "Sentinel":
+        return ""
     if param.is_flag and not param.secondary_opts:
         return ""
     if not isinstance(default, (str, int, float, list, tuple, enum.Enum)):
@@ -147,6 +151,10 @@ def _command_section(name: str, command: click.Command, level: int) -> list[str]
                 f"| {_escape(option.help or '')} |"
             )
         lines.append("")
+    # the root's commands are listed by render_cli; nested groups list their own
+    if isinstance(command, click.Group) and name != "worker":
+        for sub in sorted(command.commands):
+            lines += _command_section(f"{name} {sub}", command.commands[sub], level + 1)
     return lines
 
 
@@ -180,6 +188,8 @@ def _type_name(annotation) -> str:
         return f"map of {_type_name(args[1])}" if args else "map"
     if annotation is typing.Any:
         return "any"
+    if origin is typing.Literal:
+        return " \\| ".join(f"`{value}`" for value in args)
     if isinstance(annotation, type):
         if issubclass(annotation, enum.Enum):
             return " \\| ".join(f"`{m.value}`" for m in annotation)
@@ -313,6 +323,12 @@ def render_config() -> str:
         "Waits for held state locks; off when the block is absent. Durations are "
         "seconds or strings such as `90s` and `1h30m`, and `actions` takes `plan`, "
         "`apply` and `destroy`. See [State locks](../locking.md).",
+    )
+    lines += _model_section(
+        "reporting",
+        ReportingOptions,
+        "Writes run records and per-definition status beside each state; off when "
+        "the block is absent. See [Run reporting](../reporting.md).",
     )
     lines += [
         "## Handlers",

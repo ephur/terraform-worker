@@ -65,15 +65,16 @@ WORKDIR /src
 
 # dependencies first, so they stay cached when only the source changes
 COPY pyproject.toml uv.lock ./
+COPY console/pyproject.toml console/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-default-groups --no-install-project
+    uv sync --locked --no-default-groups --no-install-workspace
 
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ -n "${TFWORKER_VERSION}" ]; then \
         export SETUPTOOLS_SCM_PRETEND_VERSION="${TFWORKER_VERSION}"; \
     fi; \
-    uv sync --locked --no-default-groups --no-editable
+    uv sync --locked --no-default-groups --no-editable --reinstall-package terraform-worker
 
 # --- runtime ------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim

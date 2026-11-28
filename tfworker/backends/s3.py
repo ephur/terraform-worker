@@ -1,7 +1,7 @@
 import json
 import os
 from contextlib import closing
-from typing import TYPE_CHECKING, Generator, Optional, Union
+from typing import TYPE_CHECKING, Generator, Optional, Tuple, Union
 from urllib.parse import quote
 
 import boto3.dynamodb
@@ -14,12 +14,14 @@ import click
 import tfworker.util.log as log
 import tfworker.util.terraform as tf_util
 from tfworker.custom_types import JSONType
-from tfworker.exceptions import BackendError
+from tfworker.exceptions import BackendError, ReportConflictError
+from tfworker.report import BackendLocation
 
 from .base import BaseBackend, validate_backend_empty
 from .lock import LockInfo, WorkerLease
 
 LEASE_SUFFIX = ".tfworker-lease"
+REPORT_DIR = "_tfworker"
 
 if TYPE_CHECKING:
     import boto3  # pragma: no cover  # noqa
@@ -51,12 +53,17 @@ class S3Backend(BaseBackend):
 
     auth_tag = "aws"
     lock_inspection = True
+    report_storage = True
     plan_storage = True
     tag = "s3"
 
     def __init__(
-        self, authenticators: "AuthenticatorsCollection", deployment: str = None
+        self,
+        authenticators: "AuthenticatorsCollection",
+        deployment: str = None,
+        provision: bool = True,
     ):
+        """With `provision` off, a missing lock table or bucket is not created."""
         self._authenticator: "AWSAuthenticator" = authenticators[self.auth_tag]
         self._ctx: click.Context = click.get_current_context()
         self._app_state: "AppState" = self._ctx.obj
@@ -85,8 +92,9 @@ class S3Backend(BaseBackend):
         )
 
         try:
-            self._ensure_locking_table()
-            self._ensure_backend_bucket()
+            if provision:
+                self._ensure_locking_table()
+                self._ensure_backend_bucket()
             self._bucket_files: list = self._list_bucket_definitions()
         except (
             botocore.exceptions.TokenRetrievalError,
@@ -262,6 +270,100 @@ class S3Backend(BaseBackend):
         except ValueError as e:
             raise BackendError(f"unable to parse {source}: {e}") from e
 
+    @property
+    def _rendered_prefix(self) -> str:
+        return self._app_state.root_options.backend_prefix.format(
+            deployment=self._deployment
+        )
+
+    def _report_key(self, path: str) -> str:
+        return f"{self._rendered_prefix}/{REPORT_DIR}/{path}"
+
+    def _account_id(self) -> Optional[str]:
+        if not hasattr(self, "_cached_account_id"):
+            try:
+                identity = self._authenticator.backend_session.client(
+                    "sts"
+                ).get_caller_identity()
+                self._cached_account_id = identity.get("Account")
+            except (
+                botocore.exceptions.ClientError,
+                botocore.exceptions.BotoCoreError,
+            ) as e:
+                log.debug(f"unable to look up the backend account id: {e}")
+                self._cached_account_id = None
+        return self._cached_account_id
+
+    def location(self, definition: str) -> BackendLocation:
+        return BackendLocation(
+            backend=self.tag,
+            account_id=self._account_id(),
+            region=self._app_state.root_options.backend_region,
+            bucket=self._app_state.root_options.backend_bucket,
+            state_key=self._state_key(definition),
+        )
+
+    def state_version(self, definition: str) -> Optional[Tuple[str, int]]:
+        text = self._get_object_text(self._state_key(definition))
+        if not text:
+            return None
+        try:
+            state = json.loads(text)
+            return str(state["lineage"]), int(state["serial"])
+        except (ValueError, KeyError, TypeError) as e:
+            raise BackendError(
+                f"unable to read the lineage of {definition} state: {e}"
+            ) from e
+
+    def read_report(self, path: str) -> Optional[Tuple[str, str]]:
+        key = self._report_key(path)
+        try:
+            obj = self._s3_client.get_object(
+                Bucket=self._app_state.root_options.backend_bucket, Key=key
+            )
+            with closing(obj["Body"]) as body:
+                return body.read().decode(), obj["ETag"]
+        except botocore.exceptions.ClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                return None
+            raise BackendError(f"unable to read report {key}: {e}") from e
+        except botocore.exceptions.BotoCoreError as e:
+            raise BackendError(f"unable to read report {key}: {e}") from e
+
+    def write_report(
+        self,
+        path: str,
+        body: str,
+        if_match: Optional[str] = None,
+        create_only: bool = False,
+    ) -> None:
+        key = self._report_key(path)
+        kwargs = {}
+        if if_match is not None:
+            kwargs["IfMatch"] = if_match
+        if create_only:
+            kwargs["IfNoneMatch"] = "*"
+        try:
+            self._s3_client.put_object(
+                Bucket=self._app_state.root_options.backend_bucket,
+                Key=key,
+                Body=body.encode(),
+                ContentType="application/json",
+                **kwargs,
+            )
+        except botocore.exceptions.ClientError as e:
+            code = e.response.get("Error", {}).get("Code")
+            if code in (
+                "PreconditionFailed",
+                "ConditionalRequestConflict",
+                "412",
+                "409",
+            ):
+                raise ReportConflictError(f"report {key} changed while writing") from e
+            raise BackendError(f"unable to write report {key}: {e}") from e
+        except botocore.exceptions.BotoCoreError as e:
+            raise BackendError(f"unable to write report {key}: {e}") from e
+
     def _lease_key(self, definition: str, host: str) -> str:
         return f"{self._state_key(definition)}{LEASE_SUFFIX}.{quote(host, safe='')}"
 
@@ -399,7 +501,11 @@ class S3Backend(BaseBackend):
 
         bucket = self._app_state.root_options.backend_bucket
 
+        report_prefix = f"{rendered_prefix}/{REPORT_DIR}/"
         for s3_object in self.filter_keys(s3_paginator, bucket, prefix):
+            if s3_object.startswith(report_prefix):
+                # run history is kept when states are cleaned
+                continue
             if LEASE_SUFFIX in s3_object.rsplit("/", 1)[-1]:
                 # a lease left by a worker that was killed; not a state
                 self._delete_with_versions(s3_object)

@@ -1,5 +1,5 @@
 from abc import ABCMeta, abstractmethod
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Tuple
 
 from tfworker.custom_types import JSONType
 from tfworker.exceptions import BackendError
@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from tfworker.authenticators import (  # pragma: no cover  # noqa
         AuthenticatorsCollection,
     )
+    from tfworker.report import BackendLocation  # pragma: no cover  # noqa
 
 
 class BaseBackend(metaclass=ABCMeta):
@@ -30,6 +31,7 @@ class BaseBackend(metaclass=ABCMeta):
     tag: str
     plan_storage: bool = False
     lock_inspection: bool = False
+    report_storage: bool = False
 
     @abstractmethod
     def __init__(
@@ -124,6 +126,40 @@ class BaseBackend(metaclass=ABCMeta):
 
     def put_lease(self, lease: WorkerLease) -> None:
         """Write or refresh this worker's lease for `lease.definition`."""
+        raise NotImplementedError
+
+    def location(self, definition: str) -> "BackendLocation":
+        """Return where a definition's state lives."""
+        raise NotImplementedError
+
+    def state_version(self, definition: str) -> Optional[Tuple[str, int]]:
+        """Return the lineage and serial of a definition's state, or None if it has none."""
+        raise NotImplementedError
+
+    def read_report(self, path: str) -> Optional[Tuple[str, str]]:
+        """
+        Return the text and version tag of a report object stored beside the
+        state under `_tfworker/<path>`, or None if it does not exist.
+        """
+        raise NotImplementedError
+
+    def write_report(
+        self,
+        path: str,
+        body: str,
+        if_match: Optional[str] = None,
+        create_only: bool = False,
+    ) -> None:
+        """
+        Write a report object under `_tfworker/<path>`.
+
+        Args:
+            if_match: only replace the object if it still has this version tag
+            create_only: only write if the object does not exist yet
+
+        Raises:
+            ReportConflictError: when a condition did not hold
+        """
         raise NotImplementedError
 
     def delete_lease(self, definition: str, host: str) -> None:

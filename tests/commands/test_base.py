@@ -114,6 +114,11 @@ class TestInitFunctions:
         assert b._select_backend(backend, "dep", "auth") == "ok"
         backend.value.assert_called_with("auth", deployment="dep")
 
+    def test_select_backend_passes_options(self):
+        backend = mock.Mock()
+        b._select_backend(backend, "dep", "auth", provision=False)
+        backend.value.assert_called_with("auth", deployment="dep", provision=False)
+
     def test_select_backend_error(self, mocker):
         backend = mock.Mock()
         backend.value.side_effect = b.BackendError("fail", help="h")
@@ -141,6 +146,16 @@ class TestInitFunctions:
         ph.assert_called_with({"h": {}})
         ah.assert_called_with(parsed)
         hc.assert_called_with(parsed)
+
+    def test_init_handlers_drops_old_event_sinks(self, mocker):
+        import tfworker.report.events as events
+
+        events.subscribe(mock.Mock())
+        mocker.patch.object(b, "_parse_handlers", return_value={})
+        mocker.patch.object(b, "_add_universal_handlers")
+        mocker.patch("tfworker.handlers.collection.HandlersCollection")
+        b._init_handlers({})
+        assert events.subscribed() is False
 
     def test_validate_handler_config_success(self, mocker):
         m = mock.Mock()

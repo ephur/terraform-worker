@@ -32,6 +32,9 @@ class BaseCommand:
     Base command class that initializes the application state
     """
 
+    # passed to the backend; a command that only reads sets provision False
+    backend_options: Dict[str, Any] = {}
+
     def __init__(
         self,
         deployment: str | None = None,
@@ -72,7 +75,9 @@ class BaseCommand:
         self._app_state.providers = _init_providers(
             self._app_state.loaded_config.providers, self._app_state.authenticators
         )
-        self._app_state.backend = _init_backend_(self._app_state)
+        self._app_state.backend = _init_backend_(
+            self._app_state, **self.backend_options
+        )
         self._app_state.definitions = _init_definitions(
             self._app_state.loaded_config.definitions
         )
@@ -174,7 +179,7 @@ def _init_definitions(definitions_config: Dict[str, Any]) -> "DefinitionsCollect
     return definitions
 
 
-def _init_backend_(app_state: "AppState") -> "BaseBackend":
+def _init_backend_(app_state: "AppState", **options) -> "BaseBackend":
     """
     Returns the initialized backend.
 
@@ -191,6 +196,7 @@ def _init_backend_(app_state: "AppState") -> "BaseBackend":
         backend_config,
         app_state.deployment,
         app_state.authenticators,
+        **options,
     )
 
     _check_backend_plans(app_state.root_options.backend_plans, be)
@@ -200,7 +206,10 @@ def _init_backend_(app_state: "AppState") -> "BaseBackend":
 
 
 def _select_backend(
-    backend: "Backends", deployment: str, authenticators: "AuthenticatorsCollection"
+    backend: "Backends",
+    deployment: str,
+    authenticators: "AuthenticatorsCollection",
+    **options,
 ) -> "BaseBackend":
     """
     Selects and initializes the backend.
@@ -218,7 +227,7 @@ def _select_backend(
         BackendError: If there is an error selecting the backend.
     """
     try:
-        return backend.value(authenticators, deployment=deployment)
+        return backend.value(authenticators, deployment=deployment, **options)
     except BackendError as e:
         log.error(e)
         log.error(e.help)
@@ -252,8 +261,12 @@ def _init_handlers(handlers_config: Dict[str, Any]) -> "HandlersCollection":
         HandlersCollection: The initialized handlers collection.
 
     """
+    import tfworker.report.events as events
     from tfworker.handlers.collection import HandlersCollection
 
+    # handlers subscribe to report events as they are built; drop any left
+    # from an earlier command in this process
+    events.reset()
     parsed_handlers = _parse_handlers(handlers_config)
     _add_universal_handlers(parsed_handlers)
 

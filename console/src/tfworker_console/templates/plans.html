@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Plans · tfworker console{% endblock %}
+{% block content %}
+<h1>Plans</h1>
+{% include "_notice.html" %}
+<table>
+  <tr><th>Plan</th><th>Definition</th><th>Deployment</th><th>Group</th><th>Status</th><th>Changes</th><th>Created</th><th>Expires</th><th>Actions</th></tr>
+  {% for p in plans %}
+  <tr><td><code>{{ p.plan_id }}</code>{% if p.destroy %} destroy{% endif %}{% if p.storage == 'preview' %} <span class="muted">preview</span>{% endif %}</td>
+      <td><a href="/definitions/{{ p.definition | urlencode }}{% if scope_query %}?{{ scope_query }}{% endif %}">{{ p.definition }}</a></td><td>{{ p.deployment }}</td><td>{{ p.group }}</td><td>{{ p.status }}{% if p.expired %} <span class="h-failing">expired</span>{% elif p.over_ttl %} <span class="h-drifted" title="older than the group's plan TTL">over TTL</span>{% endif %}</td>
+      <td>+{{ p.add }} ~{{ p.change }} -{{ p.destroy_count }}</td><td>{{ p.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td class="muted">{{ p.expires_at.strftime('%Y-%m-%d %H:%M') if p.expires_at else '-' }}</td>
+      <td>{% if actions_enabled and p.status == 'pending' and p.storage != 'preview' and principal and principal.allows('operator', p.group) %}
+        {% set base = '/plans/' ~ (p.store | urlencode) ~ '/' ~ (p.plan_id | urlencode) %}
+        {% set q = ('?' ~ scope_query) if scope_query else '' %}
+        <form class="act" method="post" action="{{ base }}/recheck{{ q }}"><button type="submit" title="Compare the plan with its state now">Re-check</button></form>
+        {% if p.expired or p.over_ttl %}<form class="act" method="post" action="{{ base }}/expire{{ q }}"><button type="submit">Expire</button></form>{% endif %}
+        <form class="act" method="post" action="{{ base }}/discard{{ q }}"><input name="reason" required maxlength="1000" placeholder="Reason" aria-label="Reason for discarding {{ p.plan_id }}"><button type="submit">Discard</button></form>
+      {% endif %}</td></tr>
+  {% else %}<tr><td colspan="9" class="muted">No plans.</td></tr>{% endfor %}
+</table>
+{% endblock %}

@@ -39,6 +39,7 @@ The `database` definition reads the network's output as `local.subnet_ids`, and 
 - [Running the worker](docs/running.md)
 - [Hooks](docs/hooks.md)
 - [State locks](docs/locking.md)
+- [Run reporting](docs/reporting.md)
 - [CLI reference](docs/reference/cli.md) and [configuration reference](docs/reference/config.md), generated from the code
 
 ## Assuming a Role

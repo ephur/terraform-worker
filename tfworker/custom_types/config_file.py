@@ -102,6 +102,28 @@ class LockingOptions(FreezableBaseModel):
         return value
 
 
+class ReportingOptions(FreezableBaseModel):
+    """
+    What run reporting records beside each run's state.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    resources: bool = Field(
+        True, description="Record changed resource addresses, not only counts"
+    )
+    state_serials: bool = Field(
+        True, description="Read state lineage and serial around plan and apply"
+    )
+    tracked_ref: Optional[str] = Field(
+        None,
+        description="The ref provenance compares HEAD with; the remote's default branch when unset",
+    )
+    status_retries: int = Field(
+        5, ge=1, description="Attempts at a status update another run raced"
+    )
+
+
 class GlobalVars(FreezableBaseModel):
     """
     Global Variables can be defined inside of the configuration file, this is a model for those variables.
@@ -176,6 +198,10 @@ class ConfigFile(FreezableBaseModel):
         None,
         description="Wait for held state locks and keep a worker lease; off when unset.",
     )
+    reporting: Optional[ReportingOptions] = Field(
+        None,
+        description="Write run records and definition status beside state; off when unset.",
+    )
 
     def freeze(self):
         super().freeze()
@@ -185,4 +211,6 @@ class ConfigFile(FreezableBaseModel):
             self.parallel_options.freeze()
         if self.locking:
             self.locking.freeze()
+        if self.reporting:
+            self.reporting.freeze()
         return self

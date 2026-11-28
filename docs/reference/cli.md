@@ -33,7 +33,6 @@ worker [OPTIONS] COMMAND [ARGS]...
 | `--backend-plans` / `--no-backend-plans` | `WORKER_BACKEND_PLANS` | `--no-backend-plans` | Store plans in the backend |
 | `--backend-prefix` | `WORKER_BACKEND_PREFIX` | `terraform/state/{deployment}` | Prefix to use in backend storage bucket for all terraform states |
 | `--backend-region` |  | `us-east-1` | Region where terraform root/lock bucket exists |
-| `--backend-use-all-remotes` / `--no-backend-use-all-remotes` | `WORKER_BACKEND_USE_ALL_REMOTES` | `--no-backend-use-all-remotes` | Generate remote data sources based on all definition paths present in the backend |
 | `--config-file` (repeatable) | `WORKER_CONFIG_FILE` | `./worker.yaml` | Path to one or more configuration files |
 | `--config-var` (repeatable) |  |  | key=value to be supplied as jinja variables in config_file under "var" dictionary, can be specified multiple times |
 | `--create-backend-bucket` / `--no-create-backend-bucket` |  | `--create-backend-bucket` | Create the backend bucket if it does not exist |
@@ -41,6 +40,7 @@ worker [OPTIONS] COMMAND [ARGS]...
 | `--log-level` | `LOG_LEVEL` | `INFO` | The level to use for logging/output |
 | `--repository-path` | `WORKER_REPOSITORY_PATH` | `.` | The root repository/working path, any relative paths will be resolved from here |
 | `--run-id` | `WORKER_RUN_ID` |  | When set, prefix remote plan files with this id |
+| `--run-label` (repeatable) | `WORKER_RUN_LABELS` |  | key=value recorded on the run by run reporting, such as origin=ci; repeatable, or comma separated |
 | `--version` |  |  | Show the version and exit. |
 | `--working-dir` | `WORKER_WORKING_DIR` |  | Path to use instead of a temporary directory; it must exist, be empty and be writeable, and is left in place after the run |
 
@@ -78,6 +78,68 @@ worker env [OPTIONS] DEPLOYMENT
 
 `DEPLOYMENT` is required. Can also be set with `WORKER_DEPLOYMENT`.
 
+## worker plans
+
+List, discard and sweep saved plans
+
+Works on the manifests saved plans get in an S3 backend, under
+`<prefix>/_tfworker/plans/`.
+
+```
+worker plans [OPTIONS] COMMAND [ARGS]...
+```
+
+### worker plans discard
+
+Discard pending plans so no run can apply them
+
+```
+worker plans discard [OPTIONS] DEPLOYMENT PLAN_IDS
+```
+
+`DEPLOYMENT` is required. Can also be set with `WORKER_DEPLOYMENT`.
+
+`PLAN_IDS` is required.
+
+| Option | Environment variable | Default | Description |
+| --- | --- | --- | --- |
+| `--definition` / `-d` |  |  | Only look for the plans in this definition |
+| `--reason` |  |  | Why the plans are discarded |
+
+### worker plans gc
+
+Retire saved plans that are stale, expired or orphaned
+
+```
+worker plans gc [OPTIONS] DEPLOYMENT
+```
+
+`DEPLOYMENT` is required. Can also be set with `WORKER_DEPLOYMENT`.
+
+| Option | Environment variable | Default | Description |
+| --- | --- | --- | --- |
+| `--all-records` |  |  | Check every plan record, not only those in the pending index |
+| `--applying-timeout` |  |  | Also mark plans applying for longer than this (such as 6h) failed |
+| `--discard-unconfigured` |  |  | Discard plans for definitions missing from the configuration, even when their state exists |
+| `--dry-run` |  |  | Report what would be retired, change nothing |
+| `--json` |  |  | Print the result as JSON |
+
+### worker plans list
+
+List saved plans, oldest first
+
+```
+worker plans list [OPTIONS] DEPLOYMENT
+```
+
+`DEPLOYMENT` is required. Can also be set with `WORKER_DEPLOYMENT`.
+
+| Option | Environment variable | Default | Description |
+| --- | --- | --- | --- |
+| `--definition` / `-d` |  |  | Only plans for this definition |
+| `--json` |  |  | Print the manifests as JSON |
+| `--status` (repeatable) |  |  | Only plans in this status; may be given more than once |
+
 ## worker terraform
 
 Execute terraform orchestration on all or a subset of definitions in a deployment
@@ -105,14 +167,16 @@ worker terraform [OPTIONS] DEPLOYMENT
 | `--fail-on-plan-error` / `--no-fail-on-plan-error` | `WORKER_FAIL_ON_PLAN_ERROR` | `--fail-on-plan-error` | Exit non-zero at end of planning if any definition had a plan error |
 | `--force-plan` / `--no-force-plan` | `WORKER_FORCE_PLAN` | `--no-force-plan` | Plan even when a saved plan is available, replacing the saved plan |
 | `--init-failures` / `--no-init-failures` | `WORKER_INIT_FAILURES` | `--init-failures` | Stop initializing remaining definitions when a definition fails to prepare or init |
+| `--intent` | `WORKER_INTENT` |  | Optional: what the run's plans are for (deploy, preview or drift), recorded by run reporting |
 | `--limit` (repeatable) | `WORKER_LIMIT` |  | Limit operations to a single definition |
 | `--lock-timeout` | `WORKER_LOCK_TIMEOUT` |  | How long terraform retries a held state lock, such as 90s or 10m (passed as -lock-timeout to plan, apply and destroy) |
 | `--plan` / `--no-plan` | `WORKER_PLAN` | `--no-plan` | Create a terraform plan |
 | `--plan-destroy` / `--no-plan-destroy` | `WORKER_PLAN_DESTROY` | `--no-plan-destroy` | Create a destroy plan (mutually exclusive with --plan) |
 | `--plan-failures` / `--no-plan-failures` | `WORKER_PLAN_FAILURES` | `--plan-failures` | Stop planning remaining definitions when a plan error occurs (exit code 1) |
 | `--plan-file-path` | `WORKER_PLAN_FILE_PATH` |  | Path to plan files, with plan it will save to this location, apply will read from it |
+| `--plan-ttl` | `WORKER_PLAN_TTL` | `7d` | How long a saved plan may be applied after it was made, such as 12h or 7d |
 | `--provider-cache` | `WORKER_PROVIDER_CACHE` |  | Directory to be used as a cache for provider plugins |
-| `--show-output` / `--no-show-output` | `WORKER_SHOW_OUTPUT` | `--show-output` | Show output from terraform commands |
+| `--require-plan-manifest` / `--no-require-plan-manifest` | `WORKER_REQUIRE_PLAN_MANIFEST` | `--no-require-plan-manifest` | Refuse to apply a saved plan that has no manifest (plans saved by older workers) |
 | `--stream-output` / `--no-stream-output` | `WORKER_STREAM_OUTPUT` | `--stream-output` | Stream the output from terraform command |
 | `--strict-locking` / `--no-strict-locking` | `WORKER_STRICT_LOCKING` | `--strict-locking` | Enable strict locking for terraform providers (fail if pinned providers do not meet constraints) |
 | `--target` (repeatable) | `WORKER_TARGET` |  | Target specific resources for apply/destroy, can be specified multiple times |
