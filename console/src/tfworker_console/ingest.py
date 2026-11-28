@@ -19,12 +19,14 @@ picks the object up on its own.
 import json
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pydantic import ValidationError
 from sqlalchemy import or_, select
+from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session, sessionmaker
 from tfworker.backends.lock import LockInfo
 from tfworker.report import DefinitionStatus, PlanManifest, RunRecord
@@ -47,10 +49,22 @@ log = logging.getLogger(__name__)
 APPLIED = "applied"
 UNCHANGED = "unchanged"
 IGNORED = "ignored"
+# what became of a message that did not apply
+DROPPED = "dropped"
+BUSY = "busy"
+FAILED = "failed"
 
 
 class InvalidEvent(ValueError):
     """An event that can never be applied; it is dropped rather than retried."""
+
+
+class StoreBusy(RuntimeError):
+    """The event's store is reconciling; the event is tried again shortly."""
+
+    def __init__(self, store: str):
+        super().__init__(f"store {store} is reconciling")
+        self.store = store
 
 
 @dataclass(frozen=True)
@@ -86,17 +100,21 @@ class EventIngest:
         """
         Apply one event and say what it did.
 
-        Raises InvalidEvent for an event that can never apply. Any other
-        error, such as the database being unavailable, is left to the caller
-        to retry.
+        Raises InvalidEvent for an event that can never apply, and StoreBusy
+        while its store reconciles. Any other error, such as the database
+        being unavailable, is left to the caller to retry.
         """
         kind = event.get("type")
-        handler = {
-            RUN_EVENT: (RunRecord, self._run),
-            STATUS_EVENT: (DefinitionStatus, self._status),
-            PLAN_EVENT: (PlanManifest, self._plan),
-            LOCK_WAITING_EVENT: (None, self._lock),
-        }.get(kind)
+        handler = (
+            {
+                RUN_EVENT: (RunRecord, self._run),
+                STATUS_EVENT: (DefinitionStatus, self._status),
+                PLAN_EVENT: (PlanManifest, self._plan),
+                LOCK_WAITING_EVENT: (None, self._lock),
+            }.get(kind)
+            if isinstance(kind, str)
+            else None
+        )
         if handler is None:
             return IGNORED
         model, apply = handler
@@ -104,8 +122,12 @@ class EventIngest:
         if not isinstance(data, dict):
             raise InvalidEvent(f"{kind} event has no data object")
         try:
-            body = model.model_validate(data) if model else _LockWait.parse(data)
-        except (ValidationError, ValueError) as e:
+            if model is None:
+                body = _LockWait.parse(data, _event_time(event))
+            else:
+                body = model.model_validate(data)
+            at = _written_at(body)
+        except (ValidationError, ValueError, TypeError, OverflowError) as e:
             raise InvalidEvent(f"unreadable {kind} event: {e}") from e
         if isinstance(body, PlanManifest) and body.storage == "local":
             # only the run's own machine has it; the console cannot read it
@@ -115,10 +137,23 @@ class EventIngest:
             if target is None:
                 log.debug(f"no configured store holds the {kind} event's deployment")
                 return IGNORED
-            self._lock_store(session, target.store)
-            self._deployment(session, target)
-            outcome = apply(session, target, body, _event_time(event))
-            session.commit()
+            with self.reconciler.turn(target.store.name, wait=False) as turn:
+                if not turn:
+                    raise StoreBusy(target.store.name)
+                row = self._lock_store(session, target.store)
+                if row is None:
+                    raise StoreBusy(target.store.name)
+                started = row.reconcile_started_at
+                if started is not None and at < started:
+                    # written before the last reconcile listed the store, so
+                    # that reconcile saw it, or saw it was already gone
+                    return UNCHANGED
+                try:
+                    outcome = apply(session, target, body, at)
+                    session.commit()
+                except DataError as e:
+                    # too long for a column, or a NUL Postgres refuses
+                    raise InvalidEvent(f"{kind} event does not fit: {e.orig}") from e
         return outcome
 
     # --- placing an event ---------------------------------------------------
@@ -159,31 +194,38 @@ class EventIngest:
         store, segment = rows[0]
         return Target(self.stores[store], segment)
 
-    def _lock_store(self, session: Session, store: StoreConfig) -> None:
-        # take turns with the reconciler of this store, as it holds this row
+    def _lock_store(self, session: Session, store: StoreConfig) -> Optional[db.Store]:
+        """
+        The store's row, locked as a reconcile locks it; None while another
+        replica reconciles the store, rather than waiting it out.
+        """
         if session.get(db.Store, store.name) is None:
             session.merge(Reconciler._store_row(store))
             session.commit()
-        session.execute(
-            select(db.Store).where(db.Store.name == store.name).with_for_update()
+        return session.scalar(
+            select(db.Store)
+            .where(db.Store.name == store.name)
+            .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
         )
 
-    def _deployment(self, session: Session, target: Target) -> None:
-        if session.get(db.Deployment, (target.store.name, target.segment)):
-            return
+    def _deployment(self, session: Session, target: Target) -> db.Deployment:
+        row = session.get(db.Deployment, (target.store.name, target.segment))
+        if row is not None:
+            return row
         now = self.now()
-        session.add(
-            db.Deployment(
-                store=target.store.name,
-                name=target.segment,
-                prefix=target.store.render(target.segment),
-                discovered_from="template",
-                group_name=self.groups.of(target.store.name, target.segment),
-                first_seen=now,
-                last_seen=now,
-            )
+        row = db.Deployment(
+            store=target.store.name,
+            name=target.segment,
+            prefix=target.store.render(target.segment),
+            discovered_from="template",
+            group_name=self.groups.of(target.store.name, target.segment),
+            first_seen=now,
+            last_seen=now,
         )
+        session.add(row)
         session.flush()
+        return row
 
     # --- applying each type -------------------------------------------------
 
@@ -195,7 +237,7 @@ class EventIngest:
         self._project(
             session, target, "run", f"runs/{day}/{record.record_id}.json", record
         )
-        row = session.get(db.Deployment, (store, target.segment))
+        row = self._deployment(session, target)
         row.record_name = Reconciler._record_name(session, store, target.segment)
         row.discovered_from = "record" if row.record_name else "template"
         return APPLIED
@@ -226,12 +268,13 @@ class EventIngest:
         store, segment = target.store.name, target.segment
         lock = wait.lock
         current = session.get(db.Lock, (store, segment, wait.definition))
-        if current is not None and current.observed_at >= at:
-            return UNCHANGED  # a reconcile or a later event saw it since
-        self.reconciler._definition(session, store, segment, wait.definition, None, at)
-        if current is not None and current.lock_id == lock.id:
-            current.observed_at = at
-            return APPLIED
+        if current is not None and (
+            current.observed_at >= at or current.lock_id == lock.id
+        ):
+            # seen since, or the same lock: keep the lease and when it was
+            # read together, since the screens judge one by the other
+            return UNCHANGED
+        self._deployment(session, target)
         session.merge(
             db.Lock(
                 store=store,
@@ -250,6 +293,7 @@ class EventIngest:
 
     def _project(self, session, target: Target, kind: str, path: str, body) -> None:
         store = target.store.name
+        self._deployment(session, target)
         text = body.model_dump_json(by_alias=True)
         ref = self.reconciler._project(session, store, target.segment, kind, text)
         key = f"{target.store.render(target.segment)}/{REPORT_DIR}{path}"
@@ -273,17 +317,30 @@ class _LockWait:
     deployment: str
     definition: str
     lock: LockInfo
+    at: datetime
 
     @classmethod
-    def parse(cls, data: Dict[str, Any]) -> "_LockWait":
+    def parse(cls, data: Dict[str, Any], at: datetime) -> "_LockWait":
         try:
             return cls(
                 deployment=str(data["deployment"]),
                 definition=str(data["definition"]),
                 lock=LockInfo.model_validate(data["lock"]),
+                at=at,
             )
         except KeyError as e:
             raise ValueError(f"missing {e}") from e
+
+
+def _written_at(body) -> datetime:
+    """When the worker wrote what the event carries, by the worker's clock."""
+    if isinstance(body, RunRecord):
+        return body.finished_at or body.started_at
+    if isinstance(body, DefinitionStatus):
+        return body.updated_at
+    if isinstance(body, PlanManifest):
+        return body.history[-1].at if body.history else body.created_at
+    return body.at
 
 
 def _locations(body) -> List[Tuple[Optional[str], str]]:
@@ -308,7 +365,7 @@ def _event_time(event: Dict[str, Any]) -> datetime:
     try:
         at = datetime.fromisoformat(str(event["time"]))
     except (KeyError, ValueError) as e:
-        raise InvalidEvent(f"event has no valid time: {e}") from e
+        raise ValueError(f"event has no valid time: {e}") from e
     if at.tzinfo is None:
         at = at.replace(tzinfo=timezone.utc)
     return at.astimezone(timezone.utc)
@@ -338,12 +395,18 @@ class EventConsumer:
     Reads an SQS queue on a thread while the console serves.
 
     A message is deleted once it is applied, or once it proves it can never
-    be. Any other failure leaves it on the queue to come back after its
-    visibility timeout, so a redrive policy decides when to give up on it.
+    be. A message whose store is reconciling comes back after
+    ``BUSY_SECONDS``. Any other failure leaves it on the queue to come back
+    after its visibility timeout, so a redrive policy decides when to give up
+    on it.
     """
 
     WAIT_SECONDS = 20
     BATCH = 10
+    # how soon an event whose store is reconciling is tried again
+    BUSY_SECONDS = 10
+    # assumed-role credentials expire, so the client is rebuilt this often
+    CLIENT_SECONDS = 900.0
 
     def __init__(
         self,
@@ -352,18 +415,26 @@ class EventConsumer:
         credentials: Optional[Credentials] = None,
         region: Optional[str] = None,
         client=None,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self.ingest = ingest
         self.queue_url = queue_url
         self.region = region or _queue_region(queue_url)
         self.credentials = credentials or Credentials()
         self._client = client
+        self._fixed_client = client is not None
+        self._client_made = clock()
+        self._clock = clock
+        # told of each message's event type and outcome, such as by the metrics
+        self.observers: List[Callable[[str, str], None]] = []
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
     def client(self):
-        if self._client is None:
+        stale = self._clock() - self._client_made >= self.CLIENT_SECONDS
+        if self._client is None or (stale and not self._fixed_client):
             self._client = self.credentials.session(self.region).client("sqs")
+            self._client_made = self._clock()
         return self._client
 
     def start(self) -> None:
@@ -373,9 +444,10 @@ class EventConsumer:
         self._thread.start()
 
     def stop(self) -> None:
+        # the thread is a daemon: a long poll in flight need not hold shutdown
         self._stop.set()
         if self._thread is not None:
-            self._thread.join(timeout=self.WAIT_SECONDS + 10)
+            self._thread.join(timeout=5)
 
     def poll(self) -> int:
         """Receive and apply one batch; returns how many messages were deleted."""
@@ -386,32 +458,66 @@ class EventConsumer:
         )
         done = []
         for message in response.get("Messages", []):
-            if self._handle(message):
+            finished = self._handle(message)
+            if finished is True:
                 done.append(message)
-        if done:
-            self.client().delete_message_batch(
-                QueueUrl=self.queue_url,
-                Entries=[
-                    {"Id": str(n), "ReceiptHandle": message["ReceiptHandle"]}
-                    for n, message in enumerate(done)
-                ],
-            )
-        return len(done)
+            elif finished is BUSY:
+                self._later(message)
+        if not done:
+            return 0
+        result = self.client().delete_message_batch(
+            QueueUrl=self.queue_url,
+            Entries=[
+                {"Id": str(n), "ReceiptHandle": message["ReceiptHandle"]}
+                for n, message in enumerate(done)
+            ],
+        )
+        failed = result.get("Failed", [])
+        for failure in failed:
+            # it comes back and applies again, which changes nothing
+            log.warning(f"unable to delete an event message: {failure}")
+        return len(done) - len(failed)
 
-    def _handle(self, message: Dict[str, Any]) -> bool:
-        """Apply one message, and say whether it is finished with."""
+    def _later(self, message: Dict[str, Any]) -> None:
+        try:
+            self.client().change_message_visibility(
+                QueueUrl=self.queue_url,
+                ReceiptHandle=message["ReceiptHandle"],
+                VisibilityTimeout=self.BUSY_SECONDS,
+            )
+        except Exception as e:  # it comes back after the queue's own timeout
+            log.debug(f"unable to bring an event message back sooner: {e}")
+
+    def _handle(self, message: Dict[str, Any]):
+        """Apply one message: True when finished with, BUSY, or False to retry."""
         mid = message.get("MessageId", "?")
+        kind = "unknown"
         try:
             event = envelope(message.get("Body", ""))
+            kind = str(event.get("type") or "unknown")
             outcome = self.ingest.apply(event)
         except InvalidEvent as e:
             log.warning(f"dropping event message {mid}: {e}")
+            self._observe(kind, DROPPED)
             return True
+        except StoreBusy as e:
+            log.debug(f"event message {mid} waits: {e}")
+            self._observe(kind, BUSY)
+            return BUSY
         except Exception as e:  # left for redelivery
             log.warning(f"unable to apply event message {mid}, will retry: {e}")
+            self._observe(kind, FAILED)
             return False
-        log.debug(f"{outcome} {event.get('type')} event {event.get('id')}")
+        log.debug(f"{outcome} {kind} event {event.get('id')}")
+        self._observe(kind, outcome)
         return True
+
+    def _observe(self, kind: str, outcome: str) -> None:
+        for observer in self.observers:
+            try:
+                observer(kind, outcome)
+            except Exception as e:
+                log.warning(f"an event observer failed: {e}")
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -419,6 +525,8 @@ class EventConsumer:
                 self.poll()
             except Exception as e:  # the consumer must keep running
                 log.exception(f"unable to read events from {self.queue_url}: {e}")
+                if not self._fixed_client:
+                    self._client = None  # expired credentials, for one
                 if self._stop.wait(self.WAIT_SECONDS):
                     return
 

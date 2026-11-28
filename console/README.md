@@ -178,23 +178,36 @@ it:
 - Applying an event is idempotent. A duplicate changes nothing, and so does an
   event older than what is projected: a status snapshot older than the
   current one, a plan manifest with no more history than the current one, or
-  a lock wait older than when the lock was last seen. Run records never
-  change once written.
+  a wait on a lock already shown. Run records never change once written.
+- An event written before the store's last reconcile began is skipped, since
+  that reconcile already read the object, or found it gone. A late or
+  redelivered event never brings back a released lock or a deleted plan.
 - Every object an event writes is marked unread, so the next reconcile reads
   it from the bucket, and removes the row if the object is gone. A lock from a
-  lock wait leaves on the next reconcile if it is no longer held. Plans kept
-  only on a worker's disk (`--plan-file-path`) are ignored, since the console
-  cannot read them.
-- Applying an event takes turns with the store's reconcile, like replicas do.
+  lock wait leaves on the next reconcile if it is no longer held, and the
+  reconcile reads its holder's lease. Plans kept only on a worker's disk
+  (`--plan-file-path`) are ignored, since the console cannot read them.
+- The comparisons use the worker's clocks for what it wrote and the console's
+  for when a reconcile began, so keep both on NTP. Skew only delays a change
+  until the next reconcile.
 
-A message is deleted once it is applied, or when it can never be (it is not a
-CloudEvent, or its data is unreadable). Any other failure, such as the
-database being down, leaves it on the queue to come back after the visibility
-timeout. Give the queue a redrive policy and a dead-letter queue so a message
-that keeps failing stops coming back. Every replica reads the same queue, and
-SQS gives each message to one of them. Reading needs `sqs:ReceiveMessage` and
-`sqs:DeleteMessage` on the queue (and `kms:Decrypt` on its key when it is
-encrypted).
+An event waits while its store reconciles, so the two never write the store
+at once: the message is put back and tried again 10 seconds later. A message
+is deleted once it is applied, or when it can never be (it is not a
+CloudEvent, its data is unreadable, or it does not fit the database). Any
+other failure, such as the database being down, leaves it on the queue to
+come back after the visibility timeout. Give the queue a redrive policy whose
+`maxReceiveCount` allows for a few long reconciles (10 or more), and a
+dead-letter queue, so a message that keeps failing stops coming back. Every
+replica reads the same queue, and SQS gives each message to one of them.
+
+Anyone who can send to the queue can put rows in the projection until the
+next reconcile removes them, so allow `sqs:SendMessage` only to the workers.
+Reading needs `sqs:ReceiveMessage`, `sqs:DeleteMessage` and
+`sqs:ChangeMessageVisibility` on the queue (and `kms:Decrypt` on its key when
+it is encrypted). With `TFWORKER_CONSOLE_EVENTS_ROLE_ARN`, the role is assumed
+again every 15 minutes and after any error, so its sessions never expire
+under the consumer.
 
 ## Screens and the read API
 

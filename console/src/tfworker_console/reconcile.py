@@ -23,9 +23,12 @@ and the rest still land.
 """
 
 import logging
+import threading
+from collections import defaultdict
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, Iterator, List, Optional, Tuple
 from urllib.parse import quote
 
 from sqlalchemy import delete, select
@@ -113,6 +116,10 @@ class Reconciler:
         self.groups = groups or Groups()
         self.sessions = sessions
         self.now = now
+        # one reconcile or event of a store at a time in this process; across
+        # replicas the store's row lock does the same
+        self._turns: Dict[str, threading.Lock] = defaultdict(threading.Lock)
+        self._turns_lock = threading.Lock()
 
     def reconcile_all(self) -> List[StoreSummary]:
         self._forget_unconfigured()
@@ -125,6 +132,23 @@ class Reconciler:
                 summaries.append(StoreSummary(store=name, errors=[str(e)]))
         return summaries
 
+    @contextmanager
+    def turn(self, name: str, wait: bool = True) -> Iterator[bool]:
+        """
+        Hold this process's turn at a store, saying whether it was had.
+
+        SQLite ignores row locks, so this is what keeps the schedule and the
+        event consumer of one console from writing a store at once.
+        """
+        with self._turns_lock:
+            lock = self._turns[name]
+        had = lock.acquire(blocking=wait)
+        try:
+            yield had
+        finally:
+            if had:
+                lock.release()
+
     def reconcile(self, name: str) -> StoreSummary:
         """
         Reconcile one store in one transaction.
@@ -132,6 +156,10 @@ class Reconciler:
         The store's row is locked for the transaction, so two reconcilers of
         the same store (the schedule and the CLI, or two replicas) take turns.
         """
+        with self.turn(name):
+            return self._reconcile(name)
+
+    def _reconcile(self, name: str) -> StoreSummary:
         store = self.stores[name]
         summary = StoreSummary(store=name)
         with self.sessions() as session:
@@ -144,6 +172,8 @@ class Reconciler:
                 .execution_options(populate_existing=True)
             ).scalar_one()
             try:
+                # events written before this are seen by this reconcile
+                row.reconcile_started_at = self.now()
                 self._store(session, store, summary)
                 row.last_error = "; ".join(summary.errors)[:2048] or None
                 row.reconciled_at = self.now()

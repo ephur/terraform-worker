@@ -6,6 +6,7 @@ import boto3
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.exc import DataError
 from test_reconcile import (  # noqa: F401
     NOW,
     aws,
@@ -30,11 +31,13 @@ from tfworker_console import db
 from tfworker_console.app import create_app
 from tfworker_console.ingest import (
     APPLIED,
+    DROPPED,
     IGNORED,
     UNCHANGED,
     EventConsumer,
     EventIngest,
     InvalidEvent,
+    StoreBusy,
     _queue_region,
     envelope,
 )
@@ -178,10 +181,13 @@ class TestApply:
         assert ingest.apply(event(LOCK_WAITING_EVENT, lock_wait(), at=NOW)) == UNCHANGED
         assert ingest.apply(event(LOCK_WAITING_EVENT, lock_wait(), at=at)) == UNCHANGED
         # later, same lock: only when it was seen moves
+        # later, same lock: the lease and when it was read stay together
         later = at + timedelta(minutes=1)
-        assert ingest.apply(event(LOCK_WAITING_EVENT, lock_wait(), at=later)) == APPLIED
+        assert (
+            ingest.apply(event(LOCK_WAITING_EVENT, lock_wait(), at=later)) == UNCHANGED
+        )
         (lock,) = rows(sessions, db.Lock)
-        assert lock.observed_at == later
+        assert lock.observed_at == at
         # a different lock replaces it
         newer = later + timedelta(minutes=1)
         wait = lock_wait(lock_id="lock-2")
@@ -198,6 +204,63 @@ class TestApply:
         ingest.apply(event(LOCK_WAITING_EVENT, lock_wait(), at=later))
         (lock,) = rows(sessions, db.Lock)
         assert lock.lease == {"host": "pod-1"}
+        assert lock.observed_at == NOW
+
+    def test_nothing_is_written_when_nothing_changes(
+        self, ingest, sessions  # noqa: F811
+    ):
+        ingest.apply(event(RUN_EVENT, located(record("alpha", PREFIX))))
+        # the same record id, placed in another deployment
+        again = located(record("beta", "terraform/state/beta"))
+        assert ingest.apply(event(RUN_EVENT, again)) == UNCHANGED
+        assert {d.name for d in rows(sessions, db.Deployment)} == {"alpha"}
+
+    def test_does_not_fit(self, ingest, sessions):  # noqa: F811
+        error = DataError("INSERT", {}, Exception("value too long"))
+        with mock.patch.object(ingest.reconciler, "_project", side_effect=error):
+            with pytest.raises(InvalidEvent, match="does not fit"):
+                ingest.apply(event(STATUS_EVENT, located(status("alpha", PREFIX))))
+        assert rows(sessions, db.Status) == []
+
+
+class TestTakingTurns:
+    def test_events_older_than_the_last_reconcile_are_skipped(
+        self, aws, ingest, reconciler, sessions  # noqa: F811
+    ):
+        bucket("prod-state")
+        bucket("dev-state")
+        reconciler.reconcile("prod")  # finds no lock, at NOW
+        late = event(LOCK_WAITING_EVENT, lock_wait(), at=NOW - timedelta(minutes=10))
+        assert ingest.apply(late) == UNCHANGED
+        assert rows(sessions, db.Lock) == []
+        old = located(status("alpha", PREFIX))
+        old.updated_at = NOW - timedelta(seconds=1)
+        assert ingest.apply(event(STATUS_EVENT, old)) == UNCHANGED
+        newer = located(status("alpha", PREFIX))
+        newer.updated_at = NOW + timedelta(seconds=1)
+        assert ingest.apply(event(STATUS_EVENT, newer)) == APPLIED
+
+    def test_a_failed_reconcile_does_not_move_the_mark(
+        self, aws, ingest, reconciler, sessions  # noqa: F811
+    ):
+        # no buckets: the reconcile fails as a whole
+        reconciler.reconcile("prod")
+        (store,) = rows(sessions, db.Store, name="prod")
+        assert store.last_error and store.reconcile_started_at is None
+
+    def test_busy_while_this_process_reconciles(self, ingest, reconciler):
+        body = event(STATUS_EVENT, located(status("alpha", PREFIX)))
+        with reconciler.turn("prod") as had:
+            assert had
+            with pytest.raises(StoreBusy, match="prod"):
+                ingest.apply(body)
+        assert ingest.apply(body) == APPLIED
+
+    def test_busy_while_another_replica_reconciles(self, ingest):
+        body = event(STATUS_EVENT, located(status("alpha", PREFIX)))
+        with mock.patch.object(ingest, "_lock_store", return_value=None):
+            with pytest.raises(StoreBusy):
+                ingest.apply(body)
 
 
 class TestPlacing:
@@ -263,13 +326,30 @@ class TestInvalid:
         with pytest.raises(InvalidEvent, match="unreadable"):
             ingest.apply({"type": STATUS_EVENT, "data": {"deployment": "alpha"}})
         with pytest.raises(InvalidEvent, match="missing"):
-            ingest.apply({"type": LOCK_WAITING_EVENT, "data": {"deployment": "a"}})
+            ingest.apply(
+                {
+                    "type": LOCK_WAITING_EVENT,
+                    "time": NOW.isoformat(),
+                    "data": {"deployment": "a"},
+                }
+            )
 
-    def test_no_time(self, ingest):
-        body = event(STATUS_EVENT, located(status("alpha", PREFIX)))
+    def test_not_a_string_type(self, ingest):
+        assert ingest.apply({"type": ["x"], "data": {}}) == IGNORED
+
+    def test_lock_waits_need_a_time(self, ingest):
+        body = event(LOCK_WAITING_EVENT, lock_wait())
         del body["time"]
         with pytest.raises(InvalidEvent, match="time"):
             ingest.apply(body)
+        body["time"] = "9999-12-31T23:59:59-10:00"
+        with pytest.raises(InvalidEvent):
+            ingest.apply(body)
+
+    def test_others_go_by_what_they_carry(self, ingest):
+        body = event(STATUS_EVENT, located(status("alpha", PREFIX)))
+        del body["time"]
+        assert ingest.apply(body) == APPLIED
 
     def test_naive_time_is_utc(self, ingest, sessions):  # noqa: F811
         body = event(LOCK_WAITING_EVENT, lock_wait())
@@ -361,6 +441,76 @@ class TestConsumer:
         with mock.patch.object(ingest, "apply", side_effect=RuntimeError("db down")):
             assert consumer.poll() == 0
         assert consumer.poll() == 1
+
+    def test_busy_comes_back_sooner(self, queue, ingest):
+        sqs, url = queue
+        good = event(STATUS_EVENT, located(status("alpha", PREFIX)))
+        sqs.send_message(QueueUrl=url, MessageBody=json.dumps(good))
+        consumer = EventConsumer(ingest, url, client=sqs)
+        consumer.WAIT_SECONDS = 0
+        consumer.BUSY_SECONDS = 0
+        with mock.patch.object(ingest, "apply", side_effect=StoreBusy("prod")):
+            with mock.patch.object(
+                sqs, "change_message_visibility", wraps=sqs.change_message_visibility
+            ) as later:
+                assert consumer.poll() == 0
+                assert later.call_args.kwargs["VisibilityTimeout"] == 0
+        assert consumer.poll() == 1
+
+    def test_busy_message_that_cannot_be_moved(self, ingest):
+        client = mock.Mock()
+        client.receive_message.return_value = {
+            "Messages": [{"Body": "{}", "ReceiptHandle": "h"}]
+        }
+        client.change_message_visibility.side_effect = RuntimeError("gone")
+        consumer = EventConsumer(
+            ingest, "https://sqs.us-east-1.amazonaws.com/1/q", client=client
+        )
+        with mock.patch("tfworker_console.ingest.envelope", return_value={}):
+            with mock.patch.object(ingest, "apply", side_effect=StoreBusy("prod")):
+                assert consumer.poll() == 0
+
+    def test_failed_deletes_are_not_counted(self, ingest):
+        client = mock.Mock()
+        client.receive_message.return_value = {
+            "Messages": [{"Body": "nope", "ReceiptHandle": "h", "MessageId": "m"}]
+        }
+        client.delete_message_batch.return_value = {"Failed": [{"Id": "0"}]}
+        consumer = EventConsumer(
+            ingest, "https://sqs.us-east-1.amazonaws.com/1/q", client=client
+        )
+        assert consumer.poll() == 0
+
+    def test_client_is_rebuilt(self, aws):  # noqa: F811
+        clock = mock.Mock(return_value=0.0)
+        consumer = EventConsumer(
+            mock.Mock(), "https://sqs.us-east-1.amazonaws.com/1/q", clock=clock
+        )
+        first = consumer.client()
+        assert consumer.client() is first
+        clock.return_value = consumer.CLIENT_SECONDS
+        second = consumer.client()
+        assert second is not first
+        # an error drops it, so the next poll starts from fresh credentials
+        consumer.WAIT_SECONDS = 0.01
+
+        def poll():
+            consumer._stop.set()
+            raise RuntimeError("ExpiredToken")
+
+        with mock.patch.object(consumer, "poll", side_effect=poll):
+            consumer._loop()
+        assert consumer._client is None
+
+    def test_observers(self, ingest):
+        consumer = EventConsumer(ingest, "https://sqs.us-east-1.amazonaws.com/1/q")
+        seen = []
+        consumer.observers.append(lambda kind, outcome: seen.append((kind, outcome)))
+        consumer.observers.append(mock.Mock(side_effect=RuntimeError("broken")))
+        good = event(STATUS_EVENT, located(status("alpha", PREFIX)))
+        assert consumer._handle({"Body": json.dumps(good)}) is True
+        assert consumer._handle({"Body": "nope"}) is True
+        assert seen == [(STATUS_EVENT, APPLIED), ("unknown", DROPPED)]
 
     def test_client_from_credentials(self, aws):  # noqa: F811
         consumer = EventConsumer(
