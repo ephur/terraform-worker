@@ -59,7 +59,7 @@ With `--no-<phase>-failures`, every definition is attempted and all failures are
 
 ## Output
 
-`--stream-output` (on by default) streams terraform's output as it runs. `--show-output` is accepted but currently has no effect. A definition can turn off streaming for its plan or apply with `squelch_plan_output` or `squelch_apply_output`. `--color` keeps terraform's colors. `--log-level` and `--log-format` (`TEXT` or `JSON`) control the worker's own logging.
+`--stream-output` (on by default) streams terraform's output as it runs. A definition can turn off streaming for its plan or apply with `squelch_plan_output` or `squelch_apply_output`. `--color` keeps terraform's colors. `--log-level` and `--log-format` (`TEXT` or `JSON`) control the worker's own logging.
 
 ## Working directory
 

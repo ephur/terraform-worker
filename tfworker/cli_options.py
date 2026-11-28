@@ -86,11 +86,6 @@ class CLIOptionsRoot(FreezableBaseModel):
         const.DEFAULT_AWS_REGION,
         description="Region where terraform root/lock bucket exists",
     )
-    backend_use_all_remotes: bool = Field(
-        False,
-        json_schema_extra={"env": "WORKER_BACKEND_USE_ALL_REMOTES"},
-        description="Generate remote data sources based on all definition paths present in the backend",
-    )
     run_id: Optional[str] = Field(
         None,
         json_schema_extra={"env": "WORKER_RUN_ID"},
@@ -325,11 +320,6 @@ class CLIOptionsTerraform(FreezableBaseModel):
         None,
         json_schema_extra={"env": "WORKER_PLAN_FILE_PATH"},
         description="Path to plan files, with plan it will save to this location, apply will read from it",
-    )
-    show_output: bool = Field(
-        True,
-        json_schema_extra={"env": "WORKER_SHOW_OUTPUT"},
-        description="Show output from terraform commands",
     )
     terraform_bin: Optional[str] = Field(
         None,
