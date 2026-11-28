@@ -242,6 +242,71 @@ def parse_tf_reference(tf_ref: str) -> Tuple[str, str | None]:
         return state, None
 
 
+_KEY_PATH_TOKEN = re.compile(
+    r"""\.?(?P<name>\w+)|\[\s*(?:"(?P<key>(?:[^"\\]|\\.)*)"|(?P<index>\d+))\s*\]"""
+)
+
+
+_HCL_ESCAPES = {"n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}
+_HCL_ESCAPE = re.compile(r"\\(?:u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|(.))")
+
+
+def _unescape_hcl(quoted: str, key_path: str) -> str:
+    def replace(m: "re.Match[str]") -> str:
+        if m.group(1) or m.group(2):
+            return chr(int(m.group(1) or m.group(2), 16))
+        if m.group(3) in _HCL_ESCAPES:
+            return _HCL_ESCAPES[m.group(3)]
+        raise ValueError(
+            f"Unsupported escape '\\{m.group(3)}' in output key path: '{key_path}'"
+        )
+
+    unescaped = _HCL_ESCAPE.sub(replace, quoted)
+    return unescaped.replace("$${", "${").replace("%%{", "%{")
+
+
+def split_key_path(key_path: str) -> List[Union[str, int]]:
+    """
+    Split an output key path into its segments.
+
+    Dot segments and quoted bracket keys become strings, bare bracket
+    numbers become list indexes.
+
+    Args:
+        key_path: Key path after ``outputs``, as returned by
+            ``parse_tf_reference`` (e.g. ``subnets.private`` or
+            ``items["test-key"][0]``)
+
+    Returns:
+        The path segments in order
+
+    Raises:
+        ValueError: If the key path cannot be parsed
+
+    Examples:
+        >>> split_key_path("subnets.private")
+        ['subnets', 'private']
+
+        >>> split_key_path('items["test-key"][0].id')
+        ['items', 'test-key', 0, 'id']
+    """
+    segments: List[Union[str, int]] = []
+    pos = 0
+    while pos < len(key_path):
+        m = _KEY_PATH_TOKEN.match(key_path, pos)
+        dotted = key_path.startswith(".", pos)
+        if not m or (m.group("name") is not None and dotted == (pos == 0)):
+            raise ValueError(f"Invalid output key path: '{key_path}'")
+        if m.group("name") is not None:
+            segments.append(m.group("name"))
+        elif m.group("index") is not None:
+            segments.append(int(m.group("index")))
+        else:
+            segments.append(_unescape_hcl(m.group("key"), key_path))
+        pos = m.end()
+    return segments
+
+
 def validate_remote_vars(remote_vars: Dict[str, RemoteVarValue]) -> None:
     """
     Validate a remote_vars configuration dictionary.
