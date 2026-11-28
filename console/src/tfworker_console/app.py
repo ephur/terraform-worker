@@ -2,19 +2,21 @@ import ipaddress
 import logging
 import secrets
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from starlette.middleware.sessions import SessionMiddleware
 from tfworker.report import PLAN_SCHEMA, RUN_SCHEMA, STATUS_SCHEMA
 
-from . import api, login, version, web
+from . import api, demo, login, version, web
 from .auth import OIDCClient, load_roles
 from .db import engine_for, session_factory
 from .groups import load_groups
+from .migrate import upgrade
 from .reconcile import Reconciler
 from .scheduler import ReconcileScheduler
 from .security import Forbidden, LoginRequired
@@ -31,6 +33,28 @@ def _assign_groups(sessions, groups) -> None:
             groups.assign(session)
     except SQLAlchemyError as e:
         log.warning(f"unable to assign deployment groups (run db upgrade?): {e}")
+
+
+def _seed_demo(sessions) -> None:
+    with sessions() as session:
+        try:
+            if demo.seed(session, datetime.now(timezone.utc)):
+                log.info("seeded the demo data")
+        except IntegrityError:
+            # another replica seeded it first
+            session.rollback()
+            demo.is_seeded(session)
+
+
+def _forget_demo(sessions) -> None:
+    """A demo left behind would pass for real data once the flag is off."""
+    try:
+        with sessions() as session:
+            gone = demo.forget(session)
+    except SQLAlchemyError:
+        return  # no schema yet; nothing to forget
+    if gone:
+        log.warning(f"removed the demo data left in the database: {', '.join(gone)}")
 
 
 CSP = (
@@ -124,20 +148,48 @@ def create_app(settings: Optional[ConsoleSettings] = None) -> FastAPI:
     app.state.sessions = None
     app.state.reconciler = None
     app.state.groups = load_groups(settings.groups_file)
+    if settings.demo:
+        if not settings.database_url:
+            raise ValueError(
+                "TFWORKER_CONSOLE_DEMO needs TFWORKER_CONSOLE_DATABASE_URL"
+            )
+        if settings.stores_file:
+            raise ValueError(
+                "TFWORKER_CONSOLE_DEMO shows sample data; leave out "
+                "TFWORKER_CONSOLE_STORES_FILE, which would reconcile it away"
+            )
+        if not settings.groups_file:
+            app.state.groups = demo.GROUPS
     if settings.database_url:
-        app.state.sessions = session_factory(engine_for(settings.database_url))
+        engine = engine_for(settings.database_url)
+        # the demo starts from nothing, so it always brings the schema up
+        if settings.auto_migrate or settings.demo:
+            upgrade(engine)
+        app.state.sessions = session_factory(engine)
+        if settings.demo:
+            _seed_demo(app.state.sessions)
+        else:
+            _forget_demo(app.state.sessions)
         stores = load_stores(settings.stores_file)
         unknown = app.state.groups.unknown_stores(store.name for store in stores)
-        if unknown:
+        if unknown and not settings.demo:
             log.warning(
                 f"the groups file names stores that are not configured: "
                 f"{', '.join(unknown)}"
             )
         _assign_groups(app.state.sessions, app.state.groups)
-        app.state.reconciler = Reconciler(
-            stores, app.state.sessions, groups=app.state.groups
+        # the demo has no stores to read, and a reconcile would remove its
+        # data as belonging to unconfigured stores
+        app.state.reconciler = (
+            None
+            if settings.demo
+            else Reconciler(stores, app.state.sessions, groups=app.state.groups)
         )
-        if settings.reconcile_interval > 0 and app.state.reconciler.stores:
+        if (
+            app.state.reconciler is not None
+            and settings.reconcile_interval > 0
+            and app.state.reconciler.stores
+        ):
             app_state["scheduler"] = ReconcileScheduler(
                 app.state.reconciler, settings.reconcile_interval
             )

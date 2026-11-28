@@ -96,7 +96,7 @@ jobs:
       - name: Run the projection tests against Postgres
         env:
           TFWORKER_CONSOLE_TEST_DATABASE_URL: postgresql+psycopg://postgres:console@localhost:5432/console
-        run: uv run --package tfworker-console pytest -p no:warnings --no-cov tests/test_reconcile.py tests/test_api.py tests/test_groups.py tests/test_auth.py
+        run: uv run --package tfworker-console pytest -p no:warnings --no-cov tests/test_reconcile.py tests/test_api.py tests/test_groups.py tests/test_auth.py tests/test_demo.py tests/test_dialects.py
 
   image:
     name: Console image builds
@@ -111,3 +111,24 @@ jobs:
         run: |
           docker run --rm tfworker-console:ci --version | tee version.txt
           grep -q "0.0.0+ci" version.txt
+
+      - name: Serve the demo from the image
+        run: |
+          docker run -d --name console -p 127.0.0.1:8000:8000 \
+            -e TFWORKER_CONSOLE_AUTH=none \
+            -e TFWORKER_CONSOLE_AUTH_ALLOW_REMOTE_NONE=true \
+            -e TFWORKER_CONSOLE_DEMO=true \
+            tfworker-console:ci
+          for attempt in $(seq 30); do
+            curl -fsS http://127.0.0.1:8000/healthz && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/ | grep -q "Authentication is off"
+          curl -fsS http://127.0.0.1:8000/api/v1/fleet | tee fleet.json
+          grep -q '"failing":1' fleet.json
+
+      - name: Show the console's log
+        if: always()
+        run: |
+          docker logs console || true
+          docker rm -f console || true
