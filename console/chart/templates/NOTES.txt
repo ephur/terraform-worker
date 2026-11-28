@@ -1,0 +1,27 @@
+The console is installed as {{ include "console.fullname" . }}.
+{{- if .Values.migrations.enabled }}
+
+The schema was brought up by the {{ include "console.fullname" . }}-migrate Job.
+{{- else }}
+
+Migrations are off: run `tfworker-console db upgrade` against the database.
+The pods stay unready until the schema is this version's.
+{{- end }}
+{{- if ne .Values.auth.mode "none" }}
+
+Create the first admin from a console pod:
+
+  kubectl exec -it deploy/{{ include "console.fullname" . }} -n {{ .Release.Namespace }} -- \
+    tfworker-console users create admin --role admin --break-glass
+{{- end }}
+{{- if eq .Values.reconcile.mode "cronJob" }}
+
+Stores are reconciled by the {{ include "console.fullname" . }}-reconcile CronJob ({{ .Values.reconcile.schedule }}).
+{{- end }}
+{{- if eq (include "console.metricsMode" .) "token" }}
+
+Metrics are served on the console's port to a metrics-role token:
+
+  kubectl exec -it deploy/{{ include "console.fullname" . }} -n {{ .Release.Namespace }} -- \
+    tfworker-console tokens create prometheus --role metrics
+{{- end }}

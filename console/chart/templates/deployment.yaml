@@ -1,0 +1,141 @@
+{{- include "console.validate" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "console.fullname" . }}
+  labels:
+    {{- include "console.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "console.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        {{- include "console.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: web
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # roll the pods when inline config changes
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if and (eq (include "console.metricsMode" .) "port") .Values.metrics.podAnnotations }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.metrics.port | quote }}
+        prometheus.io/path: /metrics
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "console.serviceAccountName" . }}
+      {{- include "console.podSpecCommon" . | trim | nindent 6 }}
+      containers:
+        - name: console
+          image: {{ include "console.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          ports:
+            - name: http
+              containerPort: 8000
+            {{- if eq (include "console.metricsMode" .) "port" }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+            {{- end }}
+          env:
+            - name: TFWORKER_CONSOLE_HOST
+              value: 0.0.0.0
+            - name: TFWORKER_CONSOLE_PORT
+              value: "8000"
+            # the migration Job (or you) brings the schema up, not every replica
+            - name: TFWORKER_CONSOLE_AUTO_MIGRATE
+              value: "false"
+            - name: TFWORKER_CONSOLE_AUTH
+              value: {{ .Values.auth.mode }}
+            {{- if eq .Values.auth.mode "none" }}
+            - name: TFWORKER_CONSOLE_AUTH_ALLOW_REMOTE_NONE
+              value: "true"
+            {{- else }}
+            - name: TFWORKER_CONSOLE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.secretKey.existingSecret }}
+                  key: {{ .Values.auth.secretKey.key }}
+            - name: TFWORKER_CONSOLE_SESSION_MAX_AGE
+              value: {{ .Values.auth.sessionMaxAge | quote }}
+            {{- end }}
+            {{- with .Values.auth.publicUrl }}
+            - name: TFWORKER_CONSOLE_PUBLIC_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if eq .Values.auth.mode "oidc" }}
+            - name: TFWORKER_CONSOLE_SSO_ENFORCED
+              value: {{ .Values.auth.ssoEnforced | quote }}
+            - name: TFWORKER_CONSOLE_OIDC_ISSUER
+              value: {{ .Values.auth.oidc.issuer | quote }}
+            - name: TFWORKER_CONSOLE_OIDC_CLIENT_ID
+              value: {{ .Values.auth.oidc.clientId | quote }}
+            {{- if .Values.auth.oidc.clientSecret.existingSecret }}
+            - name: TFWORKER_CONSOLE_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.oidc.clientSecret.existingSecret }}
+                  key: {{ .Values.auth.oidc.clientSecret.key }}
+            {{- end }}
+            - name: TFWORKER_CONSOLE_OIDC_SCOPES
+              value: {{ .Values.auth.oidc.scopes | quote }}
+            - name: TFWORKER_CONSOLE_OIDC_GROUPS_CLAIM
+              value: {{ .Values.auth.oidc.groupsClaim | quote }}
+            - name: TFWORKER_CONSOLE_OIDC_USERNAME_CLAIM
+              value: {{ .Values.auth.oidc.usernameClaim | quote }}
+            {{- end }}
+            - name: TFWORKER_CONSOLE_RECONCILE_INTERVAL
+              value: {{ eq .Values.reconcile.mode "inPod" | ternary .Values.reconcile.interval 0 | quote }}
+            {{- if .Values.events.enabled }}
+            - name: TFWORKER_CONSOLE_EVENTS_QUEUE_URL
+              value: {{ .Values.events.queueUrl | quote }}
+            {{- with .Values.events.roleArn }}
+            - name: TFWORKER_CONSOLE_EVENTS_ROLE_ARN
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.events.region }}
+            - name: TFWORKER_CONSOLE_EVENTS_REGION
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
+            - name: TFWORKER_CONSOLE_METRICS
+              value: {{ include "console.metricsMode" . | quote }}
+            {{- if ne (include "console.metricsMode" .) "off" }}
+            - name: TFWORKER_CONSOLE_METRICS_PORT
+              value: {{ .Values.metrics.port | quote }}
+            - name: TFWORKER_CONSOLE_METRICS_DEFINITION_LABEL
+              value: {{ .Values.metrics.definitionLabel | quote }}
+            {{- end }}
+            - name: TFWORKER_CONSOLE_LOCK_STALE_AFTER
+              value: {{ .Values.lockStaleAfter | quote }}
+            {{- include "console.commonEnv" . | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            # unready while the database is unreachable or the schema is not
+            # this version's
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "console.volumeMounts" . | nindent 12 }}
+      volumes:
+        {{- include "console.volumes" . | nindent 8 }}

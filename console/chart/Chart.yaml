@@ -1,0 +1,11 @@
+apiVersion: v2
+name: tfworker-console
+description: The terraform-worker console, a fleet view of worker runs, saved plans and state locks
+type: application
+# Released charts take their version and appVersion from the console-v* tag:
+#   helm package console/chart --version 0.3.0 --app-version 0.3.0
+version: 0.0.0-dev
+appVersion: 0.0.0-dev
+home: https://github.com/ephur/terraform-worker
+sources:
+  - https://github.com/ephur/terraform-worker/tree/master/console

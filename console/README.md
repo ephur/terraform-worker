@@ -104,6 +104,110 @@ ready replicas:
   ones leave rotation together, and the console is unavailable until the new
   ones pass. Expect a short gap on any release that adds a migration.
 
+## Helm chart
+
+`console/chart` deploys the console to Kubernetes. No image is published yet,
+so build `console/Dockerfile`, push it to your registry and set
+`image.repository` and `image.tag`. The chart bundles no database. Give it
+Postgres through a Secret holding the SQLAlchemy URL, plus a Secret for the
+session key:
+
+    kubectl create secret generic console-db \
+      --from-literal=database-url='postgresql+psycopg://console:password@db:5432/console'
+    kubectl create secret generic console-session \
+      --from-literal=secret-key="$(openssl rand -base64 48)"
+    helm install console console/chart -f values.yaml
+
+A values file for SSO, with stores read through IRSA:
+
+    image:
+      repository: registry.example.com/tfworker-console
+      tag: 0.3.0
+    database:
+      existingSecret: console-db
+    auth:
+      mode: oidc
+      publicUrl: https://console.example.com
+      secretKey:
+        existingSecret: console-session
+      oidc:
+        issuer: https://sso.example.com
+        clientId: console
+        clientSecret:
+          existingSecret: console-oidc
+      roles:
+        role_mappings:
+          - claim: platform
+            role: admin
+    serviceAccount:
+      annotations:
+        eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/console
+    stores:
+      stores:
+        - name: prod
+          region: us-east-1
+          bucket: tfstate-prod
+          prefix: terraform/{deployment}
+    ingress:
+      enabled: true
+      className: nginx
+      hosts:
+        - host: console.example.com
+
+[`values.yaml`](chart/values.yaml) documents every value. In short:
+
+- **Config files.** `stores`, `groups` and `auth.roles` take the file's YAML
+  inline, rendered into a ConfigMap. Changing one rolls the pods. Or name an
+  existing ConfigMap with `storesConfigMap`, `groupsConfigMap` or
+  `auth.rolesConfigMap`, holding `stores.yaml`, `groups.yaml` or `roles.yaml`.
+- **AWS credentials.** Use IRSA (annotate the service account), or put an AWS
+  `config` and `credentials` file in a Secret named by
+  `awsProfiles.existingSecret`. That Secret is mounted read-only, and the
+  stores file names the profile.
+- **Migrations.** A `pre-install,pre-upgrade` hook Job runs
+  `tfworker-console db upgrade` before the new pods start, and the pods
+  themselves never migrate. Set `migrations.enabled=false` to migrate another
+  way; the pods stay unready until the schema is at their head (see
+  [Probes](#probes)).
+- **Reconciling.** With `reconcile.mode: cronJob` (the default), the web pods
+  only serve, and a CronJob runs `tfworker-console reconcile` on
+  `reconcile.schedule`. It is never run twice at once. With `inPod`, every web
+  replica reconciles every `reconcile.interval` seconds, taking turns per
+  store. The CronJob's own reconcile metrics aren't scraped, but
+  `tfworker_console_store_last_reconcile_timestamp_seconds` and
+  `store_reconcile_ok` come from the projection and report either way.
+- **Events.** `events.enabled` with `events.queueUrl` (and `roleArn` and
+  `region` when needed) turns on [event ingest](#events) in the web pods.
+- **Metrics.** `metrics.mode: port` serves `/metrics` on a separate container
+  and Service port (9090), with `prometheus.io/*` pod annotations. `token`
+  serves it on the console's port to a metrics-role token. With
+  `metrics.serviceMonitor.enabled`, the chart adds a Prometheus Operator
+  ServiceMonitor. In token mode it reads the token from
+  `metrics.serviceMonitor.tokenSecret`. Every replica reports the same fleet
+  metrics, so deduplicate on the `instance` label or aggregate with `max`.
+- **Probes.** Liveness is `/livez` and readiness is `/readyz`.
+- **Hardening.** Pods run as uid 10001 with a read-only root filesystem, no
+  capabilities and the runtime's default seccomp profile. `/tmp` is an
+  emptyDir.
+
+The chart refuses, at install time, settings the console would refuse:
+
+- no database Secret
+- `auth.mode: none` without `auth.allowNone: true`
+- OIDC without an issuer, client id or public URL
+- a ServiceMonitor with metrics off
+
+After installing, create the first admin from a pod, as the install notes
+show:
+
+    kubectl exec -it deploy/console-tfworker-console -- \
+      tfworker-console users create admin --role admin --break-glass
+
+The chart's tests render it with `helm template` and check the manifests. Run
+them from `console/` with helm on `PATH`:
+
+    uv run pytest chart/tests -p no:cacheprovider --no-cov
+
 ## Stores and the projection
 
 The console reads the run records, status snapshots, plan manifests and
