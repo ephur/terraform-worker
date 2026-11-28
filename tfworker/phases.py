@@ -62,9 +62,6 @@ class PhaseDispatcher:
     def __init__(self, listeners: Iterable[PhaseListener] = ()):
         self.listeners: List[PhaseListener] = list(listeners)
 
-    def __bool__(self) -> bool:
-        return bool(self.listeners)
-
     def setup(self, deployment: str) -> None:
         self._each("setup", deployment)
 
