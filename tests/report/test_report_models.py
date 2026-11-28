@@ -174,6 +174,14 @@ class TestMergeStatus:
         assert status.pending_plan is None
         assert status.last_apply.status == "succeeded"
 
+    def test_phases_fold_in_run_order_whatever_the_map_order(self):
+        run, result = _run(plan="succeeded", apply="succeeded", changes=CHANGES)
+        result.phases = dict(reversed(list(result.phases.items())))
+        assert list(result.phases) == ["apply", "plan"]
+        status = merge_status(None, run, result, T0)
+        assert status.pending_plan is None
+        assert status.last_apply.status == "succeeded"
+
     def test_failure(self):
         run, result = _run(plan="succeeded", apply="failed", changes=CHANGES)
         status = merge_status(None, run, result, T0)
