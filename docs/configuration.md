@@ -50,7 +50,7 @@ With the options in the file and credentials in the environment, `worker terrafo
 
 ## Providers
 
-Each entry under `providers` is written into the definitions that use it: its `requirements` go into `required_providers`, and `vars` and `config_blocks` go into the `provider` block.
+Each entry under `providers` describes one provider: `requirements` for the `required_providers` block, and `vars` and `config_blocks` for its `provider` block.
 
 ```yaml
 terraform:
@@ -78,7 +78,7 @@ terraform:
 
 ## Definitions
 
-A definition is a terraform root module that runs as its own state, at `<backend prefix>/<definition name>`. Definitions run in the order they are listed, and are destroyed in reverse order.
+A definition is a terraform root module that runs as its own state, at `<backend prefix>/<definition name>`. Definitions run in the order they are listed, for apply and destroy alike.
 
 ```yaml
 terraform:
@@ -94,11 +94,11 @@ terraform:
         subnet_ids: network.outputs.private_subnet_ids
 ```
 
-`path` is either a git URL or a local directory. A local path is always relative to `--repository-path` (the current directory by default), even when it starts with `/`. For git, `branch` picks the branch or tag to clone (`master` when unset) and `sub_path` the directory inside the repository.
+`path` is either a git URL or a local directory. A local path is looked up under `--repository-path` (the current directory by default) first, even when it starts with `/`, and used as given when it is not there. For git, `branch` picks the branch or tag to clone (`master` when unset) and `sub_path` the directory inside the repository.
 
 The worker copies each definition into its working directory and adds the files it generates:
 
-- `worker_generated_terraform.tf`: the backend, the `required_providers` and `provider` blocks for the providers the definition uses, and a `terraform_remote_state` data source for each state it reads.
+- `worker_generated_terraform.tf`: the backend, a `provider` block for each configured provider the definition uses, and a `terraform_remote_state` data source for each state it reads. When the definition has no `required_providers` of its own, the worker adds one listing every configured provider.
 - `worker_generated.auto.tfvars.json`: the definition's `terraform_vars`.
 - `worker_generated_locals.tf`: a `locals` block with the definition's `remote_vars`.
 
@@ -106,7 +106,7 @@ Files ending in `.tf.j2` are rendered with Jinja and saved without the `.j2`. In
 
 ### Terraform variables
 
-`terraform_vars` become terraform input variables through `worker_generated.auto.tfvars.json`. Values keep their YAML types, and strings are written as they are: quotes, backslashes, `${` and `%{` need no escaping. Each definition still declares the variables it uses.
+`terraform_vars` become terraform input variables through `worker_generated.auto.tfvars.json`. A definition's values keep their YAML types (global ones must be strings, booleans, lists or maps), and strings are written as they are: quotes, backslashes, `${` and `%{` need no escaping. Each definition still declares the variables it uses.
 
 ### Remote variables
 
@@ -122,7 +122,7 @@ remote_vars:
     vpc: network.outputs.vpc_id
 ```
 
-The definition uses them as `local.vpc_id`, `local.ids` and so on. The referenced definition's state is read from the backend, so it does not need to be part of the current run. `--backend-use-all-remotes` adds a data source for every state in the deployment, not only the referenced ones.
+The definition uses them as `local.vpc_id`, `local.ids` and so on. The referenced definition's state is read from the backend, so it does not need to be part of the current run. `worker terraform --backend-use-all-remotes` adds a data source for every state in the deployment, not only the referenced ones.
 
 ### Global variables
 
@@ -176,13 +176,13 @@ Sources are processed for every command that loads the configuration (`terraform
 
 For each source, in configuration order:
 
-1. The source is copied to a temporary directory, which is removed once its command has run. Nothing is written to the working directory. With `sub_path`, only that subdirectory is copied.
-2. `command` runs in the copy. It is split into arguments shell-style and run without a shell, so pipes and redirection are not available. A relative executable such as `bin/list-definitions` resolves against the copy and must be executable. The command inherits the worker's environment, plus `WORKER_DEPLOYMENT` set to the deployment.
+1. The source is copied to a temporary directory, which is removed once its command has run, whether it succeeds or fails. Nothing is written to the working directory. With `sub_path`, only that subdirectory is copied.
+2. `command` runs in the copy. It is rendered with Jinja like the rest of the configuration, then split into arguments shell-style and run without a shell, so pipes and redirection are not available. A relative executable such as `bin/list-definitions` resolves against the copy and must be executable. The command inherits the worker's environment, plus `WORKER_DEPLOYMENT` set to the deployment.
 3. Standard output is parsed as YAML (or JSON): a mapping of definition name to definition body. Empty output generates no definitions, and a null body is treated as `{}`. Standard error is logged at debug level.
 4. A generated definition without its own `path` gets the source's `path` and, if it has no `remote_path_options` of its own, the options the source sets.
 5. The definitions are inserted, in the order printed, right after the `after` definition, or at the end when `after` is not set. `after` may name a definition generated by an earlier source.
 
-The worker only treats a non-zero exit from the command as a failure. It stops with exit code 1, naming the source, when:
+Deciding what counts as an error is the command's job; the worker only checks its exit code. The worker stops with exit code 1, naming the source, when:
 
 - the source cannot be fetched (clone failure, unknown path type, missing local path);
 - the command cannot be run, or exits non-zero (the error includes its exit code and standard error);

@@ -41,6 +41,7 @@ worker [OPTIONS] COMMAND [ARGS]...
 | `--log-level` | `LOG_LEVEL` | `INFO` | The level to use for logging/output |
 | `--repository-path` | `WORKER_REPOSITORY_PATH` | `.` | The root repository/working path, any relative paths will be resolved from here |
 | `--run-id` | `WORKER_RUN_ID` |  | When set, prefix remote plan files with this id |
+| `--version` |  |  | Show the version and exit. |
 | `--working-dir` | `WORKER_WORKING_DIR` |  | Specify the path to use instead of a temporary directory, must exist, be empty, and be writeable, --clean applies to this directory as well |
 
 ## worker clean

@@ -30,11 +30,11 @@ class ProviderAlias(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     vars: Optional[Dict[str, Any]] = Field(
-        None, description="Arguments that replace the provider's vars for this alias."
+        None, description="Arguments merged over the provider's vars for this alias."
     )
     config_blocks: Optional[Dict[str, Any]] = Field(
         None,
-        description="Nested blocks that replace the provider's config_blocks for this alias.",
+        description="Nested blocks merged over the provider's config_blocks for this alias.",
     )
 
 
@@ -46,7 +46,7 @@ class ProviderConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     requirements: ProviderRequirements = Field(
-        description="Version and source written to required_providers."
+        description="Version and source for required_providers, written when a definition has none of its own."
     )
     vars: Optional[Dict[str, Any]] = Field(
         None, description="Arguments written into the provider block."

@@ -30,7 +30,7 @@ class Definition(BaseModel):
 
     name: str
     path: str = Field(
-        description="Local path, relative to the repository path, or a git URL of the module."
+        description="Git URL, or local path looked up under the repository path first."
     )
     always_apply: bool = Field(
         False,

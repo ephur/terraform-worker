@@ -30,7 +30,7 @@ Each entry under `definitions` is one terraform root module run as its own state
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `path` | string | required | Local path, relative to the repository path, or a git URL of the module. |
+| `path` | string | required | Git URL, or local path looked up under the repository path first. |
 | `always_apply` | boolean | `false` | Apply right after this definition is planned, even without --apply or changes. |
 | `always_include` | boolean | `false` | Include this definition even when --limit leaves it out. |
 | `remote_path_options` | object |  | Options for the remote path of the definition |
@@ -84,19 +84,19 @@ One entry per terraform provider used by the definitions.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `requirements` | object | required | Version and source written to required_providers. |
+| `requirements` | object | required | Version and source for required_providers, written when a definition has none of its own. |
 | `vars` | map of any |  | Arguments written into the provider block. |
 | `config_blocks` | map of any |  | Nested blocks written into the provider block, such as assume_role. |
 | `aliases` | map of object |  | Additional aliased provider blocks, keyed by alias. |
 
 ### providers.&lt;name&gt;.requirements
 
-Rendered into each definition's `required_providers` block.
+Written to a definition's `required_providers` block when it has none of its own.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `version` | string | required | Version constraint, such as ">= 5.0". |
-| `source` | string |  | Provider source address; defaults to hashicorp/<name> on the public registry. |
+| `version` | string | required | Version constraint, such as "&gt;= 5.0". |
+| `source` | string |  | Provider source address; defaults to hashicorp/&lt;name&gt; on the public registry. |
 
 ### providers.&lt;name&gt;.aliases.&lt;alias&gt;
 
@@ -104,8 +104,8 @@ An aliased provider block; its values override the provider's own.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `vars` | map of any |  | Arguments that replace the provider's vars for this alias. |
-| `config_blocks` | map of any |  | Nested blocks that replace the provider's config_blocks for this alias. |
+| `vars` | map of any |  | Arguments merged over the provider's vars for this alias. |
+| `config_blocks` | map of any |  | Nested blocks merged over the provider's config_blocks for this alias. |
 
 ### parallel_options
 
@@ -128,7 +128,7 @@ Waits for held state locks; off when the block is absent. Durations are seconds 
 | `on_stale` | `fail` \| `wait` \| `force_unlock` | `fail` | What to do with a stale lock |
 | `heartbeat` | number | `30` | How often the worker lease is refreshed; 0 turns it off |
 | `on_timeout` | `fail_definition` \| `fail_run` | `fail_definition` | Fail the definition or the whole run when the wait runs out |
-| `actions` | list of `plan` \| `apply` \| `destroy` \| `init` | `[plan, apply, destroy]` | The terraform actions that wait for the lock |
+| `actions` | list of `plan` \| `apply` \| `destroy` | `[plan, apply, destroy]` | The terraform actions that wait for the lock |
 
 ## Handlers
 
@@ -173,8 +173,8 @@ Report plan and apply progress and results to GitHub.
 | `private_key` | string |  | GitHub App private key (PEM content); falls back to GITHUB_APP_PRIVATE_KEY. |
 | `private_key_file` | string |  | Path to the GitHub App private key; falls back to GITHUB_APP_PRIVATE_KEY_FILE. |
 | `installation_id` | integer |  | App installation id; discovered from the repository when unset. Falls back to GITHUB_APP_INSTALLATION_ID. |
-| `check_run_name` | string |  | Name of the check run; defaults to 'tfworker/<deployment>/plan'. |
-| `apply_check_run_name` | string |  | Name of the apply check run; defaults to 'tfworker/<deployment>/apply'. |
+| `check_run_name` | string |  | Name of the check run; defaults to 'tfworker/&lt;deployment&gt;/plan'. |
+| `apply_check_run_name` | string |  | Name of the apply check run; defaults to 'tfworker/&lt;deployment&gt;/apply'. |
 | `details_url` | string |  | Template for the rollup check runs' details link; falls back to GITHUB_CHECK_DETAILS_URL. str.format placeholders: {run_id}, {deployment}, {definition} (empty), {from_ts} and {to_ts} (epoch ms). |
 | `definition_details_url` | string |  | Template for the per-definition check runs' details link, with the placeholders of details_url; falls back to GITHUB_CHECK_DEFINITION_DETAILS_URL, then details_url. |
 | `logs_url` | string |  | Template for a labelled logs link in the rollup check runs' output, with the placeholders of details_url; falls back to GITHUB_CHECK_LOGS_URL. |

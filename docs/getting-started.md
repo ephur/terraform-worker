@@ -73,19 +73,22 @@ terraform:
         tags: tags.outputs.tag_map
 ```
 
-Plan the deployment, named `example`:
+Every definition is planned before anything is applied, and planning `bucket` reads the `tags` state. On a new deployment that state does not exist yet, so apply `tags` on its own first:
+
+```sh
+worker --aws-profile my-profile --aws-region us-west-2 terraform example --limit tags --plan --apply
+```
+
+From then on the whole deployment can be planned, and applied when you ask for it:
 
 ```sh
 worker --aws-profile my-profile --aws-region us-west-2 terraform example --plan
-```
-
-Each definition is initialized and planned in order. Nothing is applied until you ask for it:
-
-```sh
 worker --aws-profile my-profile --aws-region us-west-2 terraform example --plan --apply
 ```
 
-To tear it down again, plan a destroy and run it. Definitions are destroyed in reverse order:
+Setting `always_apply: true` on `tags` does the same in a single run: it is applied as soon as it is planned, before `bucket` is planned.
+
+To tear it down again, plan a destroy and run it:
 
 ```sh
 worker --aws-profile my-profile --aws-region us-west-2 terraform example --plan-destroy --destroy

@@ -30,7 +30,7 @@ uv tool install terraform-worker
 worker --aws-profile default --backend s3 --backend-bucket my-state terraform example --plan --apply
 ```
 
-The `database` definition reads the network's output as `local.subnet_ids`, and `{{ aws_region }}` is filled in from `--aws-region`.
+The `database` definition reads the network's output as `local.subnet_ids`, and `{{ aws_region }}` is filled in from `--aws-region`. On a new deployment, apply `network` first (`--limit network`), since planning `database` reads its state.
 
 ## Documentation
 

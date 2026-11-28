@@ -39,6 +39,11 @@ HEADER = (
     "run `make docs` instead. -->\n\n"
 )
 
+# Fields whose validators accept less than their annotation.
+TYPE_OVERRIDES = {
+    (LockingOptions, "actions"): "list of `plan` \\| `apply` \\| `destroy`",
+}
+
 # Fields the worker sets while it runs; they are not configuration.
 INTERNAL_DEFINITION_FIELDS = {
     "name",
@@ -54,12 +59,27 @@ INTERNAL_DEFINITION_FIELDS = {
 
 
 def _escape(text: str) -> str:
-    return " ".join(text.split()).replace("|", "\\|")
+    text = " ".join(text.split())
+    return text.replace("|", "\\|").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _code(value: str) -> str:
+    if not value:
+        return '`""`'
+    if "`" in value:
+        return _escape(value)
+    escaped = value.replace("|", "\\|")
+    return f"`{escaped}`"
 
 
 def _portable(value: str) -> str:
-    """Replace the generating machine's working directory with `.`."""
-    return value.replace(const.DEFAULT_REPOSITORY_PATH, ".")
+    """Show defaults derived from the generating machine's working directory as `.`."""
+    cwd = const.DEFAULT_REPOSITORY_PATH
+    if value == cwd:
+        return "."
+    if value.startswith(cwd + "/"):
+        return "." + value[len(cwd) :]
+    return value
 
 
 # --- CLI reference -----------------------------------------------------------
@@ -67,7 +87,9 @@ def _portable(value: str) -> str:
 
 def _option_default(param: click.Option) -> str:
     default = param.default
-    if callable(default) or default is None:
+    if param.is_flag and not param.secondary_opts:
+        return ""
+    if not isinstance(default, (str, int, float, list, tuple, enum.Enum)):
         return ""
     if param.is_flag and param.secondary_opts:
         flag = param.opts[0] if default else param.secondary_opts[0]
@@ -75,10 +97,10 @@ def _option_default(param: click.Option) -> str:
     if isinstance(default, (list, tuple)):
         if not default:
             return ""
-        return ", ".join(f"`{_portable(str(d))}`" for d in default)
+        return ", ".join(_code(_portable(str(d))) for d in default)
     if isinstance(default, enum.Enum):
         default = default.value
-    return f"`{_portable(str(default))}`"
+    return _code(_portable(str(default)))
 
 
 def _option_name(param: click.Option) -> str:
@@ -110,11 +132,7 @@ def _command_section(name: str, command: click.Command, level: int) -> list[str]
         lines += [f"`{argument.human_readable_name}` is required.{env}", ""]
 
     options = sorted(
-        (
-            p
-            for p in command.params
-            if isinstance(p, click.Option) and p.expose_value and not p.hidden
-        ),
+        (p for p in command.params if isinstance(p, click.Option) and not p.hidden),
         key=lambda p: p.opts[0],
     )
     if options:
@@ -207,7 +225,7 @@ def _field_default(field) -> str:
     text = str(value)
     if "\n" in text or len(text) > 40:
         return "built in"
-    return f"`{text}`"
+    return _code(text)
 
 
 def _model_table(model: type[BaseModel], skip: set[str] = frozenset()) -> list[str]:
@@ -218,8 +236,9 @@ def _model_table(model: type[BaseModel], skip: set[str] = frozenset()) -> list[s
     for name, field in model.model_fields.items():
         if name in skip:
             continue
+        type_name = TYPE_OVERRIDES.get((model, name)) or _type_name(field.annotation)
         lines.append(
-            f"| `{name}` | {_type_name(field.annotation)} | {_field_default(field)} "
+            f"| `{name}` | {type_name} | {_field_default(field)} "
             f"| {_escape(field.description or '')} |"
         )
     return lines + [""]
@@ -276,7 +295,7 @@ def render_config() -> str:
     lines += _model_section(
         "providers.&lt;name&gt;.requirements",
         ProviderRequirements,
-        "Rendered into each definition's `required_providers` block.",
+        "Written to a definition's `required_providers` block when it has none of its own.",
     )
     lines += _model_section(
         "providers.&lt;name&gt;.aliases.&lt;alias&gt;",
