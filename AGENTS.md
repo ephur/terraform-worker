@@ -29,6 +29,12 @@
 - Add annotations to all new modules and public functions; keep them precise.
 - Use `reveal_type()` to clarify uncertain types during development when helpful.
 
+## Console Database
+- The console (`console/`) must stay database-engine agnostic. Postgres and SQLite are tested; nothing may rule out another engine SQLAlchemy supports, such as MySQL or Aurora MySQL.
+- Use SQLAlchemy and Alembic constructs only. Engine-specific SQL (for example Postgres advisory locks) goes behind a `dialect.name` check, with behavior that stays correct on other engines.
+- Use the shared types in `tfworker_console/sqltypes.py` (such as `Timestamp`) in both models and migrations, never `sa.DateTime` directly. Give every string column an explicit length, and keep indexed keys within InnoDB's 3,072-byte limit at utf8mb4 (4 bytes per character).
+- `tests/test_dialects.py` renders the models and migrations for Postgres, MySQL and SQLite; keep it passing when adding tables or columns.
+
 ## Commit & Pull Request Guidelines
 - Commits: imperative mood (“Add X”, not “Added X”); concise subject, descriptive body when needed.
 - PRs must include tests, reference relevant `make` targets run (test/lint/format/typecheck), and briefly explain the rationale and scope. Link issues when applicable.
