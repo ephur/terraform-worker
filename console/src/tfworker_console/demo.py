@@ -410,6 +410,10 @@ def seed(session: Session, now: datetime) -> bool:
                 group_name=GROUPS.of(store, name),
             )
         )
+    # deployments first: without relationships the unit of work does not order
+    # these inserts, and Postgres enforces the foreign key at once
+    session.flush()
+    for (store, name), definitions in sorted(deployments.items()):
         for definition in sorted(definitions):
             session.add(
                 db.Definition(
